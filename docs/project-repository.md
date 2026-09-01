@@ -76,6 +76,7 @@ These were considered and **intentionally left out** until a concrete need appea
 
 - **Language**: Go 1.23+
 - **HTTP Router**: `chi` (`github.com/go-chi/chi/v5`) — minimal overhead, readable middleware chaining.
+- **Rate Limiting**: `github.com/go-chi/httprate`, 20 req/min per client IP on all `/api/v1/*` routes — see [`docs/architecture/error-handling-resilience.md`](architecture/error-handling-resilience.md) §5 for why the (not yet built) Telegram webhook route will need a different, per-user limiter instead of this one.
 - **Telegram Bot**: `gotgbot/v2` (`github.com/PaulSonOfLars/gotgbot/v2`) — code-generated from the Bot API specification, fully type-safe, standard library only. Chosen because message *mutation* methods (`editMessageText`, `editMessageReplyMarkup`, `deleteMessage`, `answerCallbackQuery`) map 1:1 to the Bot API, which the inline-keyboard navigation depends on.
 - **my.kpi.ua Client**: none — the server never fetches `my.kpi.ua`. That fetch (a small regexp extraction of the FullCalendar events URL embedded in the calendar shell page's inline script, then the JSON events feed itself; see `docs/schedules/main/data-extraction.md`) is now the browser extension's job, done client-side.
 - **Persistence**: PostgreSQL via `pgx`. **Not SQLite** — deployment targets have ephemeral disks.

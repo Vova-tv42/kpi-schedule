@@ -17,13 +17,23 @@ func NewRouter(svc *Service, internalToken string) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	// ClientIPFromRemoteAddr, not the deprecated RealIP: this server isn't
+	// known to sit behind any particular reverse proxy yet (hosting is
+	// deliberately undecided, see docs/project-repository.md §4.2), and
+	// RealIP blindly trusts X-Forwarded-For/X-Real-IP from anyone, which
+	// would let a client spoof its way around ipRateLimitMiddleware
+	// entirely. Switch to middleware.ClientIPFromXFF(trustedProxyCIDR) (or
+	// ClientIPFromHeader for a known CDN) once a specific host is chosen.
+	r.Use(middleware.ClientIPFromRemoteAddr)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
 	r.Get("/healthz", h.getHealthz)
 
 	r.Route("/api/v1", func(r chi.Router) {
+		// Rate-limit before the token check, so guessing at X-Internal-Token
+		// is itself throttled rather than exempt from the limit.
+		r.Use(ipRateLimitMiddleware())
 		r.Use(internalTokenMiddleware(internalToken))
 
 		r.Route("/auth", func(r chi.Router) {

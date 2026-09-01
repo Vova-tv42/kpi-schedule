@@ -83,3 +83,42 @@ Standard Error Codes:
 - `ERR_INVALID_REQUEST`: Malformed request (bad date format, missing required field, etc).
 - `ERR_INTERNAL`: Unexpected server-side failure.
 - `ERR_UNAUTHORIZED`: Missing or invalid `X-Internal-Token`.
+- `ERR_RATE_LIMITED`: Too many requests from this client IP — see §5.
+
+---
+
+## 5. Rate Limiting
+
+Every `/api/v1/*` route (all of them, before the `X-Internal-Token` check runs) is limited
+to **20 requests/minute per client IP** (`apps/server/internal/api/middleware.go`,
+`ipRateLimitMiddleware`, via `github.com/go-chi/httprate`). Exceeding it returns `HTTP 429`
+with `ERR_RATE_LIMITED` in the standard error envelope (§4). `/healthz` is unaffected — it's
+mounted outside the `/api/v1` group.
+
+The client IP is resolved via chi's `middleware.ClientIPFromRemoteAddr` (the raw TCP peer),
+**not** the deprecated `middleware.RealIP`, which blindly trusts `X-Forwarded-For` /
+`X-Real-IP` from anyone and would let a client spoof its way past the limiter. This server
+isn't known to sit behind any particular reverse proxy yet (hosting is deliberately
+undecided — see [`docs/project-repository.md`](../project-repository.md) §4.2); once a
+specific host is chosen, switch to `middleware.ClientIPFromXFF(trustedProxyCIDR)` (or
+`ClientIPFromHeader` for a known CDN like Cloudflare) so the real client IP behind that proxy
+is resolved correctly instead.
+
+**This limiter does not, and cannot, apply to Telegram webhook traffic.** When the (not yet
+built) Telegram bot runs in webhook mode, every one of its end users' messages arrives at
+`POST /api/v1/telegram/webhook` from Telegram's own small set of shared edge IPs
+(`149.154.160.0/20` and `91.108.4.0/22` per Telegram's Bot API docs) — an IP-keyed limit on
+that route would throttle the bot's entire real user base, not abusers, once more than ~20
+messages/minute arrive in aggregate. That route will need its own, separate design instead,
+to be built alongside the webhook handler itself:
+- **Authenticity**: verify the `X-Telegram-Bot-Api-Secret-Token` header against the
+  `secret_token` configured via `setWebhook` (gotgbot's `ext.WebhookOpts.SecretToken`
+  supports this natively) — a reliable identity check, unlike IP filtering alone.
+- **Per-user limiting**: key the limiter off the Telegram `user.id` inside the parsed update
+  payload, not the source IP, since the IP is meaningless (shared by every user) on this
+  route.
+
+This is deliberately **not implemented yet**, since the webhook route and the bot itself
+don't exist in this codebase — building the limiter in isolation with no update parser or
+route to attach it to would just be untested, speculative code. See
+[`docs/bot/telegram-bot-design.md`](../bot/telegram-bot-design.md).

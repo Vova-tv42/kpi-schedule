@@ -23,6 +23,7 @@ The Golang backend API serves as the core coordinator between the Telegram Bot, 
   - `400 Bad Request`: Invalid parameters.
   - `401 Unauthorized`: Missing/invalid `X-Internal-Token`, or no schedule data stored yet for the user (`ERR_AUTH_REQUIRED`).
   - `404 Not Found`: Group or user not found.
+  - `429 Too Many Requests`: More than 20 requests/minute from this client IP (`ERR_RATE_LIMITED`) — see [`docs/architecture/error-handling-resilience.md`](../architecture/error-handling-resilience.md) §5.
   - `500 Internal Server Error`: Unrecoverable merging failure (accompanied by a structured error code).
 
 > **Note on the bot.** The Telegram bot is not implemented yet. When it is added, it will run **inside this same Go process** (see [`docs/project-repository.md` §4.1](../project-repository.md)) and call the engine/service layer directly rather than issuing HTTP requests to these routes — the `/schedule/*` endpoints exist today purely as a manually-tested, inspectable surface.

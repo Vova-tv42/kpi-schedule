@@ -15,6 +15,7 @@ const (
 	ErrInvalidRequest       = "ERR_INVALID_REQUEST"
 	ErrInternal             = "ERR_INTERNAL"
 	ErrUnauthorized         = "ERR_UNAUTHORIZED"
+	ErrRateLimited          = "ERR_RATE_LIMITED"
 )
 
 // APIError is the standard error envelope for every non-2xx JSON response.
