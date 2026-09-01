@@ -32,6 +32,7 @@ user_schedule_state  (user_id PK/FK, refreshed_at, lesson_count, enrichment_stat
 user_lessons         (id, user_id FK, date, week, day, slot, start_time, end_time,
                        subject, subject_norm, tag, teacher_raw, location_raw,
                        lecturer_id, lecturer_name, location_title, location_uri, enriched,
+                       is_recurring,
                        UNIQUE (user_id, date, start_time, subject_norm))
 ```
 
@@ -54,6 +55,15 @@ current-week anchor, and `engine.slotByTime` against Campus's lesson-slot times)
 only for display grouping and for matching against the Campus API's own week-pattern
 schedule during enrichment. That part of the schema is unaffected by the credential-storage
 decision above and remains correct.
+
+`is_recurring` is a separate, related bit: whether this lesson happens every week of its
+`week` parity, or only on specific calendar dates per the matched Campus group lesson's
+`dates[]` (defaults `true` when unenriched). It exists specifically so a **stale** stored
+schedule keeps rendering correctly without a live Campus fetch: `date` alone is enough for
+`/today`/`/date` reads, but the generic `/week` template needs to know which lessons are
+safe to show as permanent weekly fixtures and which are one-off sessions that should only
+ever appear on their actual occurring dates. See
+[`merging-engine.md`](merging-engine.md) §6.
 
 ## 3. No Credential Storage, No Encryption
 

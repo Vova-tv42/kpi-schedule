@@ -61,6 +61,53 @@ func TestMergeEnrichesMatchingLesson(t *testing.T) {
 	}
 }
 
+func TestMergeMarksSpecificDatesLessonNonRecurring(t *testing.T) {
+	// 2026-09-01 is a Tuesday (day 2) in week 1. The matched group pair only
+	// occurs on two specific dates, not every week-1 Tuesday.
+	personal := []model.ParsedLesson{
+		{Date: date("2026-09-01"), StartTime: "08:30:00", Subject: "Колоквіум", Tag: "prac"},
+	}
+	group := campus.GroupScheduleResponse{
+		ScheduleFirstWeek: []campus.DaySchedule{
+			{Day: "Вв", Pairs: []campus.Pair{
+				{Name: "колоквіум", Tag: "prac", Time: "08:30:00", Dates: []string{"2026-09-01", "2026-10-13"}},
+			}},
+		},
+	}
+
+	got := Merge(personal, group, testSlots, referenceDate, referenceWeek)
+	if len(got) != 1 || !got[0].Enriched {
+		t.Fatalf("expected one enriched lesson, got %+v", got)
+	}
+	if got[0].IsRecurring {
+		t.Fatalf("expected IsRecurring=false for a lesson matched to a specific-dates-only group pair")
+	}
+}
+
+func TestMergeDefaultsRecurringWhenNoDatesOrUnmatched(t *testing.T) {
+	personal := []model.ParsedLesson{
+		{Date: date("2026-09-01"), StartTime: "10:25:00", Subject: "Технології DevOps", Tag: "prac"},
+		{Date: date("2026-08-31"), StartTime: "08:30:00", Subject: "Невідомий курс", Tag: "lec"},
+	}
+	group := campus.GroupScheduleResponse{
+		ScheduleFirstWeek: []campus.DaySchedule{
+			{Day: "Вв", Pairs: []campus.Pair{
+				{Name: "технології devops", Tag: "prac", Time: "10:25:00"}, // empty Dates = every week
+			}},
+		},
+	}
+
+	got := Merge(personal, group, testSlots, referenceDate, referenceWeek)
+	if len(got) != 2 {
+		t.Fatalf("got %d lessons, want 2", len(got))
+	}
+	for _, l := range got {
+		if !l.IsRecurring {
+			t.Fatalf("expected IsRecurring=true (empty dates[] or unmatched), got %+v", l)
+		}
+	}
+}
+
 func TestMergeKeepsUnmatchedPersonalLesson(t *testing.T) {
 	// 2026-08-31 is a Monday (day 1) in week 1.
 	personal := []model.ParsedLesson{

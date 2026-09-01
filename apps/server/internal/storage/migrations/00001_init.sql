@@ -47,6 +47,12 @@ CREATE TABLE user_lessons (
     location_title text,
     location_uri   text,
     enriched       boolean NOT NULL DEFAULT false,
+    -- True if this lesson happens every week of its `week` parity; false if
+    -- it only occurs on specific calendar dates (per the matched Campus
+    -- group lesson's dates[]). Defaults true when unenriched. Read paths use
+    -- this to exclude one-off/irregular lessons from the generic /week
+    -- template view — see docs/architecture/merging-engine.md §6.
+    is_recurring   boolean NOT NULL DEFAULT true,
     UNIQUE (user_id, date, start_time, subject_norm)
 );
 

@@ -74,6 +74,13 @@ type Lesson struct {
 	Lecturer    *Lecturer // Campus API enrichment: hashed ID + full name
 	Location    *Location // Campus API enrichment: room title + map URI
 	Enriched    bool
+	// IsRecurring: true if this lesson happens every week of its Week
+	// parity, false if it only occurs on a handful of specific calendar
+	// dates (per the matched Campus group lesson's dates[]; defaults true
+	// when unenriched). Used to decide whether a lesson belongs in the
+	// generic /schedule/week template view — see
+	// docs/architecture/merging-engine.md §6.
+	IsRecurring bool
 }
 
 // ParsedLesson is one dated lesson occurrence in the shape a client submits

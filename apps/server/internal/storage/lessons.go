@@ -38,10 +38,10 @@ func (db *DB) ReplaceLessons(ctx context.Context, userID uuid.UUID, lessons []mo
 		_, err := tx.Exec(ctx, `
 			INSERT INTO user_lessons
 				(user_id, date, week, day, slot, start_time, end_time, subject, subject_norm, tag,
-				 teacher_raw, location_raw, lecturer_id, lecturer_name, location_title, location_uri, enriched)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+				 teacher_raw, location_raw, lecturer_id, lecturer_name, location_title, location_uri, enriched, is_recurring)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 		`, userID, l.Date, l.Week, l.Day, l.Slot, l.StartTime, l.EndTime, l.Subject, l.SubjectNorm, l.Tag,
-			l.TeacherRaw, l.LocationRaw, lecturerID, lecturerName, locTitle, locURI, l.Enriched)
+			l.TeacherRaw, l.LocationRaw, lecturerID, lecturerName, locTitle, locURI, l.Enriched, l.IsRecurring)
 		if err != nil {
 			return fmt.Errorf("inserting lesson %q: %w", l.Subject, err)
 		}
@@ -79,14 +79,14 @@ func (db *DB) GetScheduleState(ctx context.Context, userID uuid.UUID) (model.Sch
 }
 
 const lessonColumns = `id, user_id, date, week, day, slot, start_time, end_time, subject, subject_norm, tag,
-	       teacher_raw, location_raw, lecturer_id, lecturer_name, location_title, location_uri, enriched`
+	       teacher_raw, location_raw, lecturer_id, lecturer_name, location_title, location_uri, enriched, is_recurring`
 
 func scanLesson(rows pgx.Rows) (model.Lesson, error) {
 	var l model.Lesson
 	var lecturerID, lecturerName, locTitle, locURI *string
 	err := rows.Scan(&l.ID, &l.UserID, &l.Date, &l.Week, &l.Day, &l.Slot, &l.StartTime, &l.EndTime,
 		&l.Subject, &l.SubjectNorm, &l.Tag, &l.TeacherRaw, &l.LocationRaw,
-		&lecturerID, &lecturerName, &locTitle, &locURI, &l.Enriched)
+		&lecturerID, &lecturerName, &locTitle, &locURI, &l.Enriched, &l.IsRecurring)
 	if err != nil {
 		return model.Lesson{}, fmt.Errorf("scanning lesson: %w", err)
 	}

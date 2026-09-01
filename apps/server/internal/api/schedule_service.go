@@ -93,10 +93,24 @@ func (s *Service) buildWeek(ctx context.Context, user model.User, weekFilter int
 
 	for _, w := range weeksToBuild {
 		byDay := make(map[int][]lessonView)
+		// The scan window above spans several real calendar weeks of the
+		// same parity, so a recurring lesson has one stored row per
+		// occurrence — dedupe down to a single representative per
+		// (day, time, subject) slot. Irregular lessons (IsRecurring=false:
+		// they only occur on a handful of specific dates, not every week —
+		// see docs/architecture/merging-engine.md §6) are excluded entirely;
+		// they still surface correctly via /today, /tomorrow, and /date,
+		// which read the exact stored date directly.
+		seen := make(map[string]bool)
 		for _, l := range lessons {
-			if l.Week != w {
+			if l.Week != w || !l.IsRecurring {
 				continue
 			}
+			key := fmt.Sprintf("%d|%s|%s", l.Day, l.StartTime, l.SubjectNorm)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 			byDay[l.Day] = append(byDay[l.Day], toLessonView(l))
 		}
 

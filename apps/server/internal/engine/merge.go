@@ -125,6 +125,15 @@ type MergedLesson struct {
 	Lecturer    *campus.Lecturer
 	Location    *campus.Location
 	Enriched    bool
+	// IsRecurring reports whether this lesson happens every week of its
+	// parity, as opposed to only a handful of specific calendar dates (an
+	// irregular one-off session, e.g. an exam-prep block). Derived from the
+	// matched group Pair's Dates field: empty means "every cycle of that
+	// week" (docs/schedules/secondary/data-models.md). Unmatched personal
+	// lessons default to true, since there is no group-side signal to say
+	// otherwise. Consumers use this to decide whether a lesson belongs in a
+	// generic weekly template view (see docs/architecture/merging-engine.md §6).
+	IsRecurring bool
 }
 
 // slotByTime resolves a HH:MM:SS time to a 1..7 slot number using the
@@ -207,6 +216,7 @@ func Merge(personal []model.ParsedLesson, group campus.GroupScheduleResponse, sl
 			Tag:         p.Tag,
 			TeacherRaw:  p.TeacherRaw,
 			LocationRaw: p.LocationRaw,
+			IsRecurring: true,
 		}
 
 		if slot, ok := slotByTime(slotTimes, p.StartTime); ok {
@@ -220,6 +230,7 @@ func Merge(personal []model.ParsedLesson, group campus.GroupScheduleResponse, sl
 			m.Lecturer = best.Lecturer
 			m.Location = best.Location
 			m.Enriched = true
+			m.IsRecurring = len(best.Dates) == 0
 		}
 
 		merged = append(merged, m)

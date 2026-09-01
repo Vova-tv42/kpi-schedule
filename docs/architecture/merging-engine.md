@@ -98,7 +98,31 @@ student didn't choose, and the alternate subgroup's lab session, out of their fe
 `apps/server/internal/engine/merge.go` (`Merge`), covered by
 `TestMergeDiscardsGroupOnlyLessons`.
 
-## 6. ~~Read-Time Staleness Guard~~ (obsolete)
+## 6. Recurring vs. Specific-Dates Lessons (`IsRecurring`)
+
+A stored lesson's own `Date` answers "does this occur on this specific day" (§3, Step 1) —
+but the generic `/schedule/week` view (a template of "what does week 1 / week 2 look like")
+needs a different question answered: "does this lesson happen on **every** week of this
+parity, or only on a handful of specific calendar dates?" That distinction only exists on
+the Campus API side (`campus.Pair.Dates`) — my.kpi.ua's personal feed has no equivalent
+concept, since it just hands back one already-dated row per actual occurrence.
+
+`Merge` sets `MergedLesson.IsRecurring` from the matched group Pair:
+- **Matched, `Dates` empty** → `IsRecurring = true` (occurs every cycle of that week).
+- **Matched, `Dates` non-empty** → `IsRecurring = false` (an irregular, few-times-a-semester
+  session — e.g. an exam-prep block).
+- **Unmatched** (no group counterpart found) → defaults `true`; there's no group-side signal
+  to say otherwise, and this preserves the pre-`IsRecurring` behavior for unenriched lessons.
+
+`buildWeek` (`apps/server/internal/api/schedule_service.go`) uses this to build the
+template: it scans a multi-week window of stored rows, **excludes** `IsRecurring = false`
+lessons entirely (they only ever show up via `/today`, `/tomorrow`, or `/date`, which read
+the exact stored `date` directly — never as a phantom "every week" fixture), and **dedupes**
+`IsRecurring = true` lessons down to one representative per (day, start_time, subject) —
+since a genuinely recurring class has one stored row per real occurrence within the scan
+window, and the template should show it once per week-slot, not once per occurrence.
+
+## 7. ~~Read-Time Staleness Guard~~ (obsolete)
 
 The original design re-fetched the group schedule on every read to re-derive `dates[]` live,
 in case the Campus API's pattern-based dates had shifted between refreshes. This mechanism
