@@ -34,8 +34,8 @@ flowchart TD
         PersonalClient["MyKPI Scraper Client (goquery)"]
         CampusClient["Campus API Client"]
         MergeEngine["Schedule Merging & Enrichment Engine"]
-        CacheLayer["In-Memory / Redis Cache"]
-        DB[(PostgreSQL / SQLite Storage)]
+        CacheLayer["In-Memory Cache"]
+        DB[(PostgreSQL Storage)]
     end
 
     subgraph ExternalServices["External KPI Systems"]
@@ -74,7 +74,7 @@ flowchart TD
 
 ## 3. Core Architectural Components
 
-### 3.1 Browser Extension (`extension/`)
+### 3.1 Browser Extension (`apps/extension/`)
 - **Role**: Secure bridge between the student's authenticated browser session and the Go backend.
 - **Workflow**:
   1. Student logs into `my.kpi.ua` via browser (supporting password or KPI ID / Diia / BankID SSO).
@@ -82,13 +82,13 @@ flowchart TD
   3. Student opens the extension popup, enters the code, and clicks **"Sync Schedule"**.
   4. Extension reads `my.kpi.ua` session cookies (`PHPSESSID`, `_identity`) and sends them over HTTPS to the backend.
 
-### 3.2 Golang Backend API (`internal/api/` & `internal/engine/`)
-- **Scraper Service (`internal/mykpi/`)**: Makes authenticated HTTP requests to `https://my.kpi.ua/room/student/calendar` using the stored session cookies, parsing HTML tables to extract enrolled classes, days, and timeslots.
-- **Campus API Client (`internal/campus/`)**: Queries `https://api.campus.kpi.ua/` for group schedules, current academic week, timeslots, and group lists.
-- **Merging Engine (`internal/engine/`)**: Matches each enrolled class from the scraper with the corresponding group lesson object from the Campus API, applying date filtering and adding classroom/teacher info.
-- **Cache Layer (`internal/cache/`)**: Caches group schedules (TTL 24h) and user personalized schedules (TTL 1-6h) to avoid rate limits and reduce scraping latency.
+### 3.2 Golang Backend API (`apps/server/internal/`)
+- **Scraper Service (`apps/server/internal/mykpi/`)**: Makes authenticated HTTP requests to `https://my.kpi.ua/room/student/calendar` using the stored session cookies, parsing HTML tables to extract enrolled classes, days, and timeslots.
+- **Campus API Client (`apps/server/internal/campus/`)**: Queries `https://api.campus.kpi.ua/` for group schedules, current academic week, timeslots, and group lists.
+- **Merging Engine (`apps/server/internal/engine/`)**: Matches each enrolled class from the scraper with the corresponding group lesson object from the Campus API, applying date filtering and adding classroom/teacher info.
+- **Cache Layer (`apps/server/internal/cache/`)**: Caches group schedules (TTL 24h) and user personalized schedules (TTL 1-6h) to avoid rate limits and reduce scraping latency.
 
-### 3.3 Telegram Bot (`internal/bot/`)
+### 3.3 Telegram Bot (`apps/server/internal/bot/`)
 - **Role**: Primary UI for students to check daily/weekly schedules, customize reminders, and manage group bindings.
 - **Features**:
   - Daily schedule (`/today`, `/tomorrow`) with classroom locations and direct links.

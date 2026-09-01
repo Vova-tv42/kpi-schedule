@@ -1,39 +1,20 @@
-# Auth & Pairing API Endpoints
+# Auth & Session API Endpoints
 
-## 1. Generate Pairing Code
+> **Status note.** The pairing-code handshake (`/auth/pair-code` + browser extension) is
+> **deferred**. This iteration accepts `my.kpi.ua` cookies directly in one call, per the
+> user's "server + API only, cookies posted directly, tested with curl" scope. The schema and
+> encryption underneath are unchanged, so the pairing flow can be layered on top later without
+> a data-model change — see `docs/project-repository.md` §2 "Not yet created".
 
-Initiated by the Telegram Bot when a user issues the `/link` command.
+## 1. Link a Session
 
-- **Endpoint**: `POST /api/v1/auth/pair-code`
-- **Headers**: `X-Internal-Token: <SECRET_BOT_TOKEN>`
+- **Endpoint**: `POST /api/v1/auth/session`
+- **Headers**: `X-Internal-Token: <INTERNAL_API_TOKEN>`
 - **Request Body**:
 ```json
 {
   "telegram_id": 123456789,
-  "username": "student_handle"
-}
-```
-- **Response**: `200 OK`
-```json
-{
-  "success": true,
-  "pair_code": "742918",
-  "expires_at": "2026-09-01T10:25:00Z",
-  "ttl_seconds": 600
-}
-```
-
----
-
-## 2. Sync Session from Browser Extension
-
-Called directly by the Browser Extension popup when the user submits their pairing code.
-
-- **Endpoint**: `POST /api/v1/auth/sync-session`
-- **Request Body**:
-```json
-{
-  "pair_code": "742918",
+  "group_name": "ІП-54",
   "cookies": {
     "PHPSESSID": "eb659e5b8a5f5a4ea1d4f20ef1443af9",
     "_identity": "39233868b6449f77b496598a9824806e3adf855c...",
@@ -42,21 +23,24 @@ Called directly by the Browser Extension popup when the user submits their pairi
   "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)..."
 }
 ```
+
+**Behavior**:
+1. If `group_name` is given, it is resolved to a Campus `groupId` via the group catalog
+   (`GET /group/all`, cached 24h) — `404`-style failure if not found.
+2. The user row is created or updated (`telegram_id` is the external key).
+3. The cookies are probed against `https://my.kpi.ua/room/student/calendar` **before** being
+   stored — an invalid cookie set is never persisted as "active".
+4. On success, the cookies are AES-256-GCM encrypted (see `docs/architecture/data-storage.md`
+   §3) and stored, and a first schedule refresh runs immediately.
+
 - **Response (`200 OK`)**:
 ```json
 {
   "success": true,
   "message": "Session successfully validated and linked.",
-  "student_name": "Іваненко Іван Іванович",
-  "group_name": "ІП-21"
-}
-```
-- **Error Response (`400 Bad Request`)**:
-```json
-{
-  "success": false,
-  "error_code": "ERR_INVALID_OR_EXPIRED_PAIR_CODE",
-  "message": "The pair code is invalid or has expired."
+  "telegram_id": 123456789,
+  "group_name": "ІП-54",
+  "enrichment_status": "full"
 }
 ```
 - **Error Response (`401 Unauthorized`)**:
@@ -70,12 +54,10 @@ Called directly by the Browser Extension popup when the user submits their pairi
 
 ---
 
-## 3. Check Session Status
-
-Used by the Telegram Bot to display account status in `/settings`.
+## 2. Check Session Status
 
 - **Endpoint**: `GET /api/v1/auth/status/{telegramId}`
-- **Headers**: `X-Internal-Token: <SECRET_BOT_TOKEN>`
+- **Headers**: `X-Internal-Token: <INTERNAL_API_TOKEN>`
 - **Response**: `200 OK`
 ```json
 {
@@ -83,20 +65,20 @@ Used by the Telegram Bot to display account status in `/settings`.
   "status": "ACTIVE",
   "linked_at": "2026-09-01T08:30:00Z",
   "last_synced_at": "2026-09-01T10:00:00Z",
-  "group_id": 4402,
-  "group_name": "ІП-21"
+  "group_id": 5626,
+  "group_name": "ІП-54"
 }
 ```
 *Status values: `ACTIVE`, `EXPIRED`, `NOT_LINKED`.*
 
 ---
 
-## 4. Unlink Session
+## 3. Unlink Session
 
-Removes stored cookies and reverts the user to group-only schedule mode.
+Removes the user's cookies and all stored lessons (`ON DELETE CASCADE`).
 
 - **Endpoint**: `DELETE /api/v1/auth/unlink/{telegramId}`
-- **Headers**: `X-Internal-Token: <SECRET_BOT_TOKEN>`
+- **Headers**: `X-Internal-Token: <INTERNAL_API_TOKEN>`
 - **Response**: `200 OK`
 ```json
 {

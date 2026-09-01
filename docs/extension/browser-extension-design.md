@@ -2,7 +2,7 @@
 
 ## 1. Overview & Objective
 
-The **KPI Schedule Sync Extension** is a lightweight browser extension built with **WebExtensions Manifest V3** standards. Its single responsibility is to safely read the student's active authentication cookies from `https://my.kpi.ua` and synchronize them with the backend server using a one-time pairing code.
+The **KPI Schedule Sync Extension** is a lightweight browser extension built with **WebExtensions Manifest V3** standards in **TypeScript**. Its single responsibility is to safely read the student's active authentication cookies from `https://my.kpi.ua` and synchronize them with the backend server using a one-time pairing code.
 
 ---
 
@@ -42,16 +42,24 @@ The **KPI Schedule Sync Extension** is a lightweight browser extension built wit
 
 ## 3. Extension Architecture & Files
 
+> **Status: provisional.** This layout is the expected structure, not a frozen contract; it may change during implementation. Keep it in sync with [`docs/project-repository.md`](../project-repository.md).
+
+Built with **TypeScript**, bundled by **Vite + `@crxjs/vite-plugin`**, with **Bun** as the package manager. The `manifest.json` shown in §2 is *generated* at build time from `manifest.config.ts` rather than hand-maintained.
+
 ```text
-extension/
-├── manifest.json                  # Manifest V3 metadata & permissions
-├── popup/
-│   ├── popup.html                 # Extension UI modal
-│   ├── popup.css                  # Modern minimal styling
-│   └── popup.js                   # UI event handling & user feedback
-├── background/
-│   └── service_worker.js          # Cookie extraction & backend sync network handler
-└── icons/
+apps/extension/
+├── manifest.config.ts             # Typed manifest source (@crxjs generates manifest.json)
+├── vite.config.ts                 # Vite + @crxjs build configuration
+├── package.json                   # Bun-managed dependencies
+├── tsconfig.json
+├── src/
+│   ├── popup/
+│   │   ├── popup.html             # Extension UI modal
+│   │   ├── popup.css              # Modern minimal styling
+│   │   └── popup.ts               # UI event handling & user feedback
+│   └── background/
+│       └── service-worker.ts      # Cookie extraction & backend sync handler
+└── public/icons/
     ├── icon-16.png
     ├── icon-48.png
     └── icon-128.png
@@ -87,4 +95,4 @@ flowchart TD
 2. **Local Processing**:
    - Cookies are never transmitted to third parties or analytics services.
 3. **Open Source & Auditable**:
-   - The extension consists of transparent, unminified JavaScript located in the `extension/` directory.
+   - The extension is fully open source; its TypeScript sources live in `apps/extension/src/` and the production bundle is built with source maps so it can be audited against them.

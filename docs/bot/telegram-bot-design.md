@@ -1,5 +1,7 @@
 # Telegram Bot Architecture & User Experience
 
+> **Runtime note.** The bot is **not a separate service**. It runs inside the single Go backend (`apps/server/internal/bot/`, using `gotgbot/v2`) and shares its process, database, cache, and scheduler. Updates arrive via webhook (`POST /api/v1/telegram/webhook`) in production and via long polling in local development. See [`docs/project-repository.md` §4.1](../project-repository.md) for the rationale.
+
 ## 1. Bot Purpose & Features
 
 The Telegram Bot provides students with quick, frictionless access to their verified daily and weekly schedules. It combines:
@@ -70,8 +72,27 @@ journey
 
 ---
 
-## 5. Automated Background Worker
+## 5. Inline Navigation & Message Mutation
 
-The bot backend runs a scheduled cron daemon:
+The day/week navigation buttons (`◀️ Вчора` / `🔄 Оновити` / `Завтра ▶️`) **edit the existing message in place** rather than sending a new one, so the chat is never flooded. This uses:
+
+| Purpose | Bot API method |
+| :--- | :--- |
+| Replace the schedule text and buttons | `editMessageText` |
+| Replace only the keyboard | `editMessageReplyMarkup` |
+| Remove a message | `deleteMessage` |
+| Stop the button's loading spinner | `answerCallbackQuery` |
+
+**Storage implication**: a callback update already carries `callback_query.message.message_id` and the chat ID, so ordinary navigation requires **no persisted message state**. A `message_id` only needs to be stored when the server must edit a message *later and unprompted* — for example, amending the morning briefing if a class is cancelled.
+
+---
+
+## 6. Automated Background Worker
+
+The server runs an in-process scheduler (`apps/server/internal/scheduler/`):
 - **Morning Reminder Worker**: Fires every morning (e.g. at 07:30 or 08:00) for opted-in users who have classes scheduled on that day.
 - **Session Keep-Alive / Check Worker**: Periodically checks the validity of stored session cookies and alerts users gracefully if re-sync is required.
+
+Per-user reminders are **not** individual cron entries. A single short-interval tick drains a table of due reminders (outbox pattern), so pending notifications survive restarts and redeploys.
+
+Sending a reminder is a plain outbound HTTPS call to `api.telegram.org`, independent of whether updates are delivered by webhook or long polling.

@@ -78,5 +78,25 @@ A critical feature of the Campus API is the `dates` array:
 
 If the Campus API is unreachable or the student belongs to a group whose schedule is not populated:
 - The system returns the raw scraped personal schedule from `my.kpi.ua`.
-- An indicator informs the user: *"Відображено базовий розклад без розширених даних про аудиторії"*.
+- The response is flagged `enrichment_status: "degraded"`.
 - No fatal crash occurs.
+
+## 5. Discarding Group-Only Lessons
+
+A group Pair with no matching personal lesson (same week, day, slot, and normalized subject)
+is **discarded** — it is never stored and never shown. This is what keeps electives the
+student didn't choose, and the alternate subgroup's lab session, out of their feed. See
+`apps/server/internal/engine/merge.go` (`Merge`), covered by
+`TestMergeDiscardsGroupOnlyLessons`.
+
+## 6. Read-Time Staleness Guard
+
+`dates[]` is stored at refresh time, but the Campus API can change it between refreshes (a
+specific-date class moved, for instance). A schedule read for a specific day re-fetches the
+group schedule (in-memory cache, 6h TTL — usually a cache hit, not a new HTTP call) and
+re-derives `dates[]` for each enriched lesson via the same matching logic as `Merge`, before
+applying the occurrence-date filter. If the group schedule can't be fetched, the stored
+`dates[]` is used instead and the response is flagged `enrichment_status: "degraded"`. See
+`RelookupDates` in `apps/server/internal/engine/merge.go` and `buildDay` in
+`apps/server/internal/api/schedule_service.go`, and
+`docs/architecture/data-storage.md` §5 for the full rationale.

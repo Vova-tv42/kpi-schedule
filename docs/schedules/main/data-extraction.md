@@ -1,5 +1,21 @@
 # Scraping & Data Extraction Strategy (my.kpi.ua)
 
+> **Status: selectors unverified.** Everything below §2 was inferred from `/css/site.css` and
+> `/css/print_schedule.css`, not from a real logged-in calendar page — `my.kpi.ua` does not
+> expose its markup to unauthenticated crawlers. `apps/server/internal/mykpi/parser.go` is a
+> stub (`ErrNotImplemented`) until a real fixture is captured and the selectors are corrected
+> against it. Fixture-capture workflow:
+>
+> 1. Start the server with `DEBUG_ROUTES=true` (the `.env.example` default).
+> 2. Log into `my.kpi.ua` in a browser, copy `PHPSESSID` and `_identity` from DevTools →
+>    Application → Cookies.
+> 3. `curl -X POST -H "X-Internal-Token: $INTERNAL_API_TOKEN" -H 'Content-Type: application/json' \
+>        -d '{"cookies":{"PHPSESSID":"...","_identity":"..."}}' \
+>        localhost:8080/api/v1/debug/mykpi/dump`
+> 4. The raw HTML is saved to `apps/server/internal/mykpi/testdata/calendar-<timestamp>.html`.
+> 5. `parser.go` is written and golden-tested against that fixture, and this file's §2–§4 are
+>    corrected to match what the real markup actually contains.
+
 ## 1. Scraping Target
 
 - **Endpoint**: `https://my.kpi.ua/room/student/calendar`

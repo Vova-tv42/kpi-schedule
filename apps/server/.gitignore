@@ -1,0 +1,15 @@
+# Local secrets — copy .env.example instead
+.env
+
+# Build output
+/server
+/kpi-schedule-bot
+
+# Real my.kpi.ua HTML dumps captured via POST /api/v1/debug/mykpi/dump.
+# These contain a real student's PII (name, schedule, group) and must be
+# manually reviewed/scrubbed before ever being committed as a test fixture.
+internal/mykpi/testdata/*.html
+
+# Go tooling
+*.test
+coverage.out
