@@ -19,7 +19,7 @@ Welcome to the technical documentation for the **KPI Personalized Schedule Platf
 - **Main Schedule (`my.kpi.ua`)**:
   - [Overview](file:///home/volodymyr/apps/kpi-schedule-bot/docs/schedules/main/overview.md): System architecture, Yii2 PHP stack, selective courses & subgroups.
   - [Authentication](file:///home/volodymyr/apps/kpi-schedule-bot/docs/schedules/main/auth.md): `PHPSESSID`, `_identity`, `_csrf`, and login mechanisms.
-  - [Data Extraction](file:///home/volodymyr/apps/kpi-schedule-bot/docs/schedules/main/data-extraction.md): HTML scraping strategy, DOM selectors, and `goquery` parser.
+  - [Data Extraction](file:///home/volodymyr/apps/kpi-schedule-bot/docs/schedules/main/data-extraction.md): the FullCalendar JSON events feed, its two-step discovery flow, and field mapping.
   - [Browser Extension Auth Flow](file:///home/volodymyr/apps/kpi-schedule-bot/docs/schedules/main/extension-auth-flow.md): Step-by-step pairing handshake protocol.
 - **Secondary / Group Schedule (`schedule.kpi.ua` / `api.campus.kpi.ua`)**:
   - [Overview](file:///home/volodymyr/apps/kpi-schedule-bot/docs/schedules/secondary/overview.md): Public React SPA and backend architecture.

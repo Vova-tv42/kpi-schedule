@@ -36,19 +36,3 @@ func WeekAt(referenceDate time.Time, referenceWeek int, targetDate time.Time) in
 func ISODay(t time.Time) int {
 	return (int(t.Weekday())+6)%7 + 1
 }
-
-// OccursOn reports whether a lesson with the given occurrence dates occurs on
-// target, per docs/architecture/merging-engine.md §3, Step 3: an empty dates
-// list means "every cycle of this week"; a non-empty list is exhaustive.
-func OccursOn(dates []string, target time.Time) bool {
-	if len(dates) == 0 {
-		return true
-	}
-	targetStr := target.Format("2006-01-02")
-	for _, d := range dates {
-		if d == targetStr {
-			return true
-		}
-	}
-	return false
-}

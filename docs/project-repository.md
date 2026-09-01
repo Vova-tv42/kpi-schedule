@@ -33,7 +33,7 @@ kpi-schedule-bot/
     │   │   ├── config/                 # Env-var config, fails fast on missing secrets
     │   │   ├── api/                    # chi router, handlers, orchestration (Service)
     │   │   ├── campus/                 # Client for api.campus.kpi.ua (TTL-cached)
-    │   │   ├── mykpi/                  # Scraper for my.kpi.ua (goquery)
+    │   │   ├── mykpi/                  # my.kpi.ua client: FullCalendar shell page + JSON events feed
     │   │   ├── engine/                 # Schedule merging, normalization, week-parity math
     │   │   ├── storage/                # PostgreSQL repository (pgx) + goose migrations
     │   │   ├── cache/                  # Generic in-memory TTL cache
@@ -74,7 +74,7 @@ These were considered and **intentionally left out** until a concrete need appea
 - **Language**: Go 1.23+
 - **HTTP Router**: `chi` (`github.com/go-chi/chi/v5`) — minimal overhead, readable middleware chaining.
 - **Telegram Bot**: `gotgbot/v2` (`github.com/PaulSonOfLars/gotgbot/v2`) — code-generated from the Bot API specification, fully type-safe, standard library only. Chosen because message *mutation* methods (`editMessageText`, `editMessageReplyMarkup`, `deleteMessage`, `answerCallbackQuery`) map 1:1 to the Bot API, which the inline-keyboard navigation depends on.
-- **HTML Parsing**: `goquery` (`github.com/PuerkitoBio/goquery`) for CSS-selector querying of `my.kpi.ua`.
+- **my.kpi.ua Client**: standard library `net/http`, plus a small regexp extraction of the FullCalendar events URL embedded in the calendar shell page's inline script — no HTML table parsing needed (`my.kpi.ua`'s real lesson data comes from a JSON feed, not markup; see `docs/schedules/main/data-extraction.md`).
 - **Persistence**: PostgreSQL via `pgx`. **Not SQLite** — deployment targets have ephemeral disks.
 - **Scheduling**: In-process cron (`github.com/go-co-op/gocron/v2`). No platform-level cron dependency, so the hosting choice stays open.
 - **Caching**: In-memory cache; group schedules TTL ~24h, personal schedules TTL 1–6h.

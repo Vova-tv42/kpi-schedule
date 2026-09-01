@@ -8,7 +8,15 @@ All schedule endpoints return the unified, deduplicated, and enriched schedule f
 > original draft below has been dropped: it isn't honestly derivable from either source (it
 > would require knowing every elective the group offers, not just what the student attends).
 > Each lesson instead carries `enriched` (bool): whether it was matched against the group
-> schedule for lecturer/room/exact-dates enrichment, or is a raw, un-enriched personal entry.
+> schedule for lecturer/room enrichment, or is a raw, un-enriched personal entry.
+>
+> **Correction (post-implementation).** Each lesson now carries its own `date` (my.kpi.ua's
+> personal feed turned out to return exact-dated occurrences, not a recurring pattern — see
+> `docs/schedules/main/data-extraction.md`), plus `end_time`. The free-form `type` field
+> (e.g. `"Лекція"`) was dropped in favor of `tag` alone (`"lec"`/`"prac"`/`"lab"`) — it was
+> redundant. `teacher_raw`/`location_raw` are new: my.kpi.ua's own plain-text values, included
+> as a fallback alongside the resolved `lecturer`/`location` objects (present only when
+> `enriched: true`).
 
 ---
 
@@ -33,11 +41,14 @@ All schedule endpoints return the unified, deduplicated, and enriched schedule f
   "session_status": "active",
   "lessons": [
     {
+      "date": "2026-09-01",
       "slot": 1,
       "time": "08:30:00",
+      "end_time": "10:05:00",
       "name": "Процеси розробки вбудованого програмного забезпечення",
-      "type": "Лекція",
       "tag": "lec",
+      "teacher_raw": "Гуменний Д. О.",
+      "location_raw": "lec., ауд. 402",
       "lecturer": {
         "id": "ce02d4b6d1aceeea96a562c10923d590607df6182b4a3405ad10be85b6354787",
         "name": "Гуменний Дмитро Олександрович"
@@ -49,11 +60,14 @@ All schedule endpoints return the unified, deduplicated, and enriched schedule f
       "enriched": true
     },
     {
+      "date": "2026-09-01",
       "slot": 2,
       "time": "10:25:00",
+      "end_time": "12:00:00",
       "name": "Технології DevOps",
-      "type": "Практика",
       "tag": "prac",
+      "teacher_raw": "Колумбет В. П.",
+      "location_raw": "prc., Онлайн Zoom",
       "lecturer": {
         "id": "a3513549948fbfecfa1ff0300bf3339f9b1ebff77c9fc831b3c83236a4814d61",
         "name": "Колумбет Вадим Петрович"

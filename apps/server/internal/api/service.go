@@ -23,6 +23,16 @@ import (
 // user — no platform cron in this iteration).
 const refreshInterval = 14 * 24 * time.Hour
 
+// fetchWindowPast/fetchWindowFuture bound the date range requested from
+// my.kpi.ua's events endpoint on each refresh — wide enough to cover
+// today/tomorrow/week views and a full semester's worth of upcoming lessons
+// without pulling unbounded history. The endpoint requires an explicit
+// start/end range and silently returns no events without one.
+const (
+	fetchWindowPast   = 14 * 24 * time.Hour
+	fetchWindowFuture = 120 * 24 * time.Hour
+)
+
 var ErrInvalidCookies = errors.New("cookies rejected by my.kpi.ua")
 
 type Service struct {
@@ -55,7 +65,7 @@ func (s *Service) LinkSession(ctx context.Context, telegramID int64, groupName s
 	}
 
 	// Probe before storing: an invalid cookie set must never be persisted as "active".
-	if _, err := s.mykpi.FetchCalendarHTML(ctx, cookies, userAgent); err != nil {
+	if _, err := s.mykpi.FetchCalendarPage(ctx, cookies, userAgent); err != nil {
 		if errors.Is(err, mykpi.ErrSessionExpired) {
 			return model.User{}, "", ErrInvalidCookies
 		}
@@ -106,32 +116,41 @@ func (s *Service) refreshSchedule(ctx context.Context, user model.User) (model.E
 		return "", fmt.Errorf("unmarshaling stored cookies: %w", err)
 	}
 
-	html, err := s.mykpi.FetchCalendarHTML(ctx, cookies, session.UserAgent)
+	now := time.Now().UTC()
+	eventsJSON, err := s.mykpi.FetchStudentEventsRange(ctx, cookies, session.UserAgent, now.Add(-fetchWindowPast), now.Add(fetchWindowFuture))
 	if err != nil {
 		if errors.Is(err, mykpi.ErrSessionExpired) {
 			msg := "my.kpi.ua rejected the stored session cookies"
 			_ = s.db.MarkSessionStatus(ctx, user.ID, model.SessionExpired, &msg)
 			return "", mykpi.ErrSessionExpired
 		}
-		return "", fmt.Errorf("fetching calendar: %w", err)
+		return "", fmt.Errorf("fetching calendar events: %w", err)
 	}
 	_ = s.db.MarkSessionStatus(ctx, user.ID, model.SessionActive, nil)
 
-	personal, err := mykpi.ParseCalendarHTML(html)
+	personal, err := mykpi.ParseEventsJSON(eventsJSON)
 	if err != nil {
-		return "", fmt.Errorf("parsing calendar: %w", err)
+		return "", fmt.Errorf("parsing calendar events: %w", err)
 	}
 
 	enrichmentStatus := model.EnrichmentFull
 	var groupSchedule campus.GroupScheduleResponse
 	var slotTimes map[string]string
 	var groupErrMsg *string
+	referenceWeek := 1
 
 	if user.GroupID != nil {
 		var groupErr error
 		groupSchedule, groupErr = s.campus.GroupSchedule(ctx, *user.GroupID)
 		if groupErr == nil {
 			slotTimes, groupErr = s.campus.LessonSlots(ctx)
+		}
+		if groupErr == nil {
+			var currentTime campus.CurrentAcademicTime
+			currentTime, groupErr = s.campus.CurrentTime(ctx)
+			if groupErr == nil {
+				referenceWeek = currentTime.CurrentWeek
+			}
 		}
 		if groupErr != nil {
 			enrichmentStatus = model.EnrichmentDegraded
@@ -144,22 +163,24 @@ func (s *Service) refreshSchedule(ctx context.Context, user model.User) (model.E
 		groupErrMsg = &msg
 	}
 
-	merged := engine.Merge(personal, groupSchedule, slotTimes)
+	merged := engine.Merge(personal, groupSchedule, slotTimes, now, referenceWeek)
 	lessons := make([]model.Lesson, 0, len(merged))
 	for _, m := range merged {
 		lessons = append(lessons, model.Lesson{
 			UserID:      user.ID,
+			Date:        m.Date,
 			Week:        m.Week,
 			Day:         m.Day,
 			Slot:        m.Slot,
 			StartTime:   m.StartTime,
+			EndTime:     m.EndTime,
 			Subject:     m.Subject,
 			SubjectNorm: m.SubjectNorm,
 			Tag:         m.Tag,
-			Type:        m.Type,
+			TeacherRaw:  m.TeacherRaw,
+			LocationRaw: m.LocationRaw,
 			Lecturer:    toModelLecturer(m.Lecturer),
 			Location:    toModelLocation(m.Location),
-			Dates:       m.Dates,
 			Enriched:    m.Enriched,
 		})
 	}

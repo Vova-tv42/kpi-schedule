@@ -72,20 +72,27 @@ type Location struct {
 	URI   string `json:"uri"`
 }
 
-// Lesson is one merged, persisted class occurrence pattern for a user.
+// Lesson is one concrete, dated class occurrence for a user, as returned
+// directly by my.kpi.ua's personal calendar feed (already exact-dated and
+// already filtered to only this student's actual enrollment — no elective
+// or subgroup ambiguity to resolve on our side). Week/Day/Slot are derived
+// and stored alongside Date purely for display grouping and for matching
+// against the Campus API's week-pattern schedule; Date is authoritative.
 type Lesson struct {
-	ID            uuid.UUID
-	UserID        uuid.UUID
-	Week          int // 1 or 2
-	Day           int // 1 (Monday) .. 6 (Saturday)
-	Slot          int // 1..7
-	StartTime     string // "HH:MM:SS"
-	Subject       string
-	SubjectNorm   string
-	Tag           string // "lec", "prac", "lab", or "" if unknown
-	Type          string // display label, e.g. "Лекція"
-	Lecturer      *Lecturer
-	Location      *Location
-	Dates         []string // ISO YYYY-MM-DD; empty = every cycle of this week
-	Enriched      bool
+	ID          uuid.UUID
+	UserID      uuid.UUID
+	Date        time.Time // calendar date (UTC midnight), authoritative
+	Week        int       // 1 or 2, derived from Date at refresh time
+	Day         int       // 1 (Monday) .. 7 (Sunday), derived from Date
+	Slot        int       // 1..7 if resolved against Campus lesson-slot times, else 0
+	StartTime   string    // "HH:MM:SS"
+	EndTime     string    // "HH:MM:SS"
+	Subject     string
+	SubjectNorm string
+	Tag         string // normalized: "lec", "prac", "lab", or "" if unknown
+	TeacherRaw  string // plain-text teacher name(s) as shown by my.kpi.ua
+	LocationRaw string // plain-text location/link as shown by my.kpi.ua (e.g. "lec., Онлайн Zoom")
+	Lecturer    *Lecturer // Campus API enrichment: hashed ID + full name
+	Location    *Location // Campus API enrichment: room title + map URI
+	Enriched    bool
 }

@@ -12,9 +12,16 @@ var testSlots = map[string]string{
 	"4": "14:15:00", "5": "16:10:00", "6": "18:05:00", "7": "20:00:00",
 }
 
+// referenceDate/referenceWeek anchor the tests' week-parity math: 2026-09-01
+// is a Tuesday in week 1 (per weeks_test.go's convention).
+var referenceDate = date("2026-09-01")
+
+const referenceWeek = 1
+
 func TestMergeEnrichesMatchingLesson(t *testing.T) {
+	// 2026-09-01 is a Tuesday (day 2) in week 1.
 	personal := []mykpi.ParsedLesson{
-		{Week: 1, Day: 2, Slot: 2, Subject: "Технології DevOps", Tag: "prac", Type: "Практика"},
+		{Date: date("2026-09-01"), StartTime: "10:25:00", Subject: "Технології DevOps", Tag: "prac"},
 	}
 	group := campus.GroupScheduleResponse{
 		ScheduleFirstWeek: []campus.DaySchedule{
@@ -23,7 +30,6 @@ func TestMergeEnrichesMatchingLesson(t *testing.T) {
 					Name: "технології devops", Tag: "prac", Type: "Прак", Time: "10:25:00",
 					Lecturer: &campus.Lecturer{ID: "l1", Name: "Колумбет В. П."},
 					Location: &campus.Location{Title: "5-508", URI: "https://kpi.ua/k-5"},
-					Dates:    nil,
 				},
 				{
 					// Same slot, different subject — must not be picked.
@@ -33,7 +39,7 @@ func TestMergeEnrichesMatchingLesson(t *testing.T) {
 		},
 	}
 
-	got := Merge(personal, group, testSlots)
+	got := Merge(personal, group, testSlots, referenceDate, referenceWeek)
 	if len(got) != 1 {
 		t.Fatalf("got %d lessons, want 1", len(got))
 	}
@@ -50,15 +56,19 @@ func TestMergeEnrichesMatchingLesson(t *testing.T) {
 	if l.Slot != 2 {
 		t.Fatalf("got slot %d, want 2", l.Slot)
 	}
+	if l.Week != 1 || l.Day != 2 {
+		t.Fatalf("got week %d day %d, want week 1 day 2", l.Week, l.Day)
+	}
 }
 
 func TestMergeKeepsUnmatchedPersonalLesson(t *testing.T) {
+	// 2026-08-31 is a Monday (day 1) in week 1.
 	personal := []mykpi.ParsedLesson{
-		{Week: 1, Day: 1, Slot: 1, Subject: "Невідомий курс", Tag: "lec", Type: "Лекція"},
+		{Date: date("2026-08-31"), StartTime: "08:30:00", Subject: "Невідомий курс", Tag: "lec"},
 	}
 	group := campus.GroupScheduleResponse{}
 
-	got := Merge(personal, group, testSlots)
+	got := Merge(personal, group, testSlots, referenceDate, referenceWeek)
 	if len(got) != 1 {
 		t.Fatalf("got %d lessons, want 1", len(got))
 	}
@@ -81,15 +91,17 @@ func TestMergeDiscardsGroupOnlyLessons(t *testing.T) {
 		},
 	}
 
-	got := Merge(nil, group, testSlots)
+	got := Merge(nil, group, testSlots, referenceDate, referenceWeek)
 	if len(got) != 0 {
 		t.Fatalf("got %d lessons, want 0 (group-only lessons must be discarded)", len(got))
 	}
 }
 
 func TestMergeDoesNotEnrichAcrossDifferentDayOrWeek(t *testing.T) {
+	// 2026-09-09 is a Wednesday (day 3) in week 2 (one week after the
+	// reference Tuesday in week 1).
 	personal := []mykpi.ParsedLesson{
-		{Week: 2, Day: 3, Slot: 1, Subject: "Математика", Tag: "lec", Type: "Лекція"},
+		{Date: date("2026-09-09"), StartTime: "08:30:00", Subject: "Математика", Tag: "lec"},
 	}
 	group := campus.GroupScheduleResponse{
 		ScheduleFirstWeek: []campus.DaySchedule{ // week 1, not week 2
@@ -99,8 +111,11 @@ func TestMergeDoesNotEnrichAcrossDifferentDayOrWeek(t *testing.T) {
 		},
 	}
 
-	got := Merge(personal, group, testSlots)
+	got := Merge(personal, group, testSlots, referenceDate, referenceWeek)
 	if len(got) != 1 || got[0].Enriched {
 		t.Fatalf("lesson must not match across a different week: %+v", got)
+	}
+	if got[0].Week != 2 {
+		t.Fatalf("got week %d, want 2", got[0].Week)
 	}
 }

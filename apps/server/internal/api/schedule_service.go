@@ -6,56 +6,39 @@ import (
 	"sort"
 	"time"
 
-	"kpi-schedule-bot/server/internal/campus"
 	"kpi-schedule-bot/server/internal/engine"
 	"kpi-schedule-bot/server/internal/model"
 )
 
-// buildDay assembles the response for one calendar date: resolves the target
-// week via the Campus API's current-time endpoint, filters stored lessons to
-// that day, and re-verifies each enriched lesson's occurrence dates against
-// a live group-schedule fetch (docs/architecture/merging-engine.md §2,
-// staleness guard) so a lesson that no longer occurs on this date is dropped
-// even if the stored snapshot hasn't been refreshed.
+// buildDay assembles the response for one calendar date. Since my.kpi.ua's
+// personal feed already returns exact-dated lesson instances, the stored
+// `date` column is authoritative and queried directly — no read-time
+// re-verification against the group schedule is needed (that was only ever
+// necessary to re-derive occurrence dates from the Campus API's week-pattern
+// `dates[]`, which the personal schedule no longer needs).
 func (s *Service) buildDay(ctx context.Context, user model.User, targetDate time.Time, forceRefresh bool) (dayView, error) {
 	stale, sessionStatus, enrichment, err := s.ensureFresh(ctx, user, forceRefresh)
 	if err != nil {
 		return dayView{}, err
 	}
 
-	week, err := s.resolveWeek(ctx, targetDate)
-	if err != nil {
-		return dayView{}, err
-	}
-	isoDay := engine.ISODay(targetDate)
-
-	lessons, err := s.db.GetLessons(ctx, user.ID, week)
+	dayStart := time.Date(targetDate.Year(), targetDate.Month(), targetDate.Day(), 0, 0, 0, 0, time.UTC)
+	lessons, err := s.db.GetLessonsByDateRange(ctx, user.ID, dayStart, dayStart)
 	if err != nil {
 		return dayView{}, fmt.Errorf("loading lessons: %w", err)
 	}
 
-	groupSchedule, haveGroup := s.tryFetchGroupSchedule(ctx, user)
-
-	views := make([]lessonView, 0)
+	views := make([]lessonView, 0, len(lessons))
 	for _, l := range lessons {
-		if l.Day != isoDay {
-			continue
-		}
-
-		dates := l.Dates
-		if l.Enriched && haveGroup {
-			if fresh, ok := engine.RelookupDates(groupSchedule, l.Week, l.Day, l.SubjectNorm, l.Tag); ok {
-				dates = fresh
-			}
-		}
-
-		if !engine.OccursOn(dates, targetDate) {
-			continue
-		}
-		l.Dates = dates
 		views = append(views, toLessonView(l))
 	}
-	sort.Slice(views, func(i, j int) bool { return views[i].Slot < views[j].Slot })
+	sort.Slice(views, func(i, j int) bool { return views[i].Time < views[j].Time })
+
+	isoDay := engine.ISODay(targetDate)
+	week, err := s.resolveWeek(ctx, targetDate)
+	if err != nil {
+		return dayView{}, err
+	}
 
 	return dayView{
 		Date:             targetDate.Format("2006-01-02"),
@@ -96,24 +79,32 @@ func (s *Service) buildWeek(ctx context.Context, user model.User, weekFilter int
 		SessionStatus:    string(sessionStatus),
 	}
 
-	for _, w := range weeksToBuild {
-		lessons, err := s.db.GetLessons(ctx, user.ID, w)
-		if err != nil {
-			return weekView{}, fmt.Errorf("loading lessons for week %d: %w", w, err)
-		}
+	// Pull a window wide enough to cover both academic-week parities around
+	// today, then bucket by the stored week/day fields.
+	now := time.Now().UTC()
+	windowStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -21)
+	windowEnd := windowStart.AddDate(0, 0, 42)
+	lessons, err := s.db.GetLessonsByDateRange(ctx, user.ID, windowStart, windowEnd)
+	if err != nil {
+		return weekView{}, fmt.Errorf("loading lessons: %w", err)
+	}
 
+	for _, w := range weeksToBuild {
 		byDay := make(map[int][]lessonView)
 		for _, l := range lessons {
+			if l.Week != w {
+				continue
+			}
 			byDay[l.Day] = append(byDay[l.Day], toLessonView(l))
 		}
 
 		var days []weekDayView
-		for day := 1; day <= 6; day++ {
+		for day := 1; day <= 7; day++ {
 			ls := byDay[day]
 			if len(ls) == 0 {
 				continue
 			}
-			sort.Slice(ls, func(i, j int) bool { return ls[i].Slot < ls[j].Slot })
+			sort.Slice(ls, func(i, j int) bool { return ls[i].Time < ls[j].Time })
 			days = append(days, weekDayView{
 				Day:     dayShortUA[day],
 				DayName: dayNamesUA[day],
@@ -139,15 +130,4 @@ func (s *Service) resolveWeek(ctx context.Context, target time.Time) (int, error
 		return 0, fmt.Errorf("resolving current academic week: %w", err)
 	}
 	return engine.WeekAt(time.Now(), currentTime.CurrentWeek, target), nil
-}
-
-func (s *Service) tryFetchGroupSchedule(ctx context.Context, user model.User) (campus.GroupScheduleResponse, bool) {
-	if user.GroupID == nil {
-		return campus.GroupScheduleResponse{}, false
-	}
-	sched, err := s.campus.GroupSchedule(ctx, *user.GroupID)
-	if err != nil {
-		return campus.GroupScheduleResponse{}, false
-	}
-	return sched, true
 }

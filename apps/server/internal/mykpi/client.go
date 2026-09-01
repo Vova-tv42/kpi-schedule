@@ -2,6 +2,13 @@
 // my.kpi.ua. The parser (parser.go) is fixture-driven: its selectors are
 // verified against a real HTML dump rather than guessed from CSS files.
 // See docs/schedules/main/data-extraction.md.
+//
+// The calendar page (/room/student/calendar) does NOT render a static HTML
+// schedule table — it embeds a FullCalendar.js widget that fetches lesson
+// data from a separate JSON endpoint, /calendar/studevents?id=<studentId>.
+// The studentId is only known after parsing it out of the calendar page's
+// inline script, so fetching a student's schedule is a two-step process:
+// FetchCalendarPage (to discover the events URL) then FetchEventsJSONRange.
 package mykpi
 
 import (
@@ -10,16 +17,25 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
 	"kpi-schedule-bot/server/internal/model"
 )
 
-const calendarURL = "https://my.kpi.ua/room/student/calendar"
+const baseURL = "https://my.kpi.ua"
+const calendarURL = baseURL + "/room/student/calendar"
 
 // ErrSessionExpired signals that the given cookies were rejected by my.kpi.ua.
 var ErrSessionExpired = errors.New("my.kpi.ua session expired or invalid")
+
+// ErrEventsURLNotFound signals that the calendar page's inline FullCalendar
+// config didn't contain a recognizable "events" URL — the page layout likely
+// changed and the parser needs re-verifying against a fresh fixture.
+var ErrEventsURLNotFound = errors.New("could not find FullCalendar events URL in calendar page")
+
+var eventsURLPattern = regexp.MustCompile(`"events"\s*:\s*"([^"]+)"`)
 
 type Client struct {
 	http *http.Client
@@ -39,10 +55,44 @@ func NewClient() *Client {
 	}
 }
 
-// FetchCalendarHTML performs the authenticated GET and returns the raw HTML
-// body. It returns ErrSessionExpired if the cookies were rejected.
-func (c *Client) FetchCalendarHTML(ctx context.Context, cookies model.Cookies, userAgent string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, calendarURL, nil)
+// FetchCalendarPage performs the authenticated GET of the calendar shell page
+// and returns the raw HTML body. It returns ErrSessionExpired if the cookies
+// were rejected.
+func (c *Client) FetchCalendarPage(ctx context.Context, cookies model.Cookies, userAgent string) ([]byte, error) {
+	return c.authenticatedGet(ctx, calendarURL, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", cookies, userAgent, true)
+}
+
+// ExtractEventsURL pulls the FullCalendar "events" URL out of the calendar
+// page's inline script, e.g. "/calendar/studevents?id=33101".
+func ExtractEventsURL(calendarHTML []byte) (string, error) {
+	m := eventsURLPattern.FindSubmatch(calendarHTML)
+	if m == nil {
+		return "", ErrEventsURLNotFound
+	}
+	return string(m[1]), nil
+}
+
+// FetchEventsJSONRange fetches the raw JSON lesson-events payload from the
+// URL discovered via ExtractEventsURL, for the [start, end] date range.
+// eventsPath is relative (e.g. "/calendar/studevents?id=33101"). The range
+// params are required — this is standard FullCalendar string-source
+// behavior, and the endpoint silently returns "[]" without them (confirmed
+// against the live endpoint).
+func (c *Client) FetchEventsJSONRange(ctx context.Context, eventsPath string, cookies model.Cookies, userAgent string, start, end time.Time) ([]byte, error) {
+	url := eventsPath
+	if strings.HasPrefix(eventsPath, "/") {
+		url = baseURL + eventsPath
+	}
+	sep := "?"
+	if strings.Contains(url, "?") {
+		sep = "&"
+	}
+	url = fmt.Sprintf("%s%sstart=%s&end=%s", url, sep, start.Format("2006-01-02"), end.Format("2006-01-02"))
+	return c.authenticatedGet(ctx, url, "application/json", cookies, userAgent, false)
+}
+
+func (c *Client) authenticatedGet(ctx context.Context, url, accept string, cookies model.Cookies, userAgent string, checkLoginPage bool) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("building request: %w", err)
 	}
@@ -52,11 +102,11 @@ func (c *Client) FetchCalendarHTML(ctx context.Context, cookies model.Cookies, u
 		userAgent = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
 	}
 	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept", accept)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("requesting calendar: %w", err)
+		return nil, fmt.Errorf("requesting %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
@@ -67,11 +117,11 @@ func (c *Client) FetchCalendarHTML(ctx context.Context, cookies model.Cookies, u
 		}
 		return nil, fmt.Errorf("unexpected redirect to %q", loc)
 	}
-	if resp.StatusCode == http.StatusForbidden {
+	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
 		return nil, ErrSessionExpired
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status %d from my.kpi.ua", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected status %d from %s", resp.StatusCode, url)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -79,7 +129,7 @@ func (c *Client) FetchCalendarHTML(ctx context.Context, cookies model.Cookies, u
 		return nil, fmt.Errorf("reading response body: %w", err)
 	}
 
-	if looksLikeLoginPage(body) {
+	if checkLoginPage && looksLikeLoginPage(body) {
 		return nil, ErrSessionExpired
 	}
 
@@ -106,4 +156,19 @@ func buildCookieHeader(c model.Cookies) string {
 func looksLikeLoginPage(body []byte) bool {
 	s := string(body)
 	return strings.Contains(s, "login-form") || strings.Contains(s, "id=\"login-form\"")
+}
+
+// FetchStudentEventsRange is the full two-step fetch: load the calendar
+// page, discover the events URL, then fetch the JSON payload for the given
+// date range.
+func (c *Client) FetchStudentEventsRange(ctx context.Context, cookies model.Cookies, userAgent string, start, end time.Time) ([]byte, error) {
+	page, err := c.FetchCalendarPage(ctx, cookies, userAgent)
+	if err != nil {
+		return nil, err
+	}
+	eventsURL, err := ExtractEventsURL(page)
+	if err != nil {
+		return nil, err
+	}
+	return c.FetchEventsJSONRange(ctx, eventsURL, cookies, userAgent, start, end)
 }

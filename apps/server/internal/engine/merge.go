@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"strconv"
+	"time"
 
 	"kpi-schedule-bot/server/internal/campus"
 	"kpi-schedule-bot/server/internal/mykpi"
@@ -74,9 +74,9 @@ func jaroWinkler(a, b string) float64 {
 	return jaro + float64(prefix)*0.1*(1-jaro)
 }
 
-// dayIndex maps a Campus API day label to the schema's 1..6 (Monday..Saturday).
+// dayIndex maps a Campus API day label to the schema's 1..7 (Monday..Sunday).
 var dayIndex = map[string]int{
-	"Пн": 1, "Вв": 2, "Ср": 3, "Чт": 4, "Пт": 5, "Сб": 6,
+	"Пн": 1, "Вв": 2, "Ср": 3, "Чт": 4, "Пт": 5, "Сб": 6, "Нд": 7,
 }
 
 // groupSlot pairs a group Pair with the day/week it belongs to, flattened for lookup.
@@ -109,24 +109,27 @@ func flattenGroupSchedule(sched campus.GroupScheduleResponse) []groupSlot {
 	return slots
 }
 
-// MergedLesson is a personal lesson after enrichment, ready to persist.
+// MergedLesson is a personal, dated lesson after enrichment, ready to persist.
 type MergedLesson struct {
+	Date        time.Time
 	Week        int
 	Day         int
 	Slot        int
 	StartTime   string
+	EndTime     string
 	Subject     string
 	SubjectNorm string
 	Tag         string
-	Type        string
+	TeacherRaw  string
+	LocationRaw string
 	Lecturer    *campus.Lecturer
 	Location    *campus.Location
-	Dates       []string
 	Enriched    bool
 }
 
-// slotByTime resolves a group pair's HH:MM:SS time to a 1..7 slot number using
-// the Campus API's official slot times (see campus.Client.LessonSlots).
+// slotByTime resolves a HH:MM:SS time to a 1..7 slot number using the
+// Campus API's official slot times (see campus.Client.LessonSlots). Returns
+// ok=false (slot 0) if the time doesn't match any known slot.
 func slotByTime(slots map[string]string, t string) (int, bool) {
 	for slot, slotTime := range slots {
 		if slotTime == t {
@@ -145,8 +148,6 @@ func slotByTime(slots map[string]string, t string) (int, bool) {
 
 // findMatch locates the best-scoring group pair for a personal lesson's
 // week/day/subject, per docs/architecture/merging-engine.md §3, Step 2.
-// Shared by Merge (initial enrichment) and RelookupDates (read-time
-// staleness re-verification), so both use identical matching rules.
 func findMatch(groupSlots []groupSlot, week, day int, subjectNorm, tag string) *campus.Pair {
 	var best *groupSlot
 	bestScore := 0.0
@@ -178,59 +179,47 @@ func findMatch(groupSlots []groupSlot, week, day int, subjectNorm, tag string) *
 	return &best.pair
 }
 
-// RelookupDates re-derives an enriched lesson's occurrence dates against a
-// freshly fetched group schedule, so a lesson never keeps showing on a date
-// it no longer occurs on (docs/architecture/merging-engine.md §2, "Staleness
-// guard" in docs/project-repository.md-linked planning). Returns ok=false if
-// no matching group pair is found (caller should fall back to stored dates).
-func RelookupDates(group campus.GroupScheduleResponse, week, day int, subjectNorm, tag string) ([]string, bool) {
-	pair := findMatch(flattenGroupSchedule(group), week, day, subjectNorm, tag)
-	if pair == nil {
-		return nil, false
-	}
-	return pair.Dates, true
-}
-
 // Merge implements the Selective Left Join from docs/architecture/merging-engine.md §2:
-// the personal schedule is the base; the group schedule only enriches matching
-// lessons. A group lesson with no personal counterpart is discarded — never
-// stored, never shown.
-func Merge(personal []mykpi.ParsedLesson, group campus.GroupScheduleResponse, slotTimes map[string]string) []MergedLesson {
+// the personal, dated schedule from my.kpi.ua is the base; the Campus group
+// schedule only enriches matching lessons with lecturer/location metadata.
+// A group lesson with no personal counterpart is discarded — never stored,
+// never shown. week/day are derived per-lesson from its Date via WeekAt/ISODay,
+// anchored on referenceDate/referenceWeek (the Campus API's current-time
+// anchor at refresh time).
+func Merge(personal []mykpi.ParsedLesson, group campus.GroupScheduleResponse, slotTimes map[string]string, referenceDate time.Time, referenceWeek int) []MergedLesson {
 	groupSlots := flattenGroupSchedule(group)
 
 	merged := make([]MergedLesson, 0, len(personal))
 	for _, p := range personal {
+		week := WeekAt(referenceDate, referenceWeek, p.Date)
+		day := ISODay(p.Date)
 		pNorm := NormalizeSubject(p.Subject)
-		best := findMatch(groupSlots, p.Week, p.Day, pNorm, p.Tag)
+		best := findMatch(groupSlots, week, day, pNorm, p.Tag)
 
 		m := MergedLesson{
-			Week:        p.Week,
-			Day:         p.Day,
+			Date:        p.Date,
+			Week:        week,
+			Day:         day,
+			StartTime:   p.StartTime,
+			EndTime:     p.EndTime,
 			Subject:     p.Subject,
 			SubjectNorm: pNorm,
 			Tag:         p.Tag,
-			Type:        p.Type,
+			TeacherRaw:  p.TeacherRaw,
+			LocationRaw: p.LocationRaw,
+		}
+
+		if slot, ok := slotByTime(slotTimes, p.StartTime); ok {
+			m.Slot = slot
 		}
 
 		if best != nil {
-			m.Tag = best.Tag
-			m.Type = best.Type
+			if best.Tag != "" {
+				m.Tag = best.Tag
+			}
 			m.Lecturer = best.Lecturer
 			m.Location = best.Location
-			m.Dates = best.Dates
 			m.Enriched = true
-			if slot, ok := slotByTime(slotTimes, best.Time); ok {
-				m.Slot = slot
-			} else {
-				m.Slot = p.Slot
-			}
-			m.StartTime = best.Time
-		} else {
-			m.Slot = p.Slot
-			m.Enriched = false
-			if t, ok := slotTimes[strconv.Itoa(p.Slot)]; ok {
-				m.StartTime = t
-			}
 		}
 
 		merged = append(merged, m)

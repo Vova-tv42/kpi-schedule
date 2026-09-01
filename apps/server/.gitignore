@@ -5,10 +5,14 @@
 /server
 /kpi-schedule-bot
 
-# Real my.kpi.ua HTML dumps captured via POST /api/v1/debug/mykpi/dump.
-# These contain a real student's PII (name, schedule, group) and must be
-# manually reviewed/scrubbed before ever being committed as a test fixture.
-internal/mykpi/testdata/*.html
+# Real my.kpi.ua dumps captured via POST /api/v1/debug/mykpi/dump (both the
+# calendar HTML and the raw events JSON). These contain a real student's PII
+# (name, schedule, group) and must be manually reviewed/scrubbed before ever
+# being promoted to a committed test fixture (e.g. testdata/events-golden.json).
+internal/mykpi/testdata/calendar-*.html
+internal/mykpi/testdata/events-*.json
+internal/mykpi/testdata/events-manual-*.json
+!internal/mykpi/testdata/events-golden.json
 
 # Go tooling
 *.test

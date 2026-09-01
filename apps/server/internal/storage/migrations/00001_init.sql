@@ -28,27 +28,34 @@ CREATE TABLE user_schedule_state (
     last_error         text
 );
 
+-- Each row is one concrete, dated class occurrence, as returned directly by
+-- my.kpi.ua's personal calendar feed (already exact-dated, already filtered
+-- to only this student's actual enrollment). week/day/slot are derived from
+-- `date` at refresh time and stored for display grouping and for matching
+-- against the Campus API's week-pattern schedule; `date` is authoritative.
 CREATE TABLE user_lessons (
     id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id        uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    date           date NOT NULL,
     week           smallint NOT NULL CHECK (week IN (1, 2)),
-    day            smallint NOT NULL CHECK (day BETWEEN 1 AND 6),
-    slot           smallint NOT NULL CHECK (slot BETWEEN 1 AND 7),
+    day            smallint NOT NULL CHECK (day BETWEEN 1 AND 7),
+    slot           smallint NOT NULL DEFAULT 0 CHECK (slot BETWEEN 0 AND 7),
     start_time     text NOT NULL,
+    end_time       text NOT NULL DEFAULT '',
     subject        text NOT NULL,
     subject_norm   text NOT NULL,
     tag            text NOT NULL DEFAULT '',
-    type           text NOT NULL DEFAULT '',
+    teacher_raw    text NOT NULL DEFAULT '',
+    location_raw   text NOT NULL DEFAULT '',
     lecturer_id    text,
     lecturer_name  text,
     location_title text,
     location_uri   text,
-    dates          text[] NOT NULL DEFAULT '{}',
     enriched       boolean NOT NULL DEFAULT false,
-    UNIQUE (user_id, week, day, slot, subject_norm)
+    UNIQUE (user_id, date, start_time, subject_norm)
 );
 
-CREATE INDEX idx_user_lessons_user_week_day ON user_lessons (user_id, week, day);
+CREATE INDEX idx_user_lessons_user_date ON user_lessons (user_id, date);
 
 -- +goose Down
 DROP TABLE user_lessons;

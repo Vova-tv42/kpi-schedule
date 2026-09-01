@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -35,11 +37,11 @@ func (db *DB) ReplaceLessons(ctx context.Context, userID uuid.UUID, lessons []mo
 
 		_, err := tx.Exec(ctx, `
 			INSERT INTO user_lessons
-				(user_id, week, day, slot, start_time, subject, subject_norm, tag, type,
-				 lecturer_id, lecturer_name, location_title, location_uri, dates, enriched)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-		`, userID, l.Week, l.Day, l.Slot, l.StartTime, l.Subject, l.SubjectNorm, l.Tag, l.Type,
-			lecturerID, lecturerName, locTitle, locURI, l.Dates, l.Enriched)
+				(user_id, date, week, day, slot, start_time, end_time, subject, subject_norm, tag,
+				 teacher_raw, location_raw, lecturer_id, lecturer_name, location_title, location_uri, enriched)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+		`, userID, l.Date, l.Week, l.Day, l.Slot, l.StartTime, l.EndTime, l.Subject, l.SubjectNorm, l.Tag,
+			l.TeacherRaw, l.LocationRaw, lecturerID, lecturerName, locTitle, locURI, l.Enriched)
 		if err != nil {
 			return fmt.Errorf("inserting lesson %q: %w", l.Subject, err)
 		}
@@ -76,26 +78,35 @@ func (db *DB) GetScheduleState(ctx context.Context, userID uuid.UUID) (model.Sch
 	return s, nil
 }
 
-// GetLessons returns all stored lessons for a user, optionally filtered to one week (1 or 2).
-// Pass week=0 to fetch both weeks.
-func (db *DB) GetLessons(ctx context.Context, userID uuid.UUID, week int) ([]model.Lesson, error) {
-	var rows pgx.Rows
-	var err error
-	if week == 0 {
-		rows, err = db.Pool.Query(ctx, `
-			SELECT id, user_id, week, day, slot, start_time, subject, subject_norm, tag, type,
-			       lecturer_id, lecturer_name, location_title, location_uri, dates, enriched
-			FROM user_lessons WHERE user_id = $1
-			ORDER BY week, day, slot
-		`, userID)
-	} else {
-		rows, err = db.Pool.Query(ctx, `
-			SELECT id, user_id, week, day, slot, start_time, subject, subject_norm, tag, type,
-			       lecturer_id, lecturer_name, location_title, location_uri, dates, enriched
-			FROM user_lessons WHERE user_id = $1 AND week = $2
-			ORDER BY day, slot
-		`, userID, week)
+const lessonColumns = `id, user_id, date, week, day, slot, start_time, end_time, subject, subject_norm, tag,
+	       teacher_raw, location_raw, lecturer_id, lecturer_name, location_title, location_uri, enriched`
+
+func scanLesson(rows pgx.Rows) (model.Lesson, error) {
+	var l model.Lesson
+	var lecturerID, lecturerName, locTitle, locURI *string
+	err := rows.Scan(&l.ID, &l.UserID, &l.Date, &l.Week, &l.Day, &l.Slot, &l.StartTime, &l.EndTime,
+		&l.Subject, &l.SubjectNorm, &l.Tag, &l.TeacherRaw, &l.LocationRaw,
+		&lecturerID, &lecturerName, &locTitle, &locURI, &l.Enriched)
+	if err != nil {
+		return model.Lesson{}, fmt.Errorf("scanning lesson: %w", err)
 	}
+	if lecturerID != nil {
+		l.Lecturer = &model.Lecturer{ID: *lecturerID, Name: *lecturerName}
+	}
+	if locTitle != nil {
+		l.Location = &model.Location{Title: *locTitle, URI: *locURI}
+	}
+	return l, nil
+}
+
+// GetLessonsByDateRange returns all stored lessons for a user with a date in
+// [start, end] (inclusive), ordered chronologically.
+func (db *DB) GetLessonsByDateRange(ctx context.Context, userID uuid.UUID, start, end time.Time) ([]model.Lesson, error) {
+	rows, err := db.Pool.Query(ctx, `
+		SELECT `+lessonColumns+`
+		FROM user_lessons WHERE user_id = $1 AND date BETWEEN $2 AND $3
+		ORDER BY date, start_time
+	`, userID, start, end)
 	if err != nil {
 		return nil, fmt.Errorf("querying lessons: %w", err)
 	}
@@ -103,18 +114,9 @@ func (db *DB) GetLessons(ctx context.Context, userID uuid.UUID, week int) ([]mod
 
 	var lessons []model.Lesson
 	for rows.Next() {
-		var l model.Lesson
-		var lecturerID, lecturerName, locTitle, locURI *string
-		if err := rows.Scan(&l.ID, &l.UserID, &l.Week, &l.Day, &l.Slot, &l.StartTime,
-			&l.Subject, &l.SubjectNorm, &l.Tag, &l.Type,
-			&lecturerID, &lecturerName, &locTitle, &locURI, &l.Dates, &l.Enriched); err != nil {
-			return nil, fmt.Errorf("scanning lesson: %w", err)
-		}
-		if lecturerID != nil {
-			l.Lecturer = &model.Lecturer{ID: *lecturerID, Name: *lecturerName}
-		}
-		if locTitle != nil {
-			l.Location = &model.Location{Title: *locTitle, URI: *locURI}
+		l, err := scanLesson(rows)
+		if err != nil {
+			return nil, err
 		}
 		lessons = append(lessons, l)
 	}

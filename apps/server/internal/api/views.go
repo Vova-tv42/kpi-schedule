@@ -23,26 +23,30 @@ type locationView struct {
 }
 
 type lessonView struct {
-	Slot     int           `json:"slot"`
-	Time     string        `json:"time"`
-	Name     string        `json:"name"`
-	Type     string        `json:"type"`
-	Tag      string        `json:"tag"`
-	Lecturer *lecturerView `json:"lecturer,omitempty"`
-	Location *locationView `json:"location,omitempty"`
-	Enriched bool          `json:"enriched"`
-	Dates    []string      `json:"dates,omitempty"`
+	Date        string        `json:"date"`
+	Slot        int           `json:"slot"`
+	Time        string        `json:"time"`
+	EndTime     string        `json:"end_time"`
+	Name        string        `json:"name"`
+	Tag         string        `json:"tag"`
+	TeacherRaw  string        `json:"teacher_raw,omitempty"`
+	LocationRaw string        `json:"location_raw,omitempty"`
+	Lecturer    *lecturerView `json:"lecturer,omitempty"`
+	Location    *locationView `json:"location,omitempty"`
+	Enriched    bool          `json:"enriched"`
 }
 
 func toLessonView(l model.Lesson) lessonView {
 	v := lessonView{
-		Slot:     l.Slot,
-		Time:     l.StartTime,
-		Name:     l.Subject,
-		Type:     l.Type,
-		Tag:      l.Tag,
-		Enriched: l.Enriched,
-		Dates:    l.Dates,
+		Date:        l.Date.Format("2006-01-02"),
+		Slot:        l.Slot,
+		Time:        l.StartTime,
+		EndTime:     l.EndTime,
+		Name:        l.Subject,
+		Tag:         l.Tag,
+		TeacherRaw:  l.TeacherRaw,
+		LocationRaw: l.LocationRaw,
+		Enriched:    l.Enriched,
 	}
 	if l.Lecturer != nil {
 		v.Lecturer = &lecturerView{ID: l.Lecturer.ID, Name: l.Lecturer.Name}
