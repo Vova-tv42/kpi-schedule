@@ -10,27 +10,31 @@ import (
 	"strings"
 	"time"
 
-	"kpi-schedule-bot/server/internal/cache"
+	"kpi-schedule-bot/server/internal/storage"
 )
 
 const baseURL = "https://api.campus.kpi.ua"
 
+// Cache TTLs (maxAge for storage.DB.CacheGet), unchanged from the previous
+// in-memory cache — only the backing store moved to SQLite, so a value
+// fetched before the host VM sleeps is still fresh on wake instead of
+// forcing a cold-start burst of re-fetches. See docs/architecture/data-storage.md §5.
+const (
+	timeCacheTTL     = 1 * time.Minute
+	slotsCacheTTL    = 24 * time.Hour
+	groupsCacheTTL   = 24 * time.Hour
+	scheduleCacheTTL = 6 * time.Hour
+)
+
 type Client struct {
 	http *http.Client
-
-	timeCache     *cache.TTL[CurrentAcademicTime]
-	slotsCache    *cache.TTL[map[string]string]
-	groupsCache   *cache.TTL[[]Group]
-	scheduleCache *cache.TTL[GroupScheduleResponse]
+	db   *storage.DB
 }
 
-func NewClient() *Client {
+func NewClient(db *storage.DB) *Client {
 	return &Client{
-		http:          &http.Client{Timeout: 10 * time.Second},
-		timeCache:     cache.New[CurrentAcademicTime](1 * time.Minute),
-		slotsCache:    cache.New[map[string]string](24 * time.Hour),
-		groupsCache:   cache.New[[]Group](24 * time.Hour),
-		scheduleCache: cache.New[GroupScheduleResponse](6 * time.Hour),
+		http: &http.Client{Timeout: 10 * time.Second},
+		db:   db,
 	}
 }
 
@@ -56,42 +60,45 @@ func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 	return nil
 }
 
+// cachedJSON serves out from the SQLite-backed cache (key, maxAge) when
+// fresh, otherwise fetches path, decodes into out, and persists it under key
+// for next time. A cache read/write failure is logged-worthy but not fatal
+// to the caller — falling through to a live fetch keeps the server working
+// even if the cache table is briefly unavailable.
+func (c *Client) cachedJSON(ctx context.Context, key string, maxAge time.Duration, path string, out any) error {
+	if hit, err := c.db.CacheGet(ctx, key, maxAge, out); err == nil && hit {
+		return nil
+	}
+	if err := c.getJSON(ctx, path, out); err != nil {
+		return err
+	}
+	return c.db.CacheSet(ctx, key, out)
+}
+
 // CurrentTime returns the current academic week/day/slot, cached for 1 minute.
 func (c *Client) CurrentTime(ctx context.Context) (CurrentAcademicTime, error) {
-	if v, ok := c.timeCache.Get("current"); ok {
-		return v, nil
-	}
 	var out CurrentAcademicTime
-	if err := c.getJSON(ctx, "/time/current", &out); err != nil {
+	if err := c.cachedJSON(ctx, "time:current", timeCacheTTL, "/time/current", &out); err != nil {
 		return CurrentAcademicTime{}, err
 	}
-	c.timeCache.Set("current", out)
 	return out, nil
 }
 
 // LessonSlots returns the slot-number -> start-time map, cached for 24 hours.
 func (c *Client) LessonSlots(ctx context.Context) (map[string]string, error) {
-	if v, ok := c.slotsCache.Get("slots"); ok {
-		return v, nil
-	}
 	var out map[string]string
-	if err := c.getJSON(ctx, "/schedule/lessons/slots", &out); err != nil {
+	if err := c.cachedJSON(ctx, "slots:all", slotsCacheTTL, "/schedule/lessons/slots", &out); err != nil {
 		return nil, err
 	}
-	c.slotsCache.Set("slots", out)
 	return out, nil
 }
 
 // Groups returns the full group catalog, cached for 24 hours.
 func (c *Client) Groups(ctx context.Context) ([]Group, error) {
-	if v, ok := c.groupsCache.Get("all"); ok {
-		return v, nil
-	}
 	var out []Group
-	if err := c.getJSON(ctx, "/group/all", &out); err != nil {
+	if err := c.cachedJSON(ctx, "groups:all", groupsCacheTTL, "/group/all", &out); err != nil {
 		return nil, err
 	}
-	c.groupsCache.Set("all", out)
 	return out, nil
 }
 
@@ -131,15 +138,11 @@ func (c *Client) ResolveGroupID(ctx context.Context, groupName string) (int, err
 
 // GroupSchedule returns the full 2-week schedule for a group, cached for 6 hours.
 func (c *Client) GroupSchedule(ctx context.Context, groupID int) (GroupScheduleResponse, error) {
-	key := strconv.Itoa(groupID)
-	if v, ok := c.scheduleCache.Get(key); ok {
-		return v, nil
-	}
+	key := "schedule:" + strconv.Itoa(groupID)
 	var out GroupScheduleResponse
-	path := "/schedule/lessons?" + url.Values{"groupId": {key}}.Encode()
-	if err := c.getJSON(ctx, path, &out); err != nil {
+	path := "/schedule/lessons?" + url.Values{"groupId": {strconv.Itoa(groupID)}}.Encode()
+	if err := c.cachedJSON(ctx, key, scheduleCacheTTL, path, &out); err != nil {
 		return GroupScheduleResponse{}, err
 	}
-	c.scheduleCache.Set(key, out)
 	return out, nil
 }

@@ -1,48 +1,81 @@
-// Package storage wraps the Postgres connection pool and embedded migrations.
+// Package storage wraps the SQLite connection and embedded migrations.
 package storage
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"fmt"
+	"os"
+	"path/filepath"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pressly/goose/v3"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "modernc.org/sqlite"
 )
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-type DB struct {
-	Pool *pgxpool.Pool
+// dsn builds the SQLite connection string for path, with the pragmas this
+// package relies on: WAL for concurrent-safe reads during a write, foreign
+// keys (off by default in SQLite otherwise, needed for ON DELETE CASCADE),
+// a busy-timeout fallback, and sqlite time format/UTC so time.Time values
+// round-trip through TIMESTAMP columns without manual parsing. _timezone
+// must be "UTC" (uppercase) — modernc.org/sqlite's DSN parser is case-sensitive
+// and "utc" fails with "unknown time zone utc".
+func dsn(path string) string {
+	return fmt.Sprintf(
+		"file:%s?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_journal=WAL&_time_format=sqlite&_timezone=UTC",
+		path,
+	)
 }
 
-func Open(ctx context.Context, databaseURL string) (*DB, error) {
-	pool, err := pgxpool.New(ctx, databaseURL)
+type DB struct {
+	SQL *sql.DB
+}
+
+// Open opens the SQLite database at path, creating its parent directory if
+// needed (SQLite creates the file itself, but not the directory).
+func Open(ctx context.Context, path string) (*DB, error) {
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("creating db directory: %w", err)
+		}
+	}
+
+	sqlDB, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
-		return nil, fmt.Errorf("connecting to postgres: %w", err)
+		return nil, fmt.Errorf("opening sqlite: %w", err)
 	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("pinging postgres: %w", err)
+	// A single connection serializes all access through SQLite's one writer,
+	// avoiding SQLITE_BUSY entirely rather than relying on retries — the
+	// simplest correct choice at this project's scale.
+	sqlDB.SetMaxOpenConns(1)
+
+	if err := sqlDB.PingContext(ctx); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("pinging sqlite: %w", err)
 	}
-	return &DB{Pool: pool}, nil
+	return &DB{SQL: sqlDB}, nil
 }
 
 func (db *DB) Close() {
-	db.Pool.Close()
+	db.SQL.Close()
 }
 
-// Migrate applies all embedded migrations using database/sql, since goose
-// drives migrations through the stdlib interface rather than pgx directly.
-func Migrate(databaseURL string) error {
+func Migrate(path string) error {
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("creating db directory: %w", err)
+		}
+	}
+
 	goose.SetBaseFS(migrationsFS)
-	if err := goose.SetDialect("postgres"); err != nil {
+	if err := goose.SetDialect("sqlite3"); err != nil {
 		return fmt.Errorf("setting goose dialect: %w", err)
 	}
 
-	sqlDB, err := goose.OpenDBWithDriver("pgx", databaseURL)
+	sqlDB, err := goose.OpenDBWithDriver("sqlite3", dsn(path))
 	if err != nil {
 		return fmt.Errorf("opening db for migrations: %w", err)
 	}

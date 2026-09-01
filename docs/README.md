@@ -13,7 +13,7 @@ Welcome to the technical documentation for the **KPI Personalized Schedule Platf
 - [Architecture Overview](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/overview.md): High-level system design and end-to-end data flow.
 - [Schedule Merging Engine](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/merging-engine.md): Matching algorithm, date filtering (`dates: [...]`), and course deduplication.
 - [Error Handling & Resilience](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/error-handling-resilience.md): Stale-push handling, Campus API circuit breaking, and the standard error envelope.
-- [Data Storage & Sync Policy](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/data-storage.md): Schema, why no credentials are ever stored, and the extension-push sync model.
+- [Data Storage & Sync Policy](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/data-storage.md): SQLite schema (including the disk-backed `campus_cache` table), why no credentials are ever stored, and the extension-push sync model.
 
 ### 📁 Schedule Sources
 - **Main Schedule (`my.kpi.ua`)**:
@@ -30,7 +30,7 @@ Welcome to the technical documentation for the **KPI Personalized Schedule Platf
 - [API Overview](file:///home/volodymyr/apps/kpi-schedule-bot/docs/api/overview.md): REST routing, conventions, and status codes.
 - [Auth Endpoints](file:///home/volodymyr/apps/kpi-schedule-bot/docs/api/auth-endpoints.md): Link status checks and unlinking — no credentials to link/store any more.
 - [Schedule Endpoints](file:///home/volodymyr/apps/kpi-schedule-bot/docs/api/schedule-endpoints.md): Queries for `/today`, `/tomorrow`, `/week`, and specific dates.
-- [Local Development & Manual Testing](file:///home/volodymyr/apps/kpi-schedule-bot/docs/api/local-development.md): Docker Compose setup, `.env` configuration, and the `curl` walkthrough (no bot/extension yet, and no way to push a real schedule until the sync endpoint exists).
+- [Local Development & Manual Testing](file:///home/volodymyr/apps/kpi-schedule-bot/docs/api/local-development.md): No-Docker-needed SQLite setup, `.env` configuration, the `curl` walkthrough, and testing the Docker deployment shape (no bot/extension yet, and no way to push a real schedule until the sync endpoint exists).
 
 ### 📁 Client Applications
 - [Browser Extension (Manifest V3)](file:///home/volodymyr/apps/kpi-schedule-bot/docs/extension/browser-extension-design.md): Extension design, permissions, and security.

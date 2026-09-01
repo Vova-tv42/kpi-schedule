@@ -29,7 +29,7 @@ func (h *handlers) getTimeCurrent(w http.ResponseWriter, r *http.Request) {
 
 // GET /healthz
 func (h *handlers) getHealthz(w http.ResponseWriter, r *http.Request) {
-	if err := h.svc.db.Pool.Ping(r.Context()); err != nil {
+	if err := h.svc.db.SQL.PingContext(r.Context()); err != nil {
 		model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, "database unreachable")
 		return
 	}

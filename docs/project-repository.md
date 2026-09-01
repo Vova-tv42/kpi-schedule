@@ -26,19 +26,23 @@ kpi-schedule-bot/
 │
 └── apps/
     ├── server/                         # Go 1.23+ — the whole backend
-    │   ├── compose.yaml                # Local Postgres for development
+    │   ├── compose.yaml                # Runs the built container against a local volume,
+    │   │                                #   for testing the Dockerfile/persistence shape —
+    │   │                                #   not required for day-to-day local dev (SQLite
+    │   │                                #   needs no separate service)
     │   ├── .env.example
     │   ├── cmd/server/main.go          # Single entrypoint
     │   ├── internal/
     │   │   ├── config/                 # Env-var config, fails fast on missing secrets
     │   │   ├── api/                    # chi router, handlers, orchestration (Service)
-    │   │   ├── campus/                 # Client for api.campus.kpi.ua (TTL-cached)
+    │   │   ├── campus/                 # Client for api.campus.kpi.ua (disk-cached via storage.DB)
     │   │   ├── engine/                 # Schedule merging, normalization, week-parity math
-    │   │   ├── storage/                # PostgreSQL repository (pgx) + goose migrations
-    │   │   ├── cache/                  # Generic in-memory TTL cache
+    │   │   ├── storage/                # SQLite repository (database/sql + modernc.org/sqlite)
+    │   │   │                            #   + goose migrations + the campus_cache table
     │   │   └── model/                  # Shared domain structs, error codes
     │   ├── go.mod
-    │   └── Dockerfile                  # Host-agnostic deployment artifact
+    │   └── Dockerfile                  # Host-agnostic deployment artifact, VOLUME ["/data"]
+    │                                    #   for the SQLite file
     │
     │   # Not yet created — deferred, see docs/api/overview.md's "Note on the bot":
     │   #   internal/bot/        (Telegram bot; API/engine are bot-ready)
@@ -79,9 +83,9 @@ These were considered and **intentionally left out** until a concrete need appea
 - **Rate Limiting**: `github.com/go-chi/httprate`, 20 req/min per client IP on all `/api/v1/*` routes — see [`docs/architecture/error-handling-resilience.md`](architecture/error-handling-resilience.md) §5 for why the (not yet built) Telegram webhook route will need a different, per-user limiter instead of this one.
 - **Telegram Bot**: `gotgbot/v2` (`github.com/PaulSonOfLars/gotgbot/v2`) — code-generated from the Bot API specification, fully type-safe, standard library only. Chosen because message *mutation* methods (`editMessageText`, `editMessageReplyMarkup`, `deleteMessage`, `answerCallbackQuery`) map 1:1 to the Bot API, which the inline-keyboard navigation depends on.
 - **my.kpi.ua Client**: none — the server never fetches `my.kpi.ua`. That fetch (a small regexp extraction of the FullCalendar events URL embedded in the calendar shell page's inline script, then the JSON events feed itself; see `docs/schedules/main/data-extraction.md`) is now the browser extension's job, done client-side.
-- **Persistence**: PostgreSQL via `pgx`. **Not SQLite** — deployment targets have ephemeral disks.
+- **Persistence**: SQLite (`modernc.org/sqlite`, pure Go, CGO-free) via `database/sql`, on a mounted persistent-disk volume. A prior decision here rejected SQLite for ephemeral-disk deployment targets; the target host is now confirmed to have a persistent disk, and the host VM is meant to sleep when idle to save cost, which is exactly what makes SQLite the better fit — see `docs/architecture/data-storage.md` §5.
 - **Scheduling**: no schedule-refresh cron — the server cannot refresh a schedule on its own since it has no credentials to fetch with; the only way data changes is a push from the extension (see `docs/architecture/data-storage.md` §4). The not-yet-built Telegram bot's morning-reminder worker (`internal/scheduler/`, see `docs/bot/telegram-bot-design.md` §6) is a separate, unrelated concern and may still use in-process cron (`github.com/go-co-op/gocron/v2`) when it's built.
-- **Caching**: In-memory cache; group schedules TTL ~24h, catalog/slot data TTL 24h.
+- **Caching**: Disk-backed, in the same SQLite database (`campus_cache` table) — not in-memory. Group schedules TTL ~6h, catalog/slot/current-time data TTL 1min–24h, unchanged from the old in-memory cache's TTLs. Moved to disk specifically so a value cached before the VM sleeps is still warm on wake; see `docs/architecture/data-storage.md` §5. The in-process rate limiter (below) is unaffected and stays in-memory.
 - **Logging**: Structured logging via `log/slog`.
 
 ### 3.2 Browser Extension
@@ -110,7 +114,7 @@ The hosting platform is **deliberately undecided**. To keep it open, the server 
 
 1. Ship as a plain `Dockerfile` with no platform-specific configuration.
 2. Read all configuration from environment variables.
-3. Use a network-attached PostgreSQL instance (no local disk state).
+3. Persist to a SQLite file inside a mounted volume (`VOLUME ["/data"]`, `DATABASE_PATH`) — the one platform requirement this now implies is a host that can mount a persistent volume/disk at that path, which the current hosting target provides. See `docs/architecture/data-storage.md` §5 for why local disk state was chosen over a network-attached database.
 4. Run its own in-process scheduler (once the reminder worker is built) rather than relying on platform cron.
 
 Note that "no platform-level cron dependency" in point 4 is about the future reminder

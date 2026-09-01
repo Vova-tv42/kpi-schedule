@@ -14,43 +14,38 @@ with `curl`. This is the current setup-to-boot walkthrough.
 
 ## 1. Prerequisites
 
-- Go 1.23+
-- Docker (for Postgres)
+- Go 1.26+
+- No Docker, no external services — SQLite is just a file (Docker is only needed to test the
+  actual deployment container, see §9).
 
-## 2. Start Postgres
+## 2. Configure environment
 
 ```bash
 cd apps/server
-docker compose up -d
-docker compose ps   # wait for "healthy"
-```
-
-`compose.yaml` maps Postgres to **host port 5435**, not the default 5432 — deliberately, to
-avoid clashing with other projects' Postgres containers on the same machine. Adjust if 5435 is
-also taken locally.
-
-## 3. Configure environment
-
-```bash
 cp .env.example .env
 ```
 
-`INTERNAL_API_TOKEN` defaults to `dev` in `.env.example` — every `/api/v1/*` route except
-`/healthz` requires it in the `X-Internal-Token` header. There is no encryption key to
-generate any more — the server stores no credentials (see
+`DATABASE_PATH` defaults to `./data/kpi.db` in `.env.example` — the directory is created
+automatically on first run if missing. `INTERNAL_API_TOKEN` defaults to `dev` — every
+`/api/v1/*` route except `/healthz` requires it in the `X-Internal-Token` header. There is no
+encryption key to generate any more — the server stores no credentials (see
 [`docs/architecture/data-storage.md`](../architecture/data-storage.md) §3).
 
-## 4. Run the server
+## 3. Run the server
 
 ```bash
 set -a; source .env; set +a
 go run ./cmd/server
 ```
 
-Migrations apply automatically on startup (`internal/storage/migrations/`, via `goose`). The
-server listens on `HTTP_ADDR` (`:8080` by default).
+Migrations apply automatically on startup (`internal/storage/migrations/`, via `goose`,
+idempotent — a restart with the same `DATABASE_PATH` just logs "no migrations to run"). The
+server listens on `HTTP_ADDR` (`:8080` by default). The Campus API cache
+(`campus_cache` table, see `docs/architecture/data-storage.md` §5) persists in the same file,
+so a restart against an existing `DATABASE_PATH` reuses whatever's still fresh instead of
+re-fetching from `api.campus.kpi.ua`.
 
-## 5. Run the test suite
+## 4. Run the test suite
 
 ```bash
 go test ./...
@@ -59,7 +54,7 @@ go test ./...
 Covers week-parity math across year boundaries, subject normalization, and the merge
 engine's matching/discard rules (`internal/engine`).
 
-## 6. Smoke test
+## 5. Smoke test
 
 ```bash
 curl -s localhost:8080/healthz
@@ -77,17 +72,29 @@ curl -s -H "X-Internal-Token: dev" 'localhost:8080/api/v1/auth/status/999'   # N
 curl -s -o /dev/null -w '%{http_code}\n' 'localhost:8080/api/v1/time/current'
 ```
 
-## 7. Getting a real schedule in — currently not possible via curl
+## 6. Getting a real schedule in — currently not possible via curl
 
 There is deliberately no `POST /api/v1/auth/session` or `POST /api/v1/debug/mykpi/dump` any
 more, and the browser extension's schedule-sync ingestion endpoint doesn't exist yet. Until
 that endpoint is built, `user_lessons` can only be populated by inserting rows directly (e.g.
-via `psql`) for manual `/schedule/*` testing — there is no supported end-to-end path from a
-real `my.kpi.ua` account today.
+via a Go script against the `DATABASE_PATH` file) for manual `/schedule/*` testing — there is
+no supported end-to-end path from a real `my.kpi.ua` account today.
 
-## 8. Stop everything
+## 7. Testing the actual deployment shape (Docker + persistent volume)
+
+Day-to-day development doesn't need this — it's for verifying the `Dockerfile` and the
+persistent-volume setup the target host will use (see
+[`docs/architecture/data-storage.md`](../architecture/data-storage.md) §5).
 
 ```bash
-docker compose down          # keeps the named volume (data survives)
-docker compose down -v       # also deletes the volume
+docker compose up -d --build
+docker compose ps
+curl -s localhost:8080/healthz
+
+docker compose restart server   # simulates the VM sleeping/waking
+curl -s -H "X-Internal-Token: dev" 'localhost:8080/api/v1/groups?query=ІП-54'
+# should respond fast — served from the persisted campus_cache, not a fresh Campus API fetch
+
+docker compose down             # keeps the named volume (data survives)
+docker compose down -v          # also deletes the volume
 ```

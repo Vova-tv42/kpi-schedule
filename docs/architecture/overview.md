@@ -41,8 +41,7 @@ flowchart TD
         IngestService["Schedule Sync/Ingest Service"]
         CampusClient["Campus API Client"]
         MergeEngine["Schedule Merging & Enrichment Engine"]
-        CacheLayer["In-Memory Cache"]
-        DB[(PostgreSQL Storage)]
+        DB[(SQLite Storage + Disk-Backed Cache)]
     end
 
     subgraph ExternalServices["External KPI Systems"]

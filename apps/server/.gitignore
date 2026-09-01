@@ -1,6 +1,9 @@
 # Local secrets — copy .env.example instead
 .env
 
+# Local SQLite database (dev DATABASE_PATH default) and its WAL files
+/data/
+
 # Build output
 /server
 /kpi-schedule-bot

@@ -21,8 +21,7 @@
 | :--- | :--- | :--- |
 | Personal schedule (merged/enriched lessons) | **Yes** — `user_lessons` | It is the point of the product. |
 | `my.kpi.ua` session cookies / any credentials | **No, never** | The server no longer authenticates to `my.kpi.ua` at all. The browser extension does that client-side, in the student's own browser, and only ever sends the server an already-parsed schedule. There is nothing to store or protect. |
-| Group schedule (`api.campus.kpi.ua`) | **No** | Public, cheap to fetch, and would go stale silently. Cached in-memory only (`internal/cache`, TTL 6h), never written to Postgres. |
-| Group/lecturer catalogs, lesson-slot times | **No** | Same reasoning; in-memory TTL cache (24h). |
+| Group schedule, group/lecturer catalogs, lesson-slot times, current-time (`api.campus.kpi.ua`) | **Yes** — `campus_cache` | Public and cheap to re-fetch, but deliberately persisted to *disk* (not RAM) so the cache survives the host VM sleeping and waking — see §5. |
 
 ## 2. Schema
 
@@ -34,11 +33,23 @@ user_lessons         (id, user_id FK, date, week, day, slot, start_time, end_tim
                        lecturer_id, lecturer_name, location_title, location_uri, enriched,
                        is_recurring,
                        UNIQUE (user_id, date, start_time, subject_norm))
+campus_cache         (key PK, value /* JSON */, fetched_at)
 ```
 
 Migrations live in `apps/server/internal/storage/migrations/` (embedded, applied on startup
 via `goose`). `00001_init.sql` was edited in place (again) to drop `user_sessions` rather
 than layered with a new migration file — nothing is deployed yet.
+
+**Engine: SQLite, not PostgreSQL** (`modernc.org/sqlite`, pure Go — no CGO, so it stays
+compatible with the distroless final image). This reverses an earlier decision recorded in
+[`docs/project-repository.md`](../project-repository.md) §3.1 ("not SQLite — deployment
+targets have ephemeral disks"); see §5 below for why. `database/sql` is used directly
+(`internal/storage/db.go`), with `SetMaxOpenConns(1)` to serialize all access through
+SQLite's single writer rather than juggling `SQLITE_BUSY` retries. IDs are app-generated
+UUIDs (`uuid.New()` before insert) rather than a DB-side default, and timestamps are set from
+Go (`time.Now().UTC()`) rather than SQL `DEFAULT`, both because SQLite has no
+`gen_random_uuid()`/`now()` equivalent that plays well with the DSN's `_time_format=sqlite`
+round-tripping.
 
 `telegram_id` is the external key even though the Telegram bot doesn't exist yet in this
 iteration — the API is tested manually with an arbitrary integer, and no schema change will
@@ -94,3 +105,30 @@ data changes is a push from the browser extension.
   plus margin) — meaning "the extension hasn't pushed an update in a while," not "your
   session expired" (there is no session to expire). The old `session_status` field
   (`active`/`expired`) is gone entirely along with the session concept.
+
+## 5. Disk-Backed Campus API Cache (SQLite, Not In-Memory)
+
+The hosting plan for this server is a VM that **sleeps when idle** (backed by a persistent
+disk) to save cost. An in-memory cache (the old `internal/cache.TTL[V]`) is wiped every time
+the VM sleeps and its process is torn down, so every wake would cause a cold-start burst of
+re-fetches against `api.campus.kpi.ua` (group catalog, per-group schedules, lesson slots,
+current time) before the server could serve a single request cheaply. Moving that cache onto
+disk — SQLite lives in the same persistent-disk-backed file as `user_lessons` — means a value
+fetched before the VM slept is still warm on wake.
+
+- **Table**: `campus_cache (key TEXT PK, value TEXT /* JSON */, fetched_at TIMESTAMP)`.
+- **API**: `storage.DB.CacheGet(ctx, key, maxAge, &out) (bool, error)` /
+  `storage.DB.CacheSet(ctx, key, value) error` (`internal/storage/campuscache.go`) —
+  JSON-encodes the value, and treats an entry as a miss once `time.Since(fetched_at) >
+  maxAge`, mirroring the old TTL semantics exactly.
+- **Callers**: `internal/campus/client.go`'s `cachedJSON` helper wraps every Campus API call
+  with the same TTLs the in-memory cache used — `time/current` 1 min, lesson slots 24h, group
+  catalog 24h, per-group schedule 6h (keyed by group ID).
+- **What did *not* change**: the per-IP rate limiter (`internal/api/middleware.go`,
+  `github.com/go-chi/httprate`) stays in-memory on purpose. Its window is 1 minute, and any
+  VM sleep cycle is guaranteed to exceed that — losing the in-memory counter on sleep is a
+  non-issue, so persisting it would only add write load for no benefit. See
+  [`error-handling-resilience.md`](error-handling-resilience.md) §5.
+- **Deployment**: the SQLite file lives at `DATABASE_PATH` (default `/data/kpi.db` in the
+  container), which must be a mounted volume backed by the host's persistent disk — see the
+  `Dockerfile`'s `VOLUME ["/data"]` and `docs/project-repository.md` §4.2.

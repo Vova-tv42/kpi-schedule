@@ -1,13 +1,11 @@
 -- +goose Up
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
 CREATE TABLE users (
-    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    telegram_id  bigint NOT NULL UNIQUE,
-    group_id     integer,
-    group_name   text,
-    created_at   timestamptz NOT NULL DEFAULT now(),
-    updated_at   timestamptz NOT NULL DEFAULT now()
+    id           TEXT PRIMARY KEY,
+    telegram_id  INTEGER NOT NULL UNIQUE,
+    group_id     INTEGER,
+    group_name   TEXT,
+    created_at   TIMESTAMP NOT NULL,
+    updated_at   TIMESTAMP NOT NULL
 );
 
 -- No table stores my.kpi.ua credentials. The browser extension authenticates
@@ -16,11 +14,11 @@ CREATE TABLE users (
 -- lesson list here — the server never sees or stores raw session cookies.
 -- See docs/architecture/data-storage.md §1 and docs/extension/browser-extension-design.md.
 CREATE TABLE user_schedule_state (
-    user_id            uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    refreshed_at       timestamptz NOT NULL DEFAULT now(),
-    lesson_count       integer NOT NULL DEFAULT 0,
-    enrichment_status  text NOT NULL DEFAULT 'none' CHECK (enrichment_status IN ('full', 'degraded', 'none')),
-    last_error         text
+    user_id            TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    refreshed_at       TIMESTAMP NOT NULL,
+    lesson_count       INTEGER NOT NULL DEFAULT 0,
+    enrichment_status  TEXT NOT NULL DEFAULT 'none' CHECK (enrichment_status IN ('full', 'degraded', 'none')),
+    last_error         TEXT
 );
 
 -- Each row is one concrete, dated class occurrence, as returned directly by
@@ -29,36 +27,49 @@ CREATE TABLE user_schedule_state (
 -- `date` at refresh time and stored for display grouping and for matching
 -- against the Campus API's week-pattern schedule; `date` is authoritative.
 CREATE TABLE user_lessons (
-    id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id        uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    date           date NOT NULL,
-    week           smallint NOT NULL CHECK (week IN (1, 2)),
-    day            smallint NOT NULL CHECK (day BETWEEN 1 AND 7),
-    slot           smallint NOT NULL DEFAULT 0 CHECK (slot BETWEEN 0 AND 7),
-    start_time     text NOT NULL,
-    end_time       text NOT NULL DEFAULT '',
-    subject        text NOT NULL,
-    subject_norm   text NOT NULL,
-    tag            text NOT NULL DEFAULT '',
-    teacher_raw    text NOT NULL DEFAULT '',
-    location_raw   text NOT NULL DEFAULT '',
-    lecturer_id    text,
-    lecturer_name  text,
-    location_title text,
-    location_uri   text,
-    enriched       boolean NOT NULL DEFAULT false,
+    id             TEXT PRIMARY KEY,
+    user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    date           TIMESTAMP NOT NULL,
+    week           INTEGER NOT NULL CHECK (week IN (1, 2)),
+    day            INTEGER NOT NULL CHECK (day BETWEEN 1 AND 7),
+    slot           INTEGER NOT NULL DEFAULT 0 CHECK (slot BETWEEN 0 AND 7),
+    start_time     TEXT NOT NULL,
+    end_time       TEXT NOT NULL DEFAULT '',
+    subject        TEXT NOT NULL,
+    subject_norm   TEXT NOT NULL,
+    tag            TEXT NOT NULL DEFAULT '',
+    teacher_raw    TEXT NOT NULL DEFAULT '',
+    location_raw   TEXT NOT NULL DEFAULT '',
+    lecturer_id    TEXT,
+    lecturer_name  TEXT,
+    location_title TEXT,
+    location_uri   TEXT,
+    enriched       BOOLEAN NOT NULL DEFAULT 0,
     -- True if this lesson happens every week of its `week` parity; false if
     -- it only occurs on specific calendar dates (per the matched Campus
     -- group lesson's dates[]). Defaults true when unenriched. Read paths use
     -- this to exclude one-off/irregular lessons from the generic /week
     -- template view — see docs/architecture/merging-engine.md §6.
-    is_recurring   boolean NOT NULL DEFAULT true,
+    is_recurring   BOOLEAN NOT NULL DEFAULT 1,
     UNIQUE (user_id, date, start_time, subject_norm)
 );
 
 CREATE INDEX idx_user_lessons_user_date ON user_lessons (user_id, date);
 
+-- Disk-backed replacement for the old in-memory internal/cache TTL map.
+-- Generic JSON key/value cache for api.campus.kpi.ua responses (current time,
+-- lesson slots, group catalog, per-group schedules). Living on disk (rather
+-- than in RAM) means a cache warmed before the host VM goes to sleep is still
+-- warm on wake, instead of forcing a cold-start burst of re-fetches from the
+-- Campus API — see docs/architecture/data-storage.md §5.
+CREATE TABLE campus_cache (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    fetched_at TIMESTAMP NOT NULL
+);
+
 -- +goose Down
+DROP TABLE campus_cache;
 DROP TABLE user_lessons;
 DROP TABLE user_schedule_state;
 DROP TABLE users;

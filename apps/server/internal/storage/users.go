@@ -2,11 +2,12 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"kpi-schedule-bot/server/internal/model"
 )
@@ -16,15 +17,16 @@ var ErrNotFound = errors.New("not found")
 // UpsertUser creates the user row if absent, or updates group_id/group_name
 // if provided and the row already exists. Returns the resulting user.
 func (db *DB) UpsertUser(ctx context.Context, telegramID int64, groupID *int, groupName *string) (model.User, error) {
-	row := db.Pool.QueryRow(ctx, `
-		INSERT INTO users (telegram_id, group_id, group_name)
-		VALUES ($1, $2, $3)
+	now := time.Now().UTC()
+	row := db.SQL.QueryRowContext(ctx, `
+		INSERT INTO users (id, telegram_id, group_id, group_name, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (telegram_id) DO UPDATE
-		SET group_id = COALESCE(EXCLUDED.group_id, users.group_id),
-		    group_name = COALESCE(EXCLUDED.group_name, users.group_name),
-		    updated_at = now()
+		SET group_id = COALESCE(excluded.group_id, users.group_id),
+		    group_name = COALESCE(excluded.group_name, users.group_name),
+		    updated_at = excluded.updated_at
 		RETURNING id, telegram_id, group_id, group_name, created_at, updated_at
-	`, telegramID, groupID, groupName)
+	`, uuid.New(), telegramID, groupID, groupName, now, now)
 
 	var u model.User
 	if err := row.Scan(&u.ID, &u.TelegramID, &u.GroupID, &u.GroupName, &u.CreatedAt, &u.UpdatedAt); err != nil {
@@ -34,14 +36,14 @@ func (db *DB) UpsertUser(ctx context.Context, telegramID int64, groupID *int, gr
 }
 
 func (db *DB) GetUserByTelegramID(ctx context.Context, telegramID int64) (model.User, error) {
-	row := db.Pool.QueryRow(ctx, `
+	row := db.SQL.QueryRowContext(ctx, `
 		SELECT id, telegram_id, group_id, group_name, created_at, updated_at
-		FROM users WHERE telegram_id = $1
+		FROM users WHERE telegram_id = ?
 	`, telegramID)
 
 	var u model.User
 	if err := row.Scan(&u.ID, &u.TelegramID, &u.GroupID, &u.GroupName, &u.CreatedAt, &u.UpdatedAt); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return model.User{}, ErrNotFound
 		}
 		return model.User{}, fmt.Errorf("fetching user: %w", err)
@@ -49,13 +51,17 @@ func (db *DB) GetUserByTelegramID(ctx context.Context, telegramID int64) (model.
 	return u, nil
 }
 
-// DeleteUser removes the user and, via ON DELETE CASCADE, their session and lessons.
+// DeleteUser removes the user and, via ON DELETE CASCADE, their schedule state and lessons.
 func (db *DB) DeleteUser(ctx context.Context, id uuid.UUID) error {
-	tag, err := db.Pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, id)
+	res, err := db.SQL.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("deleting user: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("deleting user: %w", err)
+	}
+	if n == 0 {
 		return ErrNotFound
 	}
 	return nil

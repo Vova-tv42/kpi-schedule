@@ -25,19 +25,19 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	if err := storage.Migrate(cfg.DatabaseURL); err != nil {
+	if err := storage.Migrate(cfg.DatabasePath); err != nil {
 		log.Fatalf("migrations: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	db, err := storage.Open(ctx, cfg.DatabaseURL)
+	db, err := storage.Open(ctx, cfg.DatabasePath)
 	cancel()
 	if err != nil {
 		log.Fatalf("db: %v", err)
 	}
 	defer db.Close()
 
-	campusClient := campus.NewClient()
+	campusClient := campus.NewClient(db)
 	svc := api.NewService(db, campusClient)
 
 	router := api.NewRouter(svc, cfg.InternalAPIToken)

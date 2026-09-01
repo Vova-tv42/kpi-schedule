@@ -1,20 +1,20 @@
+# Not required for day-to-day local development — SQLite needs no separate
+# service, so `go run ./cmd/server` with a local DATABASE_PATH is enough (see
+# docs/api/local-development.md). This compose file exists to test the actual
+# deployment shape: the Dockerfile + a named volume standing in for the
+# target host's persistent disk, so a container restart (or the VM
+# sleeping/waking) doesn't lose data.
 services:
-  postgres:
-    image: postgres:17-alpine
+  server:
+    build: .
     restart: unless-stopped
-    environment:
-      POSTGRES_USER: kpi
-      POSTGRES_PASSWORD: kpi
-      POSTGRES_DB: kpi_schedule
     ports:
-      - "5435:5432"
+      - "8080:8080"
+    environment:
+      DATABASE_PATH: /data/kpi.db
+      INTERNAL_API_TOKEN: dev
     volumes:
-      - kpi_pg_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U kpi -d kpi_schedule"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      - kpi_sqlite_data:/data
 
 volumes:
-  kpi_pg_data:
+  kpi_sqlite_data:
