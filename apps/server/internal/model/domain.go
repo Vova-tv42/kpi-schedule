@@ -6,13 +6,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type SessionStatus string
-
-const (
-	SessionActive  SessionStatus = "active"
-	SessionExpired SessionStatus = "expired"
-)
-
 type EnrichmentStatus string
 
 const (
@@ -33,25 +26,11 @@ type User struct {
 	UpdatedAt  time.Time
 }
 
-// UserSession holds the encrypted my.kpi.ua cookies for a user.
-type UserSession struct {
-	UserID         uuid.UUID
-	Ciphertext     []byte
-	UserAgent      string
-	Status         SessionStatus
-	SyncedAt       time.Time
-	LastCheckedAt  time.Time
-	LastError      *string
-}
-
-// Cookies is the decrypted cookie set posted by the client.
-type Cookies struct {
-	PHPSESSID string `json:"PHPSESSID"`
-	Identity  string `json:"_identity"`
-	Language  string `json:"language,omitempty"`
-}
-
-// ScheduleState tracks when a user's lesson set was last refreshed.
+// ScheduleState tracks when a user's lesson set was last synced. There is no
+// concept of a "session" any more — the server never sees my.kpi.ua
+// credentials (see docs/architecture/data-storage.md §1); a stale
+// RefreshedAt just means the browser extension hasn't pushed an update
+// recently, not that anything on the server has expired.
 type ScheduleState struct {
 	UserID           uuid.UUID
 	RefreshedAt      time.Time
@@ -95,4 +74,22 @@ type Lesson struct {
 	Lecturer    *Lecturer // Campus API enrichment: hashed ID + full name
 	Location    *Location // Campus API enrichment: room title + map URI
 	Enriched    bool
+}
+
+// ParsedLesson is one dated lesson occurrence in the shape a client submits
+// for merging — currently produced only by engine tests, but this is the
+// intended wire format for the future browser extension's schedule-sync
+// payload (see docs/architecture/data-storage.md §1 and
+// docs/extension/browser-extension-design.md): the extension authenticates
+// to my.kpi.ua using the student's own browser session and does the
+// fetch+parse client-side, so the server only ever receives this — never raw
+// HTML, raw JSON, or session cookies.
+type ParsedLesson struct {
+	Date        time.Time // calendar date (UTC midnight)
+	StartTime   string    // "HH:MM:SS"
+	EndTime     string    // "HH:MM:SS"
+	Subject     string
+	Tag         string // normalized: "lec", "prac", "lab", or "" if unrecognized
+	TeacherRaw  string
+	LocationRaw string
 }

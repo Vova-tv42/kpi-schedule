@@ -65,7 +65,6 @@ type dayView struct {
 	IsDayOff         bool         `json:"is_day_off"`
 	EnrichmentStatus string       `json:"enrichment_status"`
 	Stale            bool         `json:"stale"`
-	SessionStatus    string       `json:"session_status"`
 	Lessons          []lessonView `json:"lessons"`
 }
 
@@ -86,6 +85,5 @@ type weekView struct {
 	CurrentWeek      int             `json:"current_week"`
 	EnrichmentStatus string          `json:"enrichment_status"`
 	Stale            bool            `json:"stale"`
-	SessionStatus    string          `json:"session_status"`
 	Weeks            []weekBlockView `json:"weeks"`
 }

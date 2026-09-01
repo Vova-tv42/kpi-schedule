@@ -8,16 +8,13 @@ import (
 
 // Error codes, taken verbatim from docs/architecture/error-handling-resilience.md §4.
 const (
-	ErrAuthRequired           = "ERR_AUTH_REQUIRED"
-	ErrPersonalSessionExpired = "ERR_PERSONAL_SESSION_EXPIRED"
-	ErrScraperDOMChanged      = "ERR_SCRAPER_DOM_CHANGED"
-	ErrCampusAPIUnavailable   = "ERR_CAMPUS_API_UNAVAILABLE"
-	ErrGroupNotFound          = "ERR_GROUP_NOT_FOUND"
-	ErrInvalidSessionCookies  = "ERR_INVALID_SESSION_COOKIES"
-	ErrUserNotFound           = "ERR_USER_NOT_FOUND"
-	ErrInvalidRequest         = "ERR_INVALID_REQUEST"
-	ErrInternal               = "ERR_INTERNAL"
-	ErrUnauthorized           = "ERR_UNAUTHORIZED"
+	ErrAuthRequired         = "ERR_AUTH_REQUIRED"
+	ErrCampusAPIUnavailable = "ERR_CAMPUS_API_UNAVAILABLE"
+	ErrGroupNotFound        = "ERR_GROUP_NOT_FOUND"
+	ErrUserNotFound         = "ERR_USER_NOT_FOUND"
+	ErrInvalidRequest       = "ERR_INVALID_REQUEST"
+	ErrInternal             = "ERR_INTERNAL"
+	ErrUnauthorized         = "ERR_UNAUTHORIZED"
 )
 
 // APIError is the standard error envelope for every non-2xx JSON response.

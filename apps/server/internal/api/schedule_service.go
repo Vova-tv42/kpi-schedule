@@ -10,16 +10,17 @@ import (
 	"kpi-schedule-bot/server/internal/model"
 )
 
-// buildDay assembles the response for one calendar date. Since my.kpi.ua's
-// personal feed already returns exact-dated lesson instances, the stored
-// `date` column is authoritative and queried directly — no read-time
-// re-verification against the group schedule is needed (that was only ever
-// necessary to re-derive occurrence dates from the Campus API's week-pattern
-// `dates[]`, which the personal schedule no longer needs).
-func (s *Service) buildDay(ctx context.Context, user model.User, targetDate time.Time, forceRefresh bool) (dayView, error) {
-	stale, sessionStatus, enrichment, err := s.ensureFresh(ctx, user, forceRefresh)
+// buildDay assembles the response for one calendar date. Since a schedule
+// arrives as a client push (see docs/architecture/data-storage.md §1) rather
+// than a server-side fetch, this only ever reads what is already stored —
+// there is no inline refresh path.
+func (s *Service) buildDay(ctx context.Context, user model.User, targetDate time.Time) (dayView, error) {
+	hasData, stale, enrichment, err := s.scheduleFreshness(ctx, user)
 	if err != nil {
 		return dayView{}, err
+	}
+	if !hasData {
+		return dayView{}, ErrNoScheduleData
 	}
 
 	dayStart := time.Date(targetDate.Year(), targetDate.Month(), targetDate.Day(), 0, 0, 0, 0, time.UTC)
@@ -48,15 +49,17 @@ func (s *Service) buildDay(ctx context.Context, user model.User, targetDate time
 		IsDayOff:         len(views) == 0,
 		EnrichmentStatus: string(enrichment),
 		Stale:            stale,
-		SessionStatus:    string(sessionStatus),
 		Lessons:          views,
 	}, nil
 }
 
-func (s *Service) buildWeek(ctx context.Context, user model.User, weekFilter int, forceRefresh bool) (weekView, error) {
-	stale, sessionStatus, enrichment, err := s.ensureFresh(ctx, user, forceRefresh)
+func (s *Service) buildWeek(ctx context.Context, user model.User, weekFilter int) (weekView, error) {
+	hasData, stale, enrichment, err := s.scheduleFreshness(ctx, user)
 	if err != nil {
 		return weekView{}, err
+	}
+	if !hasData {
+		return weekView{}, ErrNoScheduleData
 	}
 
 	currentTime, err := s.campus.CurrentTime(ctx)
@@ -76,7 +79,6 @@ func (s *Service) buildWeek(ctx context.Context, user model.User, weekFilter int
 		CurrentWeek:      currentTime.CurrentWeek,
 		EnrichmentStatus: string(enrichment),
 		Stale:            stale,
-		SessionStatus:    string(sessionStatus),
 	}
 
 	// Pull a window wide enough to cover both academic-week parities around

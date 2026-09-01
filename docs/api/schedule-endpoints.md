@@ -2,13 +2,15 @@
 
 All schedule endpoints return the unified, deduplicated, and enriched schedule for the requested student.
 
-> **Status note.** Responses now also carry `stale` (bool), `session_status` (`active` /
-> `expired`), and `enrichment_status` (`full` / `degraded` / `none`) — see the no-cron refresh
-> policy in `docs/architecture/data-storage.md` §4. A lesson's `is_selective` field from the
-> original draft below has been dropped: it isn't honestly derivable from either source (it
-> would require knowing every elective the group offers, not just what the student attends).
-> Each lesson instead carries `enriched` (bool): whether it was matched against the group
-> schedule for lecturer/room enrichment, or is a raw, un-enriched personal entry.
+> **Correction (post-implementation, architecture decision).** The server no longer fetches
+> anything on a schedule read — see [`docs/architecture/data-storage.md`](../architecture/data-storage.md).
+> The `force_refresh` query parameter and `POST /api/v1/schedule/refresh` are **removed**:
+> there is nothing left for the server to refresh, since it has no credentials to fetch with.
+> Reads are purely passive lookups of what the (not-yet-built) browser extension has already
+> pushed; `401 ERR_AUTH_REQUIRED` is returned if nothing has ever been pushed for the user. The
+> `session_status` field is gone along with the session concept — `stale` is the only
+> freshness signal left, and it now means "the extension hasn't pushed in over 14 days," not
+> "your session expired."
 >
 > **Correction (post-implementation).** Each lesson now carries its own `date` (my.kpi.ua's
 > personal feed turned out to return exact-dated occurrences, not a recurring pattern — see
@@ -16,7 +18,8 @@ All schedule endpoints return the unified, deduplicated, and enriched schedule f
 > (e.g. `"Лекція"`) was dropped in favor of `tag` alone (`"lec"`/`"prac"`/`"lab"`) — it was
 > redundant. `teacher_raw`/`location_raw` are new: my.kpi.ua's own plain-text values, included
 > as a fallback alongside the resolved `lecturer`/`location` objects (present only when
-> `enriched: true`).
+> `enriched: true`). The `is_selective` field from the original draft was dropped: it isn't
+> honestly derivable from either source.
 
 ---
 
@@ -26,7 +29,6 @@ All schedule endpoints return the unified, deduplicated, and enriched schedule f
 - **Headers**: `X-Internal-Token: <INTERNAL_API_TOKEN>`
 - **Query Parameters**:
   - `telegram_id` (int64, required): The Telegram user ID.
-  - `force_refresh` (bool, optional): Force an inline re-scrape of `my.kpi.ua`. Default `false`.
 
 ### Response (`200 OK`)
 ```json
@@ -38,7 +40,6 @@ All schedule endpoints return the unified, deduplicated, and enriched schedule f
   "is_day_off": false,
   "enrichment_status": "full",
   "stale": false,
-  "session_status": "active",
   "lessons": [
     {
       "date": "2026-09-01",
@@ -82,6 +83,17 @@ All schedule endpoints return the unified, deduplicated, and enriched schedule f
 }
 ```
 
+### Error Response (`401 Unauthorized`)
+```json
+{
+  "success": false,
+  "error_code": "ERR_AUTH_REQUIRED",
+  "message": "no schedule data stored yet; sync the browser extension first",
+  "timestamp": "2026-09-01T10:15:00Z"
+}
+```
+Returned whenever nothing has ever been pushed for this `telegram_id`.
+
 ---
 
 ## 2. Get Schedule for Tomorrow
@@ -108,6 +120,8 @@ All schedule endpoints return the unified, deduplicated, and enriched schedule f
 {
   "telegram_id": 123456789,
   "current_week": 1,
+  "enrichment_status": "full",
+  "stale": false,
   "weeks": [
     {
       "week_number": 1,
@@ -144,19 +158,11 @@ All schedule endpoints return the unified, deduplicated, and enriched schedule f
   - `telegram_id` (int64, required)
   - `date` (string, required): Format `YYYY-MM-DD` (e.g. `2026-09-15`).
 
----
-
-## 5. Force Refresh
-
-- **Endpoint**: `POST /api/v1/schedule/refresh`
-- **Headers**: `X-Internal-Token: <INTERNAL_API_TOKEN>`
-- **Query Parameters**:
-  - `telegram_id` (int64, required)
-- **Response**: `200 OK` — `{"success": true, "enrichment_status": "full"}`
+*(Response structure is identical to `/api/v1/schedule/today`)*
 
 ---
 
-## 6. Group Search Directory
+## 5. Group Search Directory
 
 - **Endpoint**: `GET /api/v1/groups`
 - **Query Parameters**:

@@ -10,16 +10,11 @@ CREATE TABLE users (
     updated_at   timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE user_sessions (
-    user_id          uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    ciphertext       bytea NOT NULL,
-    user_agent       text NOT NULL DEFAULT '',
-    status           text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'expired')),
-    synced_at        timestamptz NOT NULL DEFAULT now(),
-    last_checked_at  timestamptz NOT NULL DEFAULT now(),
-    last_error       text
-);
-
+-- No table stores my.kpi.ua credentials. The browser extension authenticates
+-- to my.kpi.ua using the student's own already-logged-in browser session,
+-- extracts the parsed schedule client-side, and pushes only the resulting
+-- lesson list here — the server never sees or stores raw session cookies.
+-- See docs/architecture/data-storage.md §1 and docs/extension/browser-extension-design.md.
 CREATE TABLE user_schedule_state (
     user_id            uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     refreshed_at       timestamptz NOT NULL DEFAULT now(),
@@ -60,5 +55,4 @@ CREATE INDEX idx_user_lessons_user_date ON user_lessons (user_id, date);
 -- +goose Down
 DROP TABLE user_lessons;
 DROP TABLE user_schedule_state;
-DROP TABLE user_sessions;
 DROP TABLE users;

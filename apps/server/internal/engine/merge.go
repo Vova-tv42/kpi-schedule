@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"kpi-schedule-bot/server/internal/campus"
-	"kpi-schedule-bot/server/internal/mykpi"
+	"kpi-schedule-bot/server/internal/model"
 )
 
 // jaroWinkler returns a similarity score in [0,1]. Used as a fallback when an
@@ -186,7 +186,7 @@ func findMatch(groupSlots []groupSlot, week, day int, subjectNorm, tag string) *
 // never shown. week/day are derived per-lesson from its Date via WeekAt/ISODay,
 // anchored on referenceDate/referenceWeek (the Campus API's current-time
 // anchor at refresh time).
-func Merge(personal []mykpi.ParsedLesson, group campus.GroupScheduleResponse, slotTimes map[string]string, referenceDate time.Time, referenceWeek int) []MergedLesson {
+func Merge(personal []model.ParsedLesson, group campus.GroupScheduleResponse, slotTimes map[string]string, referenceDate time.Time, referenceWeek int) []MergedLesson {
 	groupSlots := flattenGroupSchedule(group)
 
 	merged := make([]MergedLesson, 0, len(personal))

@@ -1,8 +1,18 @@
 # Browser Extension Architecture & Design (Manifest V3)
 
+> **Correction (post-implementation, architecture decision).** The extension's responsibility
+> changed: it no longer relays `my.kpi.ua` session cookies to the backend at all. Instead it
+> performs the whole fetch-and-parse of the personal schedule **client-side**, in the
+> student's own browser session, and sends only the resulting parsed lesson list to the
+> backend. See [`docs/architecture/data-storage.md`](../architecture/data-storage.md) for the
+> rationale (no credential storage on the server) and
+> [`docs/schedules/main/data-extraction.md`](../schedules/main/data-extraction.md) for the
+> exact two-step fetch (shell page → FullCalendar events JSON) this document's flows now
+> replicate client-side. **Not implemented yet** — this document describes the target design.
+
 ## 1. Overview & Objective
 
-The **KPI Schedule Sync Extension** is a lightweight browser extension built with **WebExtensions Manifest V3** standards in **TypeScript**. Its single responsibility is to safely read the student's active authentication cookies from `https://my.kpi.ua` and synchronize them with the backend server using a one-time pairing code.
+The **KPI Schedule Sync Extension** is a lightweight browser extension built with **WebExtensions Manifest V3** standards in **TypeScript**. Its responsibility is to fetch and parse the student's personal schedule from `https://my.kpi.ua`, using the browser's own already-authenticated session, and push the parsed lesson list to the backend server. Raw session cookies never leave the browser.
 
 ---
 
@@ -24,12 +34,10 @@ The **KPI Schedule Sync Extension** is a lightweight browser extension built wit
     "default_title": "KPI Schedule Sync"
   },
   "permissions": [
-    "cookies",
     "storage"
   ],
   "host_permissions": [
     "https://my.kpi.ua/*",
-    "https://*.kpi.ua/*",
     "http://localhost:8080/*"
   ],
   "background": {
@@ -37,6 +45,11 @@ The **KPI Schedule Sync Extension** is a lightweight browser extension built wit
   }
 }
 ```
+
+No `cookies` permission is requested. The service worker fetches `my.kpi.ua` with
+`credentials: "include"` (covered by the `host_permissions` grant), so the browser attaches
+the student's existing session automatically — the extension never reads or inspects the
+cookie values themselves.
 
 ---
 
@@ -58,7 +71,9 @@ apps/extension/
 │   │   ├── popup.css              # Modern minimal styling
 │   │   └── popup.ts               # UI event handling & user feedback
 │   └── background/
-│       └── service-worker.ts      # Cookie extraction & backend sync handler
+│       ├── fetch-schedule.ts      # Replicates the shell-page → events-JSON two-step fetch
+│       ├── parse-schedule.ts      # Parses the FullCalendar JSON into the ParsedLesson shape
+│       └── service-worker.ts      # Orchestrates fetch → parse → sync-to-backend
 └── public/icons/
     ├── icon-16.png
     ├── icon-48.png
@@ -71,19 +86,27 @@ apps/extension/
 
 ```mermaid
 flowchart TD
-    Open["User opens extension popup"] --> CheckDomain{Is user logged in on my.kpi.ua?}
-    
-    CheckDomain -->|Cookies Found| ShowForm["Show 'Enter 6-digit Code' input"]
-    CheckDomain -->|No Cookies| ShowLoginHint["Show 'Please log in to my.kpi.ua first'"]
+    Open["User opens extension popup"] --> CheckLogin{Fetch calendar shell page}
 
-    ShowForm --> Submit["User enters code & clicks 'Sync'"]
-    Submit --> Worker["Service Worker sends cookies to Backend"]
-    
+    CheckLogin -->|200 OK, calendar loads| ShowForm["Show 'Sync Schedule' button"]
+    CheckLogin -->|Redirected to /user/login| ShowLoginHint["Show 'Please log in to my.kpi.ua first'"]
+
+    ShowForm --> Submit["User clicks 'Sync Schedule'"]
+    Submit --> FetchEvents["Fetch FullCalendar events JSON, in-browser"]
+    FetchEvents --> Parse["Parse into ParsedLesson list, client-side"]
+    Parse --> Worker["Service Worker POSTs parsed lessons to Backend"]
+
     Worker --> Result{Server Response}
-    Result -->|Success| ShowSuccess["Show '✅ Linked to @TelegramBot'"]
-    Result -->|Invalid Code| ShowCodeErr["Show 'Invalid or expired code'"]
+    Result -->|Success| ShowSuccess["Show '✅ Synced N lessons'"]
+    Result -->|Not linked to a Telegram account yet| ShowLinkErr["Show 'Link your Telegram account first — see /link'"]
     Result -->|Network Err| ShowNetErr["Show 'Server unreachable'"]
 ```
+
+The pairing mechanism that ties a browser (and its extension install) to a specific
+Telegram account — a one-time code from `/link`, a signed extension-install token, or
+something else — is not yet designed; it's a prerequisite for the "Not linked" branch above
+but out of scope for this document until the server-side ingestion endpoint exists (see
+[`docs/architecture/data-storage.md`](../architecture/data-storage.md) §4).
 
 ---
 
@@ -91,8 +114,11 @@ flowchart TD
 
 1. **Least Privilege Permissions**:
    - `host_permissions` are strictly confined to `my.kpi.ua` and the backend server.
+   - No `cookies` permission — the extension never reads raw session cookie values, only
+     relies on the browser attaching them automatically to same-session requests.
    - The extension never accesses browsing history, bookmarks, or other website data.
-2. **Local Processing**:
-   - Cookies are never transmitted to third parties or analytics services.
+2. **Nothing Sensitive Leaves the Browser**:
+   - The only network call to the backend is the parsed lesson list (subjects, times,
+     dates, plain-text teacher/location strings) — never a cookie, token, or credential.
 3. **Open Source & Auditable**:
    - The extension is fully open source; its TypeScript sources live in `apps/extension/src/` and the production bundle is built with source maps so it can be audited against them.

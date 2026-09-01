@@ -13,7 +13,6 @@ import (
 	"kpi-schedule-bot/server/internal/api"
 	"kpi-schedule-bot/server/internal/campus"
 	"kpi-schedule-bot/server/internal/config"
-	"kpi-schedule-bot/server/internal/mykpi"
 	"kpi-schedule-bot/server/internal/storage"
 )
 
@@ -39,10 +38,9 @@ func main() {
 	defer db.Close()
 
 	campusClient := campus.NewClient()
-	mykpiClient := mykpi.NewClient()
-	svc := api.NewService(db, campusClient, mykpiClient, cfg.SessionKey)
+	svc := api.NewService(db, campusClient)
 
-	router := api.NewRouter(svc, cfg.InternalAPIToken, cfg.DebugRoutes)
+	router := api.NewRouter(svc, cfg.InternalAPIToken)
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -51,7 +49,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("starting server", "addr", cfg.HTTPAddr, "debug_routes", cfg.DebugRoutes)
+		slog.Info("starting server", "addr", cfg.HTTPAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server: %v", err)
 		}

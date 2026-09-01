@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"kpi-schedule-bot/server/internal/campus"
-	"kpi-schedule-bot/server/internal/mykpi"
+	"kpi-schedule-bot/server/internal/model"
 )
 
 var testSlots = map[string]string{
@@ -20,7 +20,7 @@ const referenceWeek = 1
 
 func TestMergeEnrichesMatchingLesson(t *testing.T) {
 	// 2026-09-01 is a Tuesday (day 2) in week 1.
-	personal := []mykpi.ParsedLesson{
+	personal := []model.ParsedLesson{
 		{Date: date("2026-09-01"), StartTime: "10:25:00", Subject: "Технології DevOps", Tag: "prac"},
 	}
 	group := campus.GroupScheduleResponse{
@@ -63,7 +63,7 @@ func TestMergeEnrichesMatchingLesson(t *testing.T) {
 
 func TestMergeKeepsUnmatchedPersonalLesson(t *testing.T) {
 	// 2026-08-31 is a Monday (day 1) in week 1.
-	personal := []mykpi.ParsedLesson{
+	personal := []model.ParsedLesson{
 		{Date: date("2026-08-31"), StartTime: "08:30:00", Subject: "Невідомий курс", Tag: "lec"},
 	}
 	group := campus.GroupScheduleResponse{}
@@ -100,7 +100,7 @@ func TestMergeDiscardsGroupOnlyLessons(t *testing.T) {
 func TestMergeDoesNotEnrichAcrossDifferentDayOrWeek(t *testing.T) {
 	// 2026-09-09 is a Wednesday (day 3) in week 2 (one week after the
 	// reference Tuesday in week 1).
-	personal := []mykpi.ParsedLesson{
+	personal := []model.ParsedLesson{
 		{Date: date("2026-09-09"), StartTime: "08:30:00", Subject: "Математика", Tag: "lec"},
 	}
 	group := campus.GroupScheduleResponse{

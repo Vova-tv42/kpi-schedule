@@ -8,7 +8,7 @@ The Telegram Bot provides students with quick, frictionless access to their veri
 - **Interactive Inline Buttons**: Seamless switching between Days, Weeks, and Disciplines.
 - **Smart Enrichments**: Direct links to campus buildings/rooms (`https://kpi.ua/k-5`) and lecturer profiles.
 - **Morning Briefings**: Configurable automated reminders before the first class of the day.
-- **Session Health Alerts**: Immediate notification if the student's `my.kpi.ua` session expires.
+- **Stale Schedule Alerts**: Notification if the browser extension hasn't pushed an update in a while — there is no server-side session to expire any more, see [`docs/architecture/data-storage.md`](../architecture/data-storage.md) §4.
 
 ---
 
@@ -63,7 +63,8 @@ journey
       Student sends /link: 5: Student
       Bot provides 6-digit code: 5: Bot
       Student opens browser extension and enters code: 5: Student
-      Server validates session & notifies bot: 5: Server
+      Extension fetches+parses schedule client-side, pushes to server: 5: Student
+      Server merges & stores the pushed schedule, notifies bot: 5: Server
       Bot confirms successful pairing: 5: Bot
     section Daily Usage
       Bot delivers morning summary at 08:00: 5: Bot
@@ -91,7 +92,7 @@ The day/week navigation buttons (`◀️ Вчора` / `🔄 Оновити` / `
 
 The server runs an in-process scheduler (`apps/server/internal/scheduler/`):
 - **Morning Reminder Worker**: Fires every morning (e.g. at 07:30 or 08:00) for opted-in users who have classes scheduled on that day.
-- **Session Keep-Alive / Check Worker**: Periodically checks the validity of stored session cookies and alerts users gracefully if re-sync is required.
+- **Stale Schedule Check Worker**: Periodically checks `user_schedule_state.refreshed_at` and alerts users gracefully to re-sync the extension if it's gone stale (see [`docs/architecture/data-storage.md`](../architecture/data-storage.md) §4) — there are no session cookies to validate any more, only a push timestamp to watch.
 
 Per-user reminders are **not** individual cron entries. A single short-interval tick drains a table of due reminders (outbox pattern), so pending notifications survive restarts and redeploys.
 

@@ -1,13 +1,21 @@
 # System Architecture Overview
 
+> **Correction (post-implementation, architecture decision).** The flow below reflects the
+> current decision: the browser extension does the my.kpi.ua fetch **and** parse itself,
+> client-side, and pushes the finished schedule to the server. The server never receives or
+> stores `my.kpi.ua` credentials, and no longer runs a scraper of its own — see
+> [`docs/architecture/data-storage.md`](data-storage.md) for the rationale. The extension and
+> its server-side ingestion endpoint are **not built yet**; this document describes the
+> target shape.
+
 ## 1. High-Level Concept
 
 The KPI Personalized Schedule platform bridges two distinct data sources to deliver an accurate, noise-free timetable for university students:
 
 1. **Personalized Schedule (`my.kpi.ua`)**:
    - Contains only the exact elective courses and subgroup sessions chosen by the authenticated student.
-   - Lacks rich details like teacher IDs, classroom map links, and exact bi-weekly/periodic dates.
-   - Protected behind session-based authentication (Yii2 PHP / `PHPSESSID` / `_identity`).
+   - Lacks rich details like teacher IDs and classroom map links.
+   - Protected behind session-based authentication (Yii2 PHP / `PHPSESSID` / `_identity`) — handled entirely inside the student's own browser by the extension; the server is never involved in authenticating to `my.kpi.ua`.
 
 2. **Group Schedule (`api.campus.kpi.ua`)**:
    - Open and publicly accessible REST API for the entire academic group.
@@ -30,8 +38,7 @@ flowchart TD
 
     subgraph ServerLayer["Golang Backend Server"]
         APIGateway["REST API Router (Chi)"]
-        AuthService["Auth & Pairing Service"]
-        PersonalClient["MyKPI Scraper Client (goquery)"]
+        IngestService["Schedule Sync/Ingest Service"]
         CampusClient["Campus API Client"]
         MergeEngine["Schedule Merging & Enrichment Engine"]
         CacheLayer["In-Memory Cache"]
@@ -44,30 +51,22 @@ flowchart TD
         CDN["cdn.cloud.kpi.ua (Group Catalog)"]
     end
 
-    %% Auth Flow
-    User -->|1. /link command| TGBot
-    TGBot -->|2. Generate 6-digit Pair Code| AuthService
-    User -->|3. Enter Pair Code in Popup| BrowserExt
-    BrowserExt -->|4. Read PHPSESSID & _identity| MyKPI
-    BrowserExt -->|5. POST /api/v1/auth/sync-session| AuthService
-    AuthService -->|6. Store Encrypted Session| DB
+    %% Client-Side Fetch + Parse (no server involvement, no credentials leave the browser)
+    User -->|1. Logs into my.kpi.ua| MyKPI
+    BrowserExt -->|2. Fetch + parse schedule using the browser's own session| MyKPI
+
+    %% Push Flow — server never sees credentials
+    BrowserExt -->|3. POST parsed lesson list| APIGateway
+    APIGateway --> IngestService
+    IngestService -->|4. Fetch Group Lessons| CampusClient
+    CampusClient -->|5. GET /schedule/lessons?groupId=X| CampusAPI
+    IngestService --> MergeEngine
+    MergeEngine -->|6. Match & Enrich, then store| DB
 
     %% Query Flow
     User -->|7. /today or /week| TGBot
     TGBot -->|8. Request Schedule| APIGateway
-    APIGateway --> MergeEngine
-
-    %% Data Ingestion Flow
-    MergeEngine -->|9. Fetch with Session Cookies| PersonalClient
-    PersonalClient -->|10. GET /room/student/calendar| MyKPI
-    MergeEngine -->|11. Fetch Group Lessons| CampusClient
-    CampusClient -->|12. GET /schedule/lessons?groupId=X| CampusAPI
-    CampusClient -->|13. GET /time/current| CampusAPI
-
-    %% Enrichment & Response
-    MergeEngine -->|14. Match & Enrich| CacheLayer
-    CacheLayer -->|15. Return Clean Schedule| TGBot
-    TGBot -->|16. Formatted Telegram Message| User
+    APIGateway -->|9. Read stored lessons, no fetch| DB
 ```
 
 ---
@@ -75,18 +74,17 @@ flowchart TD
 ## 3. Core Architectural Components
 
 ### 3.1 Browser Extension (`apps/extension/`)
-- **Role**: Secure bridge between the student's authenticated browser session and the Go backend.
-- **Workflow**:
+- **Role**: The only part of the system that ever touches `my.kpi.ua` credentials. Fetches and parses the student's schedule client-side, in their own authenticated browser session, and pushes the result to the server. Nothing resembling a cookie ever leaves the browser.
+- **Workflow** (target, not yet built):
   1. Student logs into `my.kpi.ua` via browser (supporting password or KPI ID / Diia / BankID SSO).
-  2. Student requests a pairing code from the Telegram bot (`/link`).
-  3. Student opens the extension popup, enters the code, and clicks **"Sync Schedule"**.
-  4. Extension reads `my.kpi.ua` session cookies (`PHPSESSID`, `_identity`) and sends them over HTTPS to the backend.
+  2. Student requests a pairing code from the Telegram bot (`/link`), or the extension is configured directly with their Telegram ID (exact pairing UX still to be designed).
+  3. Extension fetches the calendar shell page and the FullCalendar events JSON using the browser's own cookies (replicating what `docs/schedules/main/data-extraction.md` documents), parses it into the `model.ParsedLesson` shape, and POSTs the parsed list to the backend.
 
 ### 3.2 Golang Backend API (`apps/server/internal/`)
-- **Scraper Service (`apps/server/internal/mykpi/`)**: Makes authenticated HTTP requests to `https://my.kpi.ua/room/student/calendar` using the stored session cookies to discover the student's FullCalendar events URL, then fetches `https://my.kpi.ua/calendar/studevents?id=<studentId>&start=&end=` — a JSON feed of concrete, exact-dated lesson occurrences (not a recurring pattern; see `docs/schedules/main/data-extraction.md`).
 - **Campus API Client (`apps/server/internal/campus/`)**: Queries `https://api.campus.kpi.ua/` for group schedules, current academic week, timeslots, and group lists.
-- **Merging Engine (`apps/server/internal/engine/`)**: Matches each enrolled class from the scraper with the corresponding group lesson object from the Campus API, applying date filtering and adding classroom/teacher info.
-- **Cache Layer (`apps/server/internal/cache/`)**: Caches group schedules (TTL 24h) and user personalized schedules (TTL 1-6h) to avoid rate limits and reduce scraping latency.
+- **Merging Engine (`apps/server/internal/engine/`)**: Matches each submitted personal lesson against the corresponding group lesson object from the Campus API, adding classroom/lecturer info and correcting tags. No longer does any date filtering — the personal source's own dates are already authoritative (see `docs/architecture/merging-engine.md`).
+- **Cache Layer (`apps/server/internal/cache/`)**: Caches group schedules (TTL 24h) and catalog/slot data (TTL 24h) to avoid rate limits.
+- There is no scraper package any more — `internal/mykpi` (the my.kpi.ua HTTP client/parser) was removed along with `internal/crypto` (cookie encryption) when this decision was made. The schedule-sync ingestion endpoint that will receive the extension's push is not implemented yet.
 
 ### 3.3 Telegram Bot (`apps/server/internal/bot/`)
 - **Role**: Primary UI for students to check daily/weekly schedules, customize reminders, and manage group bindings.
@@ -94,4 +92,4 @@ flowchart TD
   - Daily schedule (`/today`, `/tomorrow`) with classroom locations and direct links.
   - Weekly schedule (`/week1`, `/week2`, `/week`).
   - Automated morning reminders before the first class of the day.
-  - Session status monitoring with alerts if the university session expires.
+  - Alerts if the extension hasn't synced in a while (there is no "session" to expire any more — see `docs/architecture/data-storage.md` §4).

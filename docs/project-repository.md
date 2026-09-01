@@ -4,8 +4,8 @@
 
 This repository is a **monorepo** housing the complete ecosystem for the KPI Personalized Schedule service:
 
-- **Golang Backend (`apps/server/`)**: The entire backend — REST API, `my.kpi.ua` scraper, Campus API client, merging engine, caching, persistence, the scheduler, **and the Telegram bot itself**.
-- **Browser Extension (`apps/extension/`)**: Manifest V3 extension (TypeScript) that exports `my.kpi.ua` session cookies to the backend via a one-time pairing code.
+- **Golang Backend (`apps/server/`)**: The entire backend — REST API, Campus API client, merging engine, caching, persistence, the scheduler, **and the Telegram bot itself**. Never authenticates to `my.kpi.ua` or stores credentials — see [`docs/architecture/data-storage.md`](architecture/data-storage.md).
+- **Browser Extension (`apps/extension/`)**: Manifest V3 extension (TypeScript) that fetches and parses the student's `my.kpi.ua` schedule client-side, using the browser's own session, and pushes the resulting lesson list to the backend. **Not yet built** — see [`docs/extension/browser-extension-design.md`](extension/browser-extension-design.md).
 - **Documentation (`docs/`)**: Specifications, endpoint references, research findings, and architectural guidelines.
 
 > **Status: provisional.** The directory layout below — in particular the internal package breakdown of `apps/server/` — is the **expected** structure, not a frozen contract. Packages may be merged, split, renamed, or dropped as implementation reveals what is actually needed. Whoever changes it **must update this file in the same task** (see [`CLAUDE.md`](../CLAUDE.md)).
@@ -33,19 +33,22 @@ kpi-schedule-bot/
     │   │   ├── config/                 # Env-var config, fails fast on missing secrets
     │   │   ├── api/                    # chi router, handlers, orchestration (Service)
     │   │   ├── campus/                 # Client for api.campus.kpi.ua (TTL-cached)
-    │   │   ├── mykpi/                  # my.kpi.ua client: FullCalendar shell page + JSON events feed
     │   │   ├── engine/                 # Schedule merging, normalization, week-parity math
     │   │   ├── storage/                # PostgreSQL repository (pgx) + goose migrations
     │   │   ├── cache/                  # Generic in-memory TTL cache
-    │   │   ├── crypto/                 # AES-256-GCM cookie encryption
     │   │   └── model/                  # Shared domain structs, error codes
     │   ├── go.mod
     │   └── Dockerfile                  # Host-agnostic deployment artifact
     │
     │   # Not yet created — deferred, see docs/api/overview.md's "Note on the bot":
-    │   #   internal/bot/        (Telegram bot; API/cookies/engine are bot-ready)
-    │   #   internal/scheduler/  (cron; refresh is currently lazy-on-read, see
+    │   #   internal/bot/        (Telegram bot; API/engine are bot-ready)
+    │   #   internal/scheduler/  (cron — dropped entirely, not just deferred; the server
+    │   #                         has no credentials to refresh with any more, see
     │   #                         docs/architecture/data-storage.md §4)
+    │   #
+    │   # Removed (architecture decision, see docs/architecture/data-storage.md):
+    │   #   internal/mykpi/   (my.kpi.ua HTTP client/parser — now the extension's job)
+    │   #   internal/crypto/  (AES-256-GCM cookie encryption — nothing left to encrypt)
     │
     └── extension/                      # TypeScript + Manifest V3
         ├── src/popup/                  # Popup UI
@@ -74,10 +77,10 @@ These were considered and **intentionally left out** until a concrete need appea
 - **Language**: Go 1.23+
 - **HTTP Router**: `chi` (`github.com/go-chi/chi/v5`) — minimal overhead, readable middleware chaining.
 - **Telegram Bot**: `gotgbot/v2` (`github.com/PaulSonOfLars/gotgbot/v2`) — code-generated from the Bot API specification, fully type-safe, standard library only. Chosen because message *mutation* methods (`editMessageText`, `editMessageReplyMarkup`, `deleteMessage`, `answerCallbackQuery`) map 1:1 to the Bot API, which the inline-keyboard navigation depends on.
-- **my.kpi.ua Client**: standard library `net/http`, plus a small regexp extraction of the FullCalendar events URL embedded in the calendar shell page's inline script — no HTML table parsing needed (`my.kpi.ua`'s real lesson data comes from a JSON feed, not markup; see `docs/schedules/main/data-extraction.md`).
+- **my.kpi.ua Client**: none — the server never fetches `my.kpi.ua`. That fetch (a small regexp extraction of the FullCalendar events URL embedded in the calendar shell page's inline script, then the JSON events feed itself; see `docs/schedules/main/data-extraction.md`) is now the browser extension's job, done client-side.
 - **Persistence**: PostgreSQL via `pgx`. **Not SQLite** — deployment targets have ephemeral disks.
-- **Scheduling**: In-process cron (`github.com/go-co-op/gocron/v2`). No platform-level cron dependency, so the hosting choice stays open.
-- **Caching**: In-memory cache; group schedules TTL ~24h, personal schedules TTL 1–6h.
+- **Scheduling**: no schedule-refresh cron — the server cannot refresh a schedule on its own since it has no credentials to fetch with; the only way data changes is a push from the extension (see `docs/architecture/data-storage.md` §4). The not-yet-built Telegram bot's morning-reminder worker (`internal/scheduler/`, see `docs/bot/telegram-bot-design.md` §6) is a separate, unrelated concern and may still use in-process cron (`github.com/go-co-op/gocron/v2`) when it's built.
+- **Caching**: In-memory cache; group schedules TTL ~24h, catalog/slot data TTL 24h.
 - **Logging**: Structured logging via `log/slog`.
 
 ### 3.2 Browser Extension
@@ -86,6 +89,7 @@ These were considered and **intentionally left out** until a concrete need appea
 - **Language**: TypeScript.
 - **Build**: Vite + `@crxjs/vite-plugin`; **Bun** as package manager.
 - **Permissions**: `cookies`, `storage`, and `host_permissions` limited to `https://my.kpi.ua/*` and the backend origin.
+- **Not yet built** — see [`docs/extension/browser-extension-design.md`](extension/browser-extension-design.md) for the target design: it fetches and parses the schedule itself, then pushes parsed lessons (not cookies) to the backend.
 
 ---
 
@@ -106,7 +110,11 @@ The hosting platform is **deliberately undecided**. To keep it open, the server 
 1. Ship as a plain `Dockerfile` with no platform-specific configuration.
 2. Read all configuration from environment variables.
 3. Use a network-attached PostgreSQL instance (no local disk state).
-4. Run its own in-process scheduler rather than relying on platform cron.
+4. Run its own in-process scheduler (once the reminder worker is built) rather than relying on platform cron.
+
+Note that "no platform-level cron dependency" in point 4 is about the future reminder
+worker only — there is no schedule-*refresh* cron at all any more, since the server never
+self-triggers a `my.kpi.ua` fetch (see §3.1 above and `docs/architecture/data-storage.md` §4).
 
 ### 4.3 Telegram update delivery
 
@@ -121,4 +129,4 @@ Both modes drive identical handler code. Note that *sending* messages (e.g. sche
 
 1. **Simplicity Over Complexity**: Keep domain structures clean and flat. Avoid unnecessary abstractions — the omissions in §2.1 are the standard.
 2. **Explicit Error Handling**: Wrap errors with context (`fmt.Errorf("fetching group lessons: %w", err)`) and degrade gracefully for the user.
-3. **Resilience**: `api.campus.kpi.ua` is reliable and structured. `my.kpi.ua` is server-rendered HTML; scrapers must fail safely with clear alerts and never crash the server.
+3. **Resilience**: `api.campus.kpi.ua` is reliable and structured, but the server must still degrade gracefully (unenriched lessons, `enrichment_status: "degraded"`) if it's unreachable — see `docs/architecture/error-handling-resilience.md`. The server has no `my.kpi.ua` fetch of its own to worry about any more.

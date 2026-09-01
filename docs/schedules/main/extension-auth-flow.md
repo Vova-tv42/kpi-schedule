@@ -1,12 +1,24 @@
 # Browser Extension Authentication Flow
 
+> **Correction (post-implementation, architecture decision).** This document originally
+> described the extension reading `my.kpi.ua` session cookies via `chrome.cookies.getAll`
+> and relaying them to the server, which would store them AES-256-GCM-encrypted and do the
+> fetching itself. **That is no longer the plan.** The server never sees or stores
+> credentials — see [`docs/architecture/data-storage.md`](../../architecture/data-storage.md).
+> The extension now fetches and parses the schedule itself, client-side, using the browser's
+> own session (`fetch(..., { credentials: "include" })`, no `cookies` permission needed —
+> see [`docs/extension/browser-extension-design.md`](../../extension/browser-extension-design.md)),
+> and sends only the parsed lesson list to the server. **Not implemented yet**; the flow
+> below is the target design, and the pairing-code mechanic in particular is still
+> undesigned — see the note at the end of §2.
+
 ## 1. Overview
 
-Because `my.kpi.ua` uses HTTP-only and session cookies without a public OAuth API, the **Browser Extension** provides a seamless, secure, and user-friendly mechanism to bridge the student's browser session with their Telegram Bot account.
+Because `my.kpi.ua` uses HTTP-only session cookies without a public OAuth API, the **Browser Extension** is the only component that can read the student's personal schedule — it does so inside their own authenticated browser session, then bridges the result to their Telegram Bot account.
 
 ---
 
-## 2. Authentication Handshake Protocol
+## 2. Sync Flow (target design)
 
 ```mermaid
 sequenceDiagram
@@ -24,42 +36,57 @@ sequenceDiagram
 
     User->>MyKPI: Log in via browser (password or KPI ID SSO)
     User->>Ext: Click extension icon, enter code "742-918"
-    User->>Ext: Click "Sync with Telegram Bot"
+    User->>Ext: Click "Sync Schedule"
 
-    Ext->>MyKPI: chrome.cookies.getAll({domain: "my.kpi.ua"})
-    MyKPI-->>Ext: Return PHPSESSID, _identity, language cookies
+    Ext->>MyKPI: GET /room/student/calendar (browser's own session cookies attached automatically)
+    MyKPI-->>Ext: Calendar shell HTML (embeds the events feed URL)
+    Ext->>MyKPI: GET /calendar/studevents?id=...&start=...&end=...
+    MyKPI-->>Ext: FullCalendar events JSON
 
-    Ext->>Server: POST /api/v1/auth/sync-session<br/>{pair_code: "742918", cookies: [...]}
+    Ext->>Ext: Parse into ParsedLesson list (see docs/schedules/main/data-extraction.md)
 
-    Server->>MyKPI: Probe GET /room/student/calendar with cookies
-    MyKPI-->>Server: HTTP 200 OK (Valid student calendar HTML)
+    Ext->>Server: POST /api/v1/schedule/sync<br/>{pair_code: "742918", lessons: [...]}
 
-    Server->>Server: Encrypt & store session cookies linked to Telegram User ID
-    Server-->>Ext: Return {success: true, student_name: "..."}
-    Ext-->>User: Display "Successfully linked! You can close this tab."
+    Server->>Server: Resolve Telegram User ID from pair_code, merge lessons against Campus API, store
+    Server-->>Ext: Return {success: true, lesson_count: N}
+    Ext-->>User: Display "✅ Synced N lessons"
 
-    Server->>Bot: Trigger push event (Session Linked)
+    Server->>Bot: Trigger push event (Schedule Synced)
     Bot-->>User: Send confirmation: "✅ Розклад успішно синхронізовано!"
 ```
+
+The pairing-code mechanic (steps 1–4) is carried over unchanged in shape from the original
+design — a short-lived code from `/link` is still the most plausible way to tie a browser to
+a Telegram account — but it is **not implemented**: there is no `pair_code` table, no
+`/api/v1/schedule/sync` endpoint, and no Telegram bot yet. Treat this diagram as intent, not
+a built contract.
 
 ---
 
 ## 3. Data Transferred from Extension
 
-The extension collects only the necessary authentication parameters:
+The extension sends only the already-parsed schedule — never a cookie, token, or password:
 
 ```json
 {
   "pair_code": "742918",
-  "domain": "my.kpi.ua",
-  "cookies": {
-    "PHPSESSID": "eb659e5b8a5f5a4ea1d4f20ef1443af9",
-    "_identity": "39233868b6449f77b496598a9824806e3adf855c...",
-    "language": "uk"
-  },
-  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)..."
+  "lessons": [
+    {
+      "date": "2026-09-19",
+      "start_time": "08:30:00",
+      "end_time": "10:05:00",
+      "subject": "Технології DevOps",
+      "tag": "lec",
+      "teacher_raw": "Колумбет В. П.",
+      "location_raw": "lec., Онлайн Zoom"
+    }
+  ]
 }
 ```
+
+This mirrors `model.ParsedLesson` (`apps/server/internal/model/domain.go`) — see
+[`docs/architecture/data-storage.md`](../../architecture/data-storage.md) §4 for the
+envisioned request shape once the sync endpoint exists.
 
 ---
 
@@ -69,11 +96,12 @@ The extension collects only the necessary authentication parameters:
    - Pairing codes expire after 10 minutes and can only be used once.
    - Brute-force rate limiting: 5 attempts per IP / Telegram user before cooldown.
 
-2. **At-Rest Encryption**:
-   - Session cookies stored in the database are encrypted at rest using AES-256-GCM with a secret master key.
+2. **Nothing Sensitive Ever Reaches the Server**:
+   - No cookies, tokens, or passwords are ever transmitted. The server only ever receives
+     the parsed lesson list, which is not a credential — there is nothing to encrypt at rest.
 
 3. **No Password Stored**:
-   - The user's actual password or SSO credentials are never seen or stored by the bot or server.
+   - The user's actual password or SSO credentials are never seen or stored by the extension, bot, or server.
 
 4. **Extension Isolation**:
-   - The browser extension only requests access to `https://my.kpi.ua/*` cookies and domain. No access to other tabs or websites is requested.
+   - The browser extension only requests `host_permissions` for `https://my.kpi.ua/*` and the backend origin. No `cookies` permission, no access to other tabs or websites.

@@ -21,7 +21,7 @@ func (h *handlers) resolveUser(w http.ResponseWriter, r *http.Request) (model.Us
 	user, err := h.svc.db.GetUserByTelegramID(r.Context(), telegramID)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			model.WriteError(w, http.StatusUnauthorized, model.ErrAuthRequired, "user not linked; POST /api/v1/auth/session first")
+			model.WriteError(w, http.StatusUnauthorized, model.ErrAuthRequired, "user not linked; pair the browser extension first")
 			return model.User{}, false
 		}
 		model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, err.Error())
@@ -30,14 +30,10 @@ func (h *handlers) resolveUser(w http.ResponseWriter, r *http.Request) (model.Us
 	return user, true
 }
 
-func forceRefreshParam(r *http.Request) bool {
-	return r.URL.Query().Get("force_refresh") == "true"
-}
-
 func writeScheduleError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, ErrInvalidCookies):
-		model.WriteError(w, http.StatusUnauthorized, model.ErrPersonalSessionExpired, "the session for my.kpi.ua has expired; please re-authenticate")
+	case errors.Is(err, ErrNoScheduleData):
+		model.WriteError(w, http.StatusUnauthorized, model.ErrAuthRequired, "no schedule data stored yet; sync the browser extension first")
 	default:
 		model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, err.Error())
 	}
@@ -49,7 +45,7 @@ func (h *handlers) getScheduleToday(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	day, err := h.svc.buildDay(r.Context(), user, time.Now(), forceRefreshParam(r))
+	day, err := h.svc.buildDay(r.Context(), user, time.Now())
 	if err != nil {
 		writeScheduleError(w, err)
 		return
@@ -63,7 +59,7 @@ func (h *handlers) getScheduleTomorrow(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	day, err := h.svc.buildDay(r.Context(), user, time.Now().AddDate(0, 0, 1), forceRefreshParam(r))
+	day, err := h.svc.buildDay(r.Context(), user, time.Now().AddDate(0, 0, 1))
 	if err != nil {
 		writeScheduleError(w, err)
 		return
@@ -83,7 +79,7 @@ func (h *handlers) getScheduleDate(w http.ResponseWriter, r *http.Request) {
 		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "date query parameter must be YYYY-MM-DD")
 		return
 	}
-	day, err := h.svc.buildDay(r.Context(), user, target, forceRefreshParam(r))
+	day, err := h.svc.buildDay(r.Context(), user, target)
 	if err != nil {
 		writeScheduleError(w, err)
 		return
@@ -101,24 +97,10 @@ func (h *handlers) getScheduleWeek(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("week"); v != "" {
 		weekFilter, _ = strconv.Atoi(v)
 	}
-	week, err := h.svc.buildWeek(r.Context(), user, weekFilter, forceRefreshParam(r))
+	week, err := h.svc.buildWeek(r.Context(), user, weekFilter)
 	if err != nil {
 		writeScheduleError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, week)
-}
-
-// POST /api/v1/schedule/refresh
-func (h *handlers) postScheduleRefresh(w http.ResponseWriter, r *http.Request) {
-	user, ok := h.resolveUser(w, r)
-	if !ok {
-		return
-	}
-	status, err := h.svc.refreshSchedule(r.Context(), user)
-	if err != nil {
-		writeScheduleError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "enrichment_status": status})
 }
