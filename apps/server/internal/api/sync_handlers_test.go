@@ -160,9 +160,8 @@ func TestScheduleSyncWithToken(t *testing.T) {
 }
 
 func TestScheduleSyncRejectsRawTelegramIDWithoutInternalToken(t *testing.T) {
-	router, _, _ := setupTestServer(t)
+	router, _, internalToken := setupTestServer(t)
 
-	// Attempt to push schedule using only raw Telegram ID without pair code or token
 	syncReq := map[string]any{
 		"telegram_id": 999888777,
 		"lessons": []map[string]any{
@@ -174,13 +173,34 @@ func TestScheduleSyncRejectsRawTelegramIDWithoutInternalToken(t *testing.T) {
 		},
 	}
 	body, _ := json.Marshal(syncReq)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/schedule/sync", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
 
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 Unauthorized for unauthenticated telegram_id push, got %d", w.Code)
+	// 1. No token header -> 401
+	req1 := httptest.NewRequest(http.MethodPost, "/api/v1/schedule/sync", bytes.NewReader(body))
+	req1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+	router.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for no token header, got %d", w1.Code)
+	}
+
+	// 2. Invalid token header -> 401
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/schedule/sync", bytes.NewReader(body))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("X-Internal-Token", "wrong-secret-token")
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for invalid X-Internal-Token, got %d", w2.Code)
+	}
+
+	// 3. Valid token header -> 200 OK
+	req3 := httptest.NewRequest(http.MethodPost, "/api/v1/schedule/sync", bytes.NewReader(body))
+	req3.Header.Set("Content-Type", "application/json")
+	req3.Header.Set("X-Internal-Token", internalToken)
+	w3 := httptest.NewRecorder()
+	router.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for valid X-Internal-Token, got %d, body: %s", w3.Code, w3.Body.String())
 	}
 }
 

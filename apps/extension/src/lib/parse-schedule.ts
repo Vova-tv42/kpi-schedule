@@ -18,7 +18,7 @@ export function normalizeTag(typeStr?: string): string {
  */
 export function cleanTeacher(raw?: string): string {
   if (!raw) return '';
-  let cleaned = raw.replace(/^Викладачі:\s*/i, '').trim();
+  let cleaned = raw.replace(/^Викладач(?:і|я)?:\s*/i, '').trim();
   // Strip any accidental html tags if present
   cleaned = cleaned.replace(/<[^>]*>/g, '').trim();
   return cleaned;

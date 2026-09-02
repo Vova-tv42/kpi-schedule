@@ -19,6 +19,7 @@ describe('normalizeTag', () => {
 describe('cleanTeacher', () => {
   it('strips prefix and cleans HTML tags', () => {
     expect(cleanTeacher('Викладачі: Колумбет В. П.')).toBe('Колумбет В. П.');
+    expect(cleanTeacher('Викладач: Гуменний Д. О.')).toBe('Гуменний Д. О.');
     expect(cleanTeacher('<i><span title="test">Гуменний Д. О.</span></i>')).toBe('Гуменний Д. О.');
     expect(cleanTeacher('')).toBe('');
   });

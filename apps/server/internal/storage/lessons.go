@@ -40,6 +40,11 @@ func (db *DB) ReplaceLessons(ctx context.Context, userID uuid.UUID, lessons []mo
 				(id, user_id, date, week, day, slot, start_time, end_time, subject, subject_norm, tag,
 				 teacher_raw, location_raw, lecturer_id, lecturer_name, location_title, location_uri, enriched, is_recurring)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (user_id, date, start_time, subject_norm) DO UPDATE
+			SET end_time = excluded.end_time, tag = excluded.tag, teacher_raw = excluded.teacher_raw,
+			    location_raw = excluded.location_raw, lecturer_id = excluded.lecturer_id,
+			    lecturer_name = excluded.lecturer_name, location_title = excluded.location_title,
+			    location_uri = excluded.location_uri, enriched = excluded.enriched, is_recurring = excluded.is_recurring
 		`, uuid.New(), userID, l.Date, l.Week, l.Day, l.Slot, l.StartTime, l.EndTime, l.Subject, l.SubjectNorm, l.Tag,
 			l.TeacherRaw, l.LocationRaw, lecturerID, lecturerName, locTitle, locURI, l.Enriched, l.IsRecurring)
 		if err != nil {

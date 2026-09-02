@@ -184,7 +184,7 @@ func (h *handlers) postScheduleSync(w http.ResponseWriter, r *http.Request) {
 		user, err = h.svc.db.GetUserByToken(r.Context(), strings.TrimSpace(req.AuthToken))
 	} else if tokenHeader := r.Header.Get("X-User-Token"); tokenHeader != "" {
 		user, err = h.svc.db.GetUserByToken(r.Context(), strings.TrimSpace(tokenHeader))
-	} else if req.TelegramID != 0 && r.Header.Get("X-Internal-Token") != "" {
+	} else if req.TelegramID != 0 && h.internalToken != "" && r.Header.Get("X-Internal-Token") == h.internalToken {
 		// Only trusted internal services (e.g. Telegram Bot direct sync) can authenticate by TelegramID alone
 		user, err = h.svc.db.GetUserByTelegramID(r.Context(), req.TelegramID)
 		if errors.Is(err, storage.ErrNotFound) {

@@ -8,12 +8,13 @@ import (
 )
 
 type handlers struct {
-	svc *Service
+	svc           *Service
+	internalToken string
 }
 
 // NewRouter builds the full /api/v1 route tree.
 func NewRouter(svc *Service, internalToken string) http.Handler {
-	h := &handlers{svc: svc}
+	h := &handlers{svc: svc, internalToken: internalToken}
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
