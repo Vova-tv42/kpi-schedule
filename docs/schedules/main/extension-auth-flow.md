@@ -1,16 +1,6 @@
 # Browser Extension Authentication Flow
 
-> **Correction (post-implementation, architecture decision).** This document originally
-> described the extension reading `my.kpi.ua` session cookies via `chrome.cookies.getAll`
-> and relaying them to the server, which would store them AES-256-GCM-encrypted and do the
-> fetching itself. **That is no longer the plan.** The server never sees or stores
-> credentials — see [`docs/architecture/data-storage.md`](../../architecture/data-storage.md).
-> The extension now fetches and parses the schedule itself, client-side, using the browser's
-> own session (`fetch(..., { credentials: "include" })`, no `cookies` permission needed —
-> see [`docs/extension/browser-extension-design.md`](../../extension/browser-extension-design.md)),
-> and sends only the parsed lesson list to the server. **Not implemented yet**; the flow
-> below is the target design, and the pairing-code mechanic in particular is still
-> undesigned — see the note at the end of §2.
+> **Implementation status: Implemented.** The extension fetches and parses the schedule client-side, using the browser's own session (`fetch(..., { credentials: "include" })`, no `cookies` permission needed — see [`docs/extension/browser-extension-design.md`](../../extension/browser-extension-design.md)), and sends the parsed lesson list to the server. Telegram account pairing uses single-use 6-digit numeric codes generated via `POST /api/v1/auth/pair/generate` (by the Telegram bot) and verified via `POST /api/v1/auth/pair/verify` or directly with `POST /api/v1/schedule/sync`.
 
 ## 1. Overview
 

@@ -168,3 +168,46 @@ Returned whenever nothing has ever been pushed for this `telegram_id`.
 - **Query Parameters**:
   - `query` (string, optional): Search keyword (e.g. `ІП-54` or `ФІОТ`).
 - **Response**: List of matching groups with ID, name, and faculty.
+
+---
+
+## 6. Sync Schedule (Extension Ingestion Endpoint)
+
+Ingests parsed lesson occurrences pushed by the browser extension. Performs automatic group discovery and metadata enrichment via `api.campus.kpi.ua`.
+
+- **Endpoint**: `POST /api/v1/schedule/sync`
+- **Headers**:
+  - `Content-Type: application/json`
+  - `X-User-Token: <AUTH_TOKEN>` (optional header alternative to `auth_token` in body)
+- **Request Body**:
+```json
+{
+  "auth_token": "a1b2c3d4e5...",
+  "pair_code": "742918",
+  "telegram_id": 123456789,
+  "group_name": "ІП-21",
+  "lessons": [
+    {
+      "date": "2026-09-01",
+      "start_time": "08:30:00",
+      "end_time": "10:05:00",
+      "subject": "Технології DevOps",
+      "tag": "lec",
+      "teacher_raw": "Колумбет В. П.",
+      "location_raw": "lec., Онлайн Zoom"
+    }
+  ]
+}
+```
+
+### Response (`200 OK`)
+```json
+{
+  "success": true,
+  "lesson_count": 14,
+  "group_name": "ІП-21",
+  "enrichment_status": "full",
+  "synced_at": "2026-09-02T10:00:00Z"
+}
+```
+

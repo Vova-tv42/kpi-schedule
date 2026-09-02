@@ -68,7 +68,25 @@ CREATE TABLE campus_cache (
     fetched_at TIMESTAMP NOT NULL
 );
 
+-- Short-lived 6-digit pairing codes generated via Telegram bot /link command
+-- for browser extension authentication and linking.
+CREATE TABLE pairing_codes (
+    code         TEXT PRIMARY KEY,
+    telegram_id  INTEGER NOT NULL,
+    expires_at   TIMESTAMP NOT NULL
+);
+
+-- Extension authentication tokens issued upon successful pairing verification,
+-- allowing future sync requests without re-entering a pairing code.
+CREATE TABLE user_tokens (
+    token        TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at   TIMESTAMP NOT NULL
+);
+
 -- +goose Down
+DROP TABLE user_tokens;
+DROP TABLE pairing_codes;
 DROP TABLE campus_cache;
 DROP TABLE user_lessons;
 DROP TABLE user_schedule_state;

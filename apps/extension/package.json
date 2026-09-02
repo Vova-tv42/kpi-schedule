@@ -1,0 +1,16 @@
+{
+  "name": "kpi-schedule-sync-extension",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Синхронізація розкладу My KPI з Telegram-ботом",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.308",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0"
+  }
+}

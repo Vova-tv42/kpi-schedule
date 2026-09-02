@@ -51,3 +51,50 @@ delete any more — the server never held any.
   "message": "User unlinked and all stored lessons deleted."
 }
 ```
+
+---
+
+## 3. Generate Pairing Code (Telegram Bot)
+
+Generates a single-use 6-digit numeric pairing code (TTL: 10 minutes) for a Telegram user executing `/link`.
+
+- **Endpoint**: `POST /api/v1/auth/pair/generate`
+- **Headers**: `X-Internal-Token: <INTERNAL_API_TOKEN>`
+- **Request Body**:
+```json
+{
+  "telegram_id": 123456789
+}
+```
+- **Response (`200 OK`)**:
+```json
+{
+  "pair_code": "742918",
+  "expires_in": 600
+}
+```
+
+---
+
+## 4. Verify Pairing Code (Browser Extension)
+
+Exchanges a 6-digit pairing code entered in the extension popup for a permanent client `auth_token`.
+
+- **Endpoint**: `POST /api/v1/auth/pair/verify`
+- **Headers**: `Content-Type: application/json`
+- **Request Body**:
+```json
+{
+  "pair_code": "742918"
+}
+```
+- **Response (`200 OK`)**:
+```json
+{
+  "success": true,
+  "telegram_id": 123456789,
+  "auth_token": "a1b2c3d4e5f6...",
+  "status": "LINKED"
+}
+```
+

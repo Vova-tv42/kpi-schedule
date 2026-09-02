@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KPI Schedule Sync</title>
+  <link rel="stylesheet" href="./popup.css" />
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo-group">
+        <div class="logo-icon">KPI</div>
+        <div class="logo-title">
+          <h1>Розклад КПІ</h1>
+          <span class="subtitle">Синхронізація</span>
+        </div>
+      </div>
+      <div id="connection-badge" class="badge badge-unlinked">Не зв'язано</div>
+    </header>
+
+    <!-- Global Alert / Banner (Dynamic) -->
+    <div id="alert-box" class="alert-box hidden">
+      <div class="alert-icon" id="alert-icon">⚠️</div>
+      <div class="alert-content">
+        <h4 id="alert-title">Увага</h4>
+        <p id="alert-message"></p>
+        <div id="alert-actions" class="alert-actions hidden"></div>
+      </div>
+    </div>
+
+    <!-- Step 1: Telegram Pairing View (Visible when not linked) -->
+    <section id="view-unlinked" class="view-section">
+      <div class="card">
+        <h3>🔗 Підключення Telegram</h3>
+        <p class="description">
+          Для захисту ваших даних потрібна одноразова авторизація через бота:
+        </p>
+        <ol class="steps-list">
+          <li>Відкрийте Telegram-бота <strong>@kpi_schedule_bot</strong></li>
+          <li>Надішліть йому команду <code>/link</code></li>
+          <li>Введіть отриманий 6-значний код:</li>
+        </ol>
+
+        <form id="pair-form" class="pair-form">
+          <div class="input-group">
+            <input
+              type="text"
+              id="pair-code-input"
+              placeholder="123-456"
+              maxlength="7"
+              autocomplete="off"
+              required
+            />
+          </div>
+          <button type="submit" id="btn-pair" class="btn btn-primary">
+            <span>Зв'язати акаунт</span>
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Step 2: Main Sync View (Visible when linked) -->
+    <section id="view-linked" class="view-section hidden">
+      <div class="card info-card">
+        <div class="info-row">
+          <span class="info-label">Telegram ID:</span>
+          <span id="display-telegram-id" class="info-value">—</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Академічна група:</span>
+          <span id="display-group-name" class="info-value">—</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Останнє оновлення:</span>
+          <span id="display-last-sync" class="info-value">Не синхронізовано</span>
+        </div>
+      </div>
+
+      <!-- Sync Progress State -->
+      <div id="sync-progress" class="sync-progress hidden">
+        <div class="spinner"></div>
+        <p id="sync-progress-text">Виконується синхронізація...</p>
+      </div>
+
+      <!-- Primary Action -->
+      <button id="btn-sync" class="btn btn-primary btn-large">
+        <span class="btn-icon">🔄</span>
+        <span>Синхронізувати розклад</span>
+      </button>
+    </section>
+
+    <!-- Settings / Footer -->
+    <footer class="footer">
+      <button id="btn-toggle-settings" class="btn-link">⚙️ Налаштування</button>
+      <div id="settings-panel" class="settings-panel hidden">
+        <div class="form-group">
+          <label for="input-backend-url">Адреса сервера:</label>
+          <input type="url" id="input-backend-url" value="http://localhost:8080" />
+        </div>
+        <div class="settings-buttons">
+          <button id="btn-save-settings" class="btn btn-secondary btn-small">Зберегти</button>
+          <button id="btn-unlink" class="btn btn-danger btn-small">Від'єднати Telegram</button>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <script type="module" src="./popup.ts"></script>
+</body>
+</html>

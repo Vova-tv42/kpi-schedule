@@ -32,6 +32,23 @@ func internalTokenMiddleware(expected string) func(http.Handler) http.Handler {
 // docs/architecture/error-handling-resilience.md §5.
 const requestsPerMinutePerIP = 20
 
+// corsMiddleware handles preflight OPTIONS requests and sets CORS headers
+// so the browser extension (chrome-extension://*) can communicate with the server.
+func corsMiddleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Internal-Token, X-User-Token")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // ipRateLimitMiddleware rate-limits by the client IP resolved via
 // middleware.ClientIPFromRemoteAddr (see router.go) — the raw TCP peer, not
 // a spoofable header, since this server isn't known to sit behind a trusted
@@ -48,3 +65,5 @@ func ipRateLimitMiddleware() func(http.Handler) http.Handler {
 		}),
 	)
 }
+
+
