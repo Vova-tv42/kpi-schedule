@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"kpi-schedule-bot/server/internal/campus"
@@ -28,6 +29,27 @@ type Service struct {
 
 func NewService(db *storage.DB, campusClient *campus.Client) *Service {
 	return &Service{db: db, campus: campusClient}
+}
+
+// GeneratePairCode creates a fresh one-time pairing code for telegramID,
+// retrying on the rare code collision. Shared by the HTTP endpoint
+// (sync_handlers.go, POST /api/v1/auth/pair/generate) and the Telegram
+// bot's /link handler (internal/bot), which calls this in-process.
+func (s *Service) GeneratePairCode(ctx context.Context, telegramID int64) (code string, expiresIn int, err error) {
+	expiresAt := time.Now().UTC().Add(10 * time.Minute)
+	for attempt := 0; attempt < 5; attempt++ {
+		code, err = generate6DigitCode()
+		if err != nil {
+			return "", 0, fmt.Errorf("generating code: %w", err)
+		}
+		if err = s.db.CreatePairingCode(ctx, code, telegramID, expiresAt); err == nil {
+			return code, 600, nil
+		}
+		if !errors.Is(err, storage.ErrCodeCollision) {
+			return "", 0, err
+		}
+	}
+	return "", 0, fmt.Errorf("failed to generate unique pairing code after retries")
 }
 
 // scheduleFreshness reports whether a user has a stored schedule and how

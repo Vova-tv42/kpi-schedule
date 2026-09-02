@@ -1,6 +1,8 @@
 # Telegram Bot Architecture & User Experience
 
-> **Runtime note.** The bot is **not a separate service**. It runs inside the single Go backend (`apps/server/internal/bot/`, using `gotgbot/v2`) and shares its process, database, cache, and scheduler. Updates arrive via webhook (`POST /api/v1/telegram/webhook`) in production and via long polling in local development. See [`docs/project-repository.md` §4.1](../project-repository.md) for the rationale.
+> **Runtime note.** The bot is **not a separate service**. It runs inside the single Go backend (`apps/server/internal/bot/`, using `gotgbot/v2`) and shares its process, database, cache, and scheduler. It calls `internal/api.Service` and `internal/storage.DB` directly, in-process — not over HTTP with `X-Internal-Token`, even though the `/api/v1/auth/pair/generate` and `/api/v1/schedule/*` endpoints exist and are internal-token-protected for other internal/admin callers. Updates arrive via webhook (`POST /api/v1/telegram/webhook`) in production (**not implemented yet** — needs its own per-Telegram-user rate limiting, see `docs/architecture/error-handling-resilience.md` §5) and via long polling in local development (implemented). See [`docs/project-repository.md` §4.1](../project-repository.md) for the rationale.
+>
+> **Implementation status.** `/start`, `/link`, and `/today` (with ◀️/🔄/▶️ inline day-navigation that edits the message in place) are implemented. `/tomorrow`, `/week`, `/group`, `/settings`, `/help`, morning reminders, and the stale-schedule background check are **not implemented yet** — see §6.
 
 ## 1. Bot Purpose & Features
 
@@ -14,16 +16,16 @@ The Telegram Bot provides students with quick, frictionless access to their veri
 
 ## 2. Command Reference
 
-| Command | Action Description |
-| :--- | :--- |
-| `/start` | Welcome guide, onboarding instructions, and main menu. |
-| `/link` | Generates a 6-digit one-time code for Browser Extension pairing. |
-| `/today` | Shows today's classes with locations and teacher names. |
-| `/tomorrow` | Shows tomorrow's classes. |
-| `/week` | Shows the full timetable for the current academic week (Week 1 or Week 2). |
-| `/group` | Set or change the academic group (e.g. `ІП-21`). |
-| `/settings` | Manage morning reminders, timezone, and account linking status. |
-| `/help` | FAQ, troubleshooting, and links to web extension. |
+| Command | Status | Action Description |
+| :--- | :--- | :--- |
+| `/start` | ✅ Implemented | Welcome guide, onboarding instructions, and main menu. |
+| `/link` | ✅ Implemented | Generates a 6-digit one-time code for Browser Extension pairing. |
+| `/today` | ✅ Implemented | Shows today's classes with locations and teacher names, with ◀️/🔄/▶️ inline day-navigation. |
+| `/tomorrow` | Not yet built | Shows tomorrow's classes. |
+| `/week` | Not yet built | Shows the full timetable for the current academic week (Week 1 or Week 2). |
+| `/group` | Not yet built | Set or change the academic group (e.g. `ІП-21`). |
+| `/settings` | Not yet built | Manage morning reminders, timezone, and account linking status. |
+| `/help` | Not yet built | FAQ, troubleshooting, and links to web extension. |
 
 ---
 
@@ -89,6 +91,10 @@ The day/week navigation buttons (`◀️ Вчора` / `🔄 Оновити` / `
 ---
 
 ## 6. Automated Background Worker
+
+> **Not implemented yet.** `apps/server/internal/scheduler/` does not exist yet, and there is
+> no DB table backing per-user reminder settings or an outbox of due reminders either. The
+> design below is the target shape.
 
 The server runs an in-process scheduler (`apps/server/internal/scheduler/`):
 - **Morning Reminder Worker**: Fires every morning (e.g. at 07:30 or 08:00) for opted-in users who have classes scheduled on that day.

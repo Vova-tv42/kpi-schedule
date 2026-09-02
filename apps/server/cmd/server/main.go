@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"kpi-schedule-bot/server/internal/api"
+	"kpi-schedule-bot/server/internal/bot"
 	"kpi-schedule-bot/server/internal/campus"
 	"kpi-schedule-bot/server/internal/config"
 	"kpi-schedule-bot/server/internal/storage"
@@ -42,6 +43,20 @@ func main() {
 
 	router := api.NewRouter(svc, cfg.InternalAPIToken)
 
+	var tgBot *bot.Bot
+	if cfg.TelegramBotToken != "" {
+		tgBot, err = bot.New(cfg.TelegramBotToken, svc, db)
+		if err != nil {
+			log.Fatalf("bot: %v", err)
+		}
+		if err := tgBot.StartPolling(); err != nil {
+			log.Fatalf("bot polling: %v", err)
+		}
+		slog.Info("telegram bot started (long polling)")
+	} else {
+		slog.Info("TELEGRAM_BOT_TOKEN not set — telegram bot disabled")
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           router,
@@ -60,6 +75,9 @@ func main() {
 	<-stop
 
 	slog.Info("shutting down")
+	if tgBot != nil {
+		tgBot.Stop()
+	}
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {

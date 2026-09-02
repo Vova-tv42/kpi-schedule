@@ -45,7 +45,7 @@ func (h *handlers) getScheduleToday(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	day, err := h.svc.buildDay(r.Context(), user, time.Now())
+	day, err := h.svc.BuildDay(r.Context(), user, time.Now())
 	if err != nil {
 		writeScheduleError(w, err)
 		return
@@ -59,7 +59,7 @@ func (h *handlers) getScheduleTomorrow(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	day, err := h.svc.buildDay(r.Context(), user, time.Now().AddDate(0, 0, 1))
+	day, err := h.svc.BuildDay(r.Context(), user, time.Now().AddDate(0, 0, 1))
 	if err != nil {
 		writeScheduleError(w, err)
 		return
@@ -79,7 +79,7 @@ func (h *handlers) getScheduleDate(w http.ResponseWriter, r *http.Request) {
 		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "date query parameter must be YYYY-MM-DD")
 		return
 	}
-	day, err := h.svc.buildDay(r.Context(), user, target)
+	day, err := h.svc.BuildDay(r.Context(), user, target)
 	if err != nil {
 		writeScheduleError(w, err)
 		return
@@ -97,7 +97,7 @@ func (h *handlers) getScheduleWeek(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("week"); v != "" {
 		weekFilter, _ = strconv.Atoi(v)
 	}
-	week, err := h.svc.buildWeek(r.Context(), user, weekFilter)
+	week, err := h.svc.BuildWeek(r.Context(), user, weekFilter)
 	if err != nil {
 		writeScheduleError(w, err)
 		return

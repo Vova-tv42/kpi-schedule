@@ -12,6 +12,7 @@ require (
 )
 
 require (
+	github.com/PaulSonOfLars/gotgbot/v2 v2.0.0-rc.36 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect

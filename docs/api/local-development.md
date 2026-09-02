@@ -9,8 +9,11 @@
 > else (health check, groups, time/current, the `ERR_AUTH_REQUIRED` path) still works exactly
 > as described.
 
-This iteration has no Telegram bot and no browser extension — the API is exercised directly
-with `curl`. This is the current setup-to-boot walkthrough.
+The Telegram bot now exists for a first slice of commands (`/start`, `/link`, `/today` with
+inline day-navigation — see [`docs/bot/telegram-bot-design.md`](../bot/telegram-bot-design.md)),
+but it's optional for local API work: without `TELEGRAM_BOT_TOKEN` set, the server runs
+API-only and everything below still works exactly as described, exercised directly with
+`curl`.
 
 ## 1. Prerequisites
 
@@ -30,6 +33,11 @@ automatically on first run if missing. `INTERNAL_API_TOKEN` defaults to `dev` �
 `/api/v1/*` route except `/healthz` requires it in the `X-Internal-Token` header. There is no
 encryption key to generate any more — the server stores no credentials (see
 [`docs/architecture/data-storage.md`](../architecture/data-storage.md) §3).
+
+`TELEGRAM_BOT_TOKEN` is optional and unset by default — leave it blank to run API-only. To
+also run the bot locally: message **@BotFather** on Telegram, send `/newbot`, follow its
+prompts (display name, then a username ending in `bot`), and paste the token it gives you into
+`.env`.
 
 ## 3. Run the server
 
@@ -84,7 +92,25 @@ that endpoint is built, `user_lessons` can only be populated by inserting rows d
 via a Go script against the `DATABASE_PATH` file) for manual `/schedule/*` testing — there is
 no supported end-to-end path from a real `my.kpi.ua` account today.
 
-## 7. Testing the actual deployment shape (Docker + persistent volume)
+## 7. Testing the Telegram bot locally (long polling)
+
+With `TELEGRAM_BOT_TOKEN` set in `.env` (see §2), `go run ./cmd/server` logs "telegram bot
+started (long polling)" and the bot starts receiving updates — no public URL/webhook needed
+locally (see [`docs/bot/telegram-bot-design.md`](../bot/telegram-bot-design.md)).
+
+In Telegram, message your bot:
+
+```
+/start   → onboarding text
+/link    → a 6-digit pairing code, valid 10 minutes
+/today   → schedule message with ◀️/🔄/▶️ inline buttons once linked
+```
+
+Tapping ◀️/🔄/▶️ edits the same message in place rather than sending a new one — confirm no
+new message appears and the button's loading spinner clears each time. `/tomorrow`, `/week`,
+`/group`, `/settings`, `/help`, and morning reminders are not implemented yet.
+
+## 8. Testing the actual deployment shape (Docker + persistent volume)
 
 Day-to-day development doesn't need this — it's for verifying the `Dockerfile` and the
 persistent-volume setup the target host will use (see

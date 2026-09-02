@@ -10,11 +10,13 @@ import (
 	"kpi-schedule-bot/server/internal/model"
 )
 
-// buildDay assembles the response for one calendar date. Since a schedule
+// BuildDay assembles the response for one calendar date. Since a schedule
 // arrives as a client push (see docs/architecture/data-storage.md §1) rather
 // than a server-side fetch, this only ever reads what is already stored —
-// there is no inline refresh path.
-func (s *Service) buildDay(ctx context.Context, user model.User, targetDate time.Time) (dayView, error) {
+// there is no inline refresh path. Exported for reuse by both the HTTP
+// schedule handlers and the Telegram bot (internal/bot), which calls this
+// in-process rather than looping back through HTTP.
+func (s *Service) BuildDay(ctx context.Context, user model.User, targetDate time.Time) (dayView, error) {
 	hasData, stale, enrichment, err := s.scheduleFreshness(ctx, user)
 	if err != nil {
 		return dayView{}, err
@@ -53,7 +55,9 @@ func (s *Service) buildDay(ctx context.Context, user model.User, targetDate time
 	}, nil
 }
 
-func (s *Service) buildWeek(ctx context.Context, user model.User, weekFilter int) (weekView, error) {
+// BuildWeek assembles the response for a full academic week (or both).
+// Exported for the same reason as BuildDay above.
+func (s *Service) BuildWeek(ctx context.Context, user model.User, weekFilter int) (weekView, error) {
 	hasData, stale, enrichment, err := s.scheduleFreshness(ctx, user)
 	if err != nil {
 		return weekView{}, err

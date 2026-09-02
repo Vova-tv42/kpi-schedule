@@ -39,16 +39,19 @@ kpi-schedule-bot/
     │   │   ├── engine/                 # Schedule merging, normalization, week-parity math
     │   │   ├── storage/                # SQLite repository (database/sql + modernc.org/sqlite)
     │   │   │                            #   + goose migrations + the campus_cache table
-    │   │   └── model/                  # Shared domain structs, error codes
+    │   │   ├── model/                  # Shared domain structs, error codes
+    │   │   └── bot/                    # Telegram bot (gotgbot/v2), in-process — see
+    │   │                                #   docs/bot/telegram-bot-design.md. /start, /link,
+    │   │                                #   /today implemented; rest still not built.
     │   ├── go.mod
     │   └── Dockerfile                  # Host-agnostic deployment artifact, VOLUME ["/data"]
     │                                    #   for the SQLite file
     │
-    │   # Not yet created — deferred, see docs/api/overview.md's "Note on the bot":
-    │   #   internal/bot/        (Telegram bot; API/engine are bot-ready)
-    │   #   internal/scheduler/  (cron — dropped entirely, not just deferred; the server
-    │   #                         has no credentials to refresh with any more, see
-    │   #                         docs/architecture/data-storage.md §4)
+    │   # Not yet created — deferred:
+    │   #   internal/scheduler/  (morning reminders / stale-check worker, in-process cron via
+    │   #                         github.com/go-co-op/gocron/v2 — see
+    │   #                         docs/bot/telegram-bot-design.md §6; unrelated to the old
+    │   #                         refresh-cron concept below, which is dropped entirely)
     │   #
     │   # Removed (architecture decision, see docs/architecture/data-storage.md):
     │   #   internal/mykpi/   (my.kpi.ua HTTP client/parser — now the extension's job)

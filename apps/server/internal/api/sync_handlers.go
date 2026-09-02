@@ -87,31 +87,16 @@ func (h *handlers) postAuthPairGenerate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var code string
-	var genErr error
-	expiresAt := time.Now().UTC().Add(10 * time.Minute)
-
-	for attempt := 0; attempt < 5; attempt++ {
-		code, genErr = generate6DigitCode()
-		if genErr != nil {
-			model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, "failed to generate pairing code")
-			return
-		}
-		err := h.svc.db.CreatePairingCode(r.Context(), code, req.TelegramID, expiresAt)
-		if err == nil {
-			writeJSON(w, http.StatusOK, pairGenerateResponse{
-				PairCode:  code,
-				ExpiresIn: 600,
-			})
-			return
-		}
-		if !errors.Is(err, storage.ErrCodeCollision) {
-			model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, err.Error())
-			return
-		}
+	code, expiresIn, err := h.svc.GeneratePairCode(r.Context(), req.TelegramID)
+	if err != nil {
+		model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, err.Error())
+		return
 	}
 
-	model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, "failed to generate unique pairing code after retries")
+	writeJSON(w, http.StatusOK, pairGenerateResponse{
+		PairCode:  code,
+		ExpiresIn: expiresIn,
+	})
 }
 
 // POST /api/v1/auth/pair/verify

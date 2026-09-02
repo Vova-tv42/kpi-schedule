@@ -11,6 +11,9 @@ type Config struct {
 	DatabasePath     string
 	InternalAPIToken string
 	HTTPAddr         string
+	// TelegramBotToken is optional: if empty, the bot is not started and the
+	// server runs API-only, as it did before the bot existed.
+	TelegramBotToken string
 }
 
 func Load() (Config, error) {
@@ -22,6 +25,7 @@ func Load() (Config, error) {
 		DatabasePath:     os.Getenv("DATABASE_PATH"),
 		InternalAPIToken: os.Getenv("INTERNAL_API_TOKEN"),
 		HTTPAddr:         os.Getenv("HTTP_ADDR"),
+		TelegramBotToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
 	}
 
 	if cfg.DatabasePath == "" {
