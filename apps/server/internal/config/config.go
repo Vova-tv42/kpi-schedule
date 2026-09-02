@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -12,6 +14,10 @@ type Config struct {
 }
 
 func Load() (Config, error) {
+	// Best-effort: only present in local dev. In Docker/production, real env
+	// vars are already set and no .env file exists.
+	_ = godotenv.Load()
+
 	cfg := Config{
 		DatabasePath:     os.Getenv("DATABASE_PATH"),
 		InternalAPIToken: os.Getenv("INTERNAL_API_TOKEN"),

@@ -4,12 +4,17 @@
 # deployment shape: the Dockerfile + a named volume standing in for the
 # target host's persistent disk, so a container restart (or the VM
 # sleeping/waking) doesn't lose data.
+#
+# Host port is 8081, not 8080: `go run ./cmd/server` (the day-to-day path)
+# defaults to :8080 on the host directly, and the two would otherwise fight
+# over the same port if left running side by side. The container's internal
+# port stays 8080 (matches the Dockerfile's EXPOSE and production).
 services:
   server:
     build: .
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8081:8080"
     environment:
       DATABASE_PATH: /data/kpi.db
       INTERNAL_API_TOKEN: dev

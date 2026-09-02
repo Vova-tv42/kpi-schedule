@@ -34,9 +34,13 @@ encryption key to generate any more — the server stores no credentials (see
 ## 3. Run the server
 
 ```bash
-set -a; source .env; set +a
 go run ./cmd/server
 ```
+
+`config.Load()` calls `godotenv.Load()` on startup, which reads `apps/server/.env` into the
+process environment automatically (best-effort — it's a no-op if the file is absent, which is
+the case in Docker/production where real env vars are set directly). No manual `source`/`export`
+step needed.
 
 Migrations apply automatically on startup (`internal/storage/migrations/`, via `goose`,
 idempotent — a restart with the same `DATABASE_PATH` just logs "no migrations to run"). The
@@ -86,13 +90,17 @@ Day-to-day development doesn't need this — it's for verifying the `Dockerfile`
 persistent-volume setup the target host will use (see
 [`docs/architecture/data-storage.md`](../architecture/data-storage.md) §5).
 
+The container is published on host port **8081**, not 8080 — that's reserved for `go run
+./cmd/server` (§3) so the two can run at the same time without a port conflict. Inside the
+container it's still 8080 (matches the Dockerfile's `EXPOSE` and production).
+
 ```bash
 docker compose up -d --build
 docker compose ps
-curl -s localhost:8080/healthz
+curl -s localhost:8081/healthz
 
 docker compose restart server   # simulates the VM sleeping/waking
-curl -s -H "X-Internal-Token: dev" 'localhost:8080/api/v1/groups?query=ІП-54'
+curl -s -H "X-Internal-Token: dev" 'localhost:8081/api/v1/groups?query=ІП-54'
 # should respond fast — served from the persisted campus_cache, not a fresh Campus API fetch
 
 docker compose down             # keeps the named volume (data survives)
