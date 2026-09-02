@@ -45,7 +45,6 @@ func (b *Bot) renderDay(ctx context.Context, telegramID int64, date time.Time) (
 	for _, l := range view.Lessons {
 		line := lessonLine{
 			Time:        l.Time,
-			EndTime:     l.EndTime,
 			Name:        l.Name,
 			Tag:         l.Tag,
 			TeacherRaw:  l.TeacherRaw,
@@ -62,7 +61,6 @@ func (b *Bot) renderDay(ctx context.Context, telegramID int64, date time.Time) (
 
 	info := dayInfo{
 		Date:             view.Date,
-		Week:             view.Week,
 		DayName:          view.DayName,
 		IsDayOff:         view.IsDayOff,
 		EnrichmentStatus: view.EnrichmentStatus,
@@ -70,7 +68,7 @@ func (b *Bot) renderDay(ctx context.Context, telegramID int64, date time.Time) (
 		Lessons:          lines,
 	}
 
-	return formatDay(info, user.GroupName), dayKeyboard(date), true, nil
+	return formatDay(info), dayKeyboard(date), true, nil
 }
 
 // renderWeek is renderDay's counterpart for the week screen. offset is in
@@ -108,17 +106,16 @@ func (b *Bot) renderWeek(ctx context.Context, telegramID int64, offset int) (tex
 		lessons := make([]lessonLine, 0, len(d.Lessons))
 		for _, l := range d.Lessons {
 			lessons = append(lessons, lessonLine{
-				Time:    l.Time,
-				EndTime: l.EndTime,
-				Name:    l.Name,
-				Tag:     l.Tag,
+				Time: l.Time,
+				Name: l.Name,
+				Tag:  l.Tag,
 			})
 		}
 		days = append(days, weekDayLine{DayName: d.DayName, Lessons: lessons})
 	}
 
 	info := weekInfo{
-		WeekName:         block.WeekName,
+		WeekNumber:       block.WeekNumber,
 		EnrichmentStatus: view.EnrichmentStatus,
 		Stale:            view.Stale,
 		Days:             days,

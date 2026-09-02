@@ -34,25 +34,26 @@ The Telegram Bot provides students with quick, frictionless access to their veri
 ### 3.1 Daily Schedule View (`/today`)
 
 ```text
-📅 Розклад на сьогодні (Вівторок, 1 вересня)
-🔹 1-й тиждень (Чисельник) | Група: ІП-21
+📅 Розклад на 02.09 (Вівторок)
 
-1️⃣ 08:30 — 10:05 | Лекція
-📖 Процеси розробки вбудованого ПЗ
-👨‍🏫 Гуменний Д. О.
-📍 Аудиторія: 18-402 (Корпус 18)
+08:30 Процеси розробки вбудованого ПЗ (Лек., Offline)
+Викладач: Гуменний Д. О.
 
-2️⃣ 10:25 — 12:00 | Практика [Вибіркова]
-📖 Технології DevOps
-👨‍🏫 Колумбет В. П.
-📍 Аудиторія: 5-508 (Корпус 5)
+10:25 Технології DevOps (Практ., Online)
+Викладач: Колумбет В. П.
 
 [ ◀️ Вчора ]  [ 📅 Сьогодні ]  [ Завтра ▶️ ]
 ```
 
+(`02.09`, `Викладач:`, and the time are HTML `<b>`/`<code>` — plain-text here for readability.)
+
 The middle button jumps back to the current day from wherever navigation has wandered
 to. There is no separate "refresh" button: every render re-reads storage, so the data is
-always fresh — tapping 📅 Сьогодні while already on today is the refresh.
+always fresh — tapping 📅 Сьогодні while already on today is the refresh. The date is
+day/month only (no year) and the week/group summary row is gone entirely — a student
+already knows their own group, and the parity shows up on the `/week` screen. The
+room/online-meeting detail is reduced to a same-line `(Лек., Online)`-style tag: enough to
+know whether to walk somewhere, not the literal address.
 
 ### 3.2 Weekly Schedule View (`/week`)
 
@@ -60,14 +61,14 @@ One academic week at a time, deliberately compact (one line per lesson — a ful
 block for six days would not fit a Telegram message):
 
 ```text
-🗓 Перший тиждень (Чисельник) — Поточний
-🔹 Група: ІП-21
+🗓 Перший тиждень — Поточний
+Група: ІП-21
 
-Понеділок
+▎Понеділок
 10:25 Практичний курс іноземної мови. Частина 1 (лек.)
 12:20 Компоненти програмної інженерії. Частина 4 (лек.)
 
-Середа — Сьогодні
+▎Середа - Сьогодні
 08:30 Процеси розробки вбудованого ПЗ (прак.)
 16:10 Основи розробки трансляторів (прак.)
 
@@ -75,12 +76,18 @@ block for six days would not fit a Telegram message):
 [ 📅 Розклад на сьогодні ]
 ```
 
+("Перший"/"Другий", "Група:", and the lesson time are HTML `<b>`/`<code>`; the day header
+(`▎…`) is a native Telegram `<blockquote>` — plain-text approximations here for
+readability.)
+
 The three week buttons are **fixed slots** relative to the real current week (offsets −1,
 0, +1), not steps relative to what is on screen — so navigation never drifts further than
 one week out from today. Telegram has no disabled-button state, so the slot currently being
 displayed renders as a marked, inert button (`✅ …`, callback `week:noop`) instead of being
-removed, keeping the row's shape stable. Days are marked *Сьогодні*/*Завтра* only in the
-current week (offset 0), where those labels can actually apply.
+removed, keeping the row's shape stable. Days are marked *- Сьогодні*/*- Завтра* only in the
+current week (offset 0), where those labels can actually apply; the parenthetical
+Чисельник/Знаменник label is dropped from the header — bolding just the ordinal word carries
+the same information with far less noise.
 
 ### 3.3 Onboarding screens (`/start` → `/link`)
 

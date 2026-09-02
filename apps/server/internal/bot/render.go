@@ -15,7 +15,6 @@ import (
 // this package trying to name those unexported types directly.
 type lessonLine struct {
 	Time          string
-	EndTime       string
 	Name          string
 	Tag           string
 	TeacherRaw    string
@@ -26,7 +25,6 @@ type lessonLine struct {
 
 type dayInfo struct {
 	Date             string // YYYY-MM-DD
-	Week             int
 	DayName          string
 	IsDayOff         bool
 	EnrichmentStatus string
@@ -42,7 +40,7 @@ type weekDayLine struct {
 }
 
 type weekInfo struct {
-	WeekName         string
+	WeekNumber       int
 	EnrichmentStatus string
 	Stale            bool
 	Days             []weekDayLine
@@ -61,28 +59,6 @@ func isoWeekday(t time.Time) int {
 	return 7
 }
 
-var numberEmoji = []string{"", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"}
-
-func lessonNumber(i int) string {
-	if i < len(numberEmoji) {
-		return numberEmoji[i]
-	}
-	return fmt.Sprintf("%d.", i)
-}
-
-var tagLabels = map[string]string{
-	"lec":  "Лекція",
-	"prac": "Практика",
-	"lab":  "Лабораторна",
-}
-
-func tagLabel(tag string) string {
-	if label, ok := tagLabels[tag]; ok {
-		return label
-	}
-	return "Заняття"
-}
-
 var tagShortLabels = map[string]string{
 	"lec":  "лек.",
 	"prac": "прак.",
@@ -91,6 +67,19 @@ var tagShortLabels = map[string]string{
 
 func tagShort(tag string) string {
 	return tagShortLabels[tag]
+}
+
+var tagAbbrLabels = map[string]string{
+	"lec":  "Лек.",
+	"prac": "Практ.",
+	"lab":  "Лаб.",
+}
+
+func tagAbbr(tag string) string {
+	if v, ok := tagAbbrLabels[tag]; ok {
+		return v
+	}
+	return "Заняття"
 }
 
 func weekOffsetLabel(offset int) string {
@@ -106,38 +95,73 @@ func weekOffsetLabel(offset int) string {
 	}
 }
 
-func weekLabel(week int) string {
+func weekOrdinal(week int) string {
 	switch week {
 	case 1:
-		return "1-й тиждень (Чисельник)"
+		return "Перший"
 	case 2:
-		return "2-й тиждень (Знаменник)"
+		return "Другий"
 	default:
 		return ""
 	}
+}
+
+// hhmm truncates a stored "HH:MM:SS" time to "HH:MM" for display.
+func hhmm(t string) string {
+	if len(t) >= 5 {
+		return t[:5]
+	}
+	return t
+}
+
+// shortDate reformats a stored "YYYY-MM-DD" date to "DD.MM" for display —
+// the year adds nothing a student needs to see on a day/week screen.
+func shortDate(date string) string {
+	t, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return date
+	}
+	return t.Format("02.01")
+}
+
+// locationKind classifies a lesson's raw/enriched location as online or
+// on-campus by keyword, since that's the only thing worth surfacing inline
+// (see lessonModeSuffix) — the exact room number is dropped as clutter.
+func locationKind(location string) string {
+	if location == "" {
+		return ""
+	}
+	lower := strings.ToLower(location)
+	if strings.Contains(lower, "онлайн") || strings.Contains(lower, "zoom") {
+		return "Online"
+	}
+	return "Offline"
+}
+
+// lessonModeSuffix renders "(Лек., Online)"-style trailer text appended after
+// a lesson's name, replacing the separate location row it used to get.
+func lessonModeSuffix(location, tag string) string {
+	parts := []string{tagAbbr(tag)}
+	if kind := locationKind(location); kind != "" {
+		parts = append(parts, kind)
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
 }
 
 // formatDay renders a day's schedule as an HTML-parse-mode Telegram message,
 // matching the layout in docs/bot/telegram-bot-design.md §3.1. All dynamic
 // text is HTML-escaped since subject/teacher/room names come from external
 // sources (my.kpi.ua / Campus API) and may contain "&", "<", etc.
-func formatDay(d dayInfo, group *string) string {
+func formatDay(d dayInfo) string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "📅 Розклад на %s (%s)\n", html.EscapeString(d.Date), html.EscapeString(d.DayName))
-
-	header := "🔹 " + weekLabel(d.Week)
-	if group != nil && *group != "" {
-		header += " | Група: " + html.EscapeString(*group)
-	}
-	b.WriteString(header)
-	b.WriteString("\n")
+	fmt.Fprintf(&b, "📅 Розклад на <b>%s</b> (%s)\n", html.EscapeString(shortDate(d.Date)), html.EscapeString(d.DayName))
 
 	switch {
 	case d.Stale:
 		b.WriteString("⚠️ Розклад міг застаріти — синхронізуй розширення ще раз.\n")
 	case d.EnrichmentStatus == "degraded":
-		b.WriteString("⚠️ Деякі деталі (аудиторія/викладач) тимчасово недоступні.\n")
+		b.WriteString("⚠️ Деякі деталі тимчасово недоступні.\n")
 	}
 
 	if d.IsDayOff || len(d.Lessons) == 0 {
@@ -145,25 +169,21 @@ func formatDay(d dayInfo, group *string) string {
 		return b.String()
 	}
 
-	for i, l := range d.Lessons {
+	for _, l := range d.Lessons {
 		b.WriteString("\n")
-		fmt.Fprintf(&b, "%s %s — %s | %s\n", lessonNumber(i+1), l.Time, l.EndTime, tagLabel(l.Tag))
-		fmt.Fprintf(&b, "📖 %s\n", html.EscapeString(l.Name))
+
+		location := l.LocationTitle
+		if location == "" {
+			location = l.LocationRaw
+		}
+		fmt.Fprintf(&b, "<code>%s</code> %s <i>%s</i>\n", hhmm(l.Time), html.EscapeString(l.Name), lessonModeSuffix(location, l.Tag))
 
 		teacher := l.LecturerName
 		if teacher == "" {
 			teacher = l.TeacherRaw
 		}
 		if teacher != "" {
-			fmt.Fprintf(&b, "👨‍🏫 %s\n", html.EscapeString(teacher))
-		}
-
-		location := l.LocationTitle
-		if location == "" {
-			location = l.LocationRaw
-		}
-		if location != "" {
-			fmt.Fprintf(&b, "📍 %s\n", html.EscapeString(location))
+			fmt.Fprintf(&b, "<b>Викладач:</b> %s\n", html.EscapeString(teacher))
 		}
 	}
 
@@ -178,16 +198,16 @@ func formatDay(d dayInfo, group *string) string {
 func formatWeek(w weekInfo, offset int, group *string) string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "🗓 %s — %s\n", html.EscapeString(w.WeekName), weekOffsetLabel(offset))
+	fmt.Fprintf(&b, "🗓 <b>%s</b> тиждень — %s\n", weekOrdinal(w.WeekNumber), weekOffsetLabel(offset))
 	if group != nil && *group != "" {
-		fmt.Fprintf(&b, "🔹 Група: %s\n", html.EscapeString(*group))
+		fmt.Fprintf(&b, "<b>Група:</b> %s\n", html.EscapeString(*group))
 	}
 
 	switch {
 	case w.Stale:
 		b.WriteString("⚠️ Розклад міг застаріти — синхронізуй розширення ще раз.\n")
 	case w.EnrichmentStatus == "degraded":
-		b.WriteString("⚠️ Деякі деталі (аудиторія/викладач) тимчасово недоступні.\n")
+		b.WriteString("⚠️ Деякі деталі тимчасово недоступні.\n")
 	}
 
 	if len(w.Days) == 0 {
@@ -203,17 +223,19 @@ func formatWeek(w weekInfo, offset int, group *string) string {
 	}
 
 	for _, d := range w.Days {
-		fmt.Fprintf(&b, "\n<b>%s</b>", html.EscapeString(d.DayName))
+		b.WriteString("\n<blockquote><b>")
+		b.WriteString(html.EscapeString(d.DayName))
+		b.WriteString("</b>")
 		switch d.DayName {
 		case todayName:
-			b.WriteString(" — <i>Сьогодні</i>")
+			b.WriteString(" - <i>Сьогодні</i>")
 		case tomorrowName:
-			b.WriteString(" — <i>Завтра</i>")
+			b.WriteString(" - <i>Завтра</i>")
 		}
-		b.WriteString("\n")
+		b.WriteString("</blockquote>\n")
 
 		for _, l := range d.Lessons {
-			fmt.Fprintf(&b, "%s %s", l.Time, html.EscapeString(l.Name))
+			fmt.Fprintf(&b, "<code>%s</code> %s", hhmm(l.Time), html.EscapeString(l.Name))
 			if tag := tagShort(l.Tag); tag != "" {
 				fmt.Fprintf(&b, " <i>(%s)</i>", tag)
 			}
