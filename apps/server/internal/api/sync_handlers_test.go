@@ -158,3 +158,29 @@ func TestScheduleSyncWithToken(t *testing.T) {
 		t.Fatalf("query schedule date failed: %d, body: %s", tW.Code, tW.Body.String())
 	}
 }
+
+func TestScheduleSyncRejectsRawTelegramIDWithoutInternalToken(t *testing.T) {
+	router, _, _ := setupTestServer(t)
+
+	// Attempt to push schedule using only raw Telegram ID without pair code or token
+	syncReq := map[string]any{
+		"telegram_id": 999888777,
+		"lessons": []map[string]any{
+			{
+				"date":       "2026-09-01",
+				"start_time": "08:30:00",
+				"subject":    "Spoofed Course",
+			},
+		},
+	}
+	body, _ := json.Marshal(syncReq)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/schedule/sync", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized for unauthenticated telegram_id push, got %d", w.Code)
+	}
+}
+

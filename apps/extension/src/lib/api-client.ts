@@ -5,7 +5,11 @@ import {
 } from '../types';
 
 export class ApiClient {
-  constructor(private baseUrl: string) {}
+  private baseUrl: string = '';
+
+  constructor(baseUrl: string) {
+    this.setBaseUrl(baseUrl);
+  }
 
   setBaseUrl(url: string) {
     this.baseUrl = url.replace(/\/+$/, '');

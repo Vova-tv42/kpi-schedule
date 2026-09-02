@@ -84,6 +84,8 @@ CREATE TABLE user_tokens (
     created_at   TIMESTAMP NOT NULL
 );
 
+CREATE INDEX idx_user_tokens_user_id ON user_tokens (user_id);
+
 -- +goose Down
 DROP TABLE user_tokens;
 DROP TABLE pairing_codes;
@@ -91,3 +93,4 @@ DROP TABLE campus_cache;
 DROP TABLE user_lessons;
 DROP TABLE user_schedule_state;
 DROP TABLE users;
+

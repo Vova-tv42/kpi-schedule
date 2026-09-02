@@ -78,4 +78,20 @@ describe('parseScheduleEvents', () => {
 
     expect(detectedGroup).toBe('ТВ-42');
   });
+
+  it('pads single-digit hours to standard HH:MM:SS format', () => {
+    const fixture: RawFullCalendarEvent[] = [
+      {
+        title: 'Фізика',
+        start: '2026-09-20T8:30',
+        end: '2026-09-20T10:05',
+      },
+    ];
+
+    const { lessons } = parseScheduleEvents(fixture);
+    expect(lessons).toHaveLength(1);
+    expect(lessons[0].start_time).toBe('08:30:00');
+    expect(lessons[0].end_time).toBe('10:05:00');
+  });
 });
+

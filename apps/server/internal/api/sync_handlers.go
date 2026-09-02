@@ -87,22 +87,31 @@ func (h *handlers) postAuthPairGenerate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	code, err := generate6DigitCode()
-	if err != nil {
-		model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, "failed to generate pairing code")
-		return
-	}
-
+	var code string
+	var genErr error
 	expiresAt := time.Now().UTC().Add(10 * time.Minute)
-	if err := h.svc.db.CreatePairingCode(r.Context(), code, req.TelegramID, expiresAt); err != nil {
-		model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, err.Error())
-		return
+
+	for attempt := 0; attempt < 5; attempt++ {
+		code, genErr = generate6DigitCode()
+		if genErr != nil {
+			model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, "failed to generate pairing code")
+			return
+		}
+		err := h.svc.db.CreatePairingCode(r.Context(), code, req.TelegramID, expiresAt)
+		if err == nil {
+			writeJSON(w, http.StatusOK, pairGenerateResponse{
+				PairCode:  code,
+				ExpiresIn: 600,
+			})
+			return
+		}
+		if !errors.Is(err, storage.ErrCodeCollision) {
+			model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, err.Error())
+			return
+		}
 	}
 
-	writeJSON(w, http.StatusOK, pairGenerateResponse{
-		PairCode:  code,
-		ExpiresIn: 600,
-	})
+	model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, "failed to generate unique pairing code after retries")
 }
 
 // POST /api/v1/auth/pair/verify
@@ -162,7 +171,7 @@ func (h *handlers) postScheduleSync(w http.ResponseWriter, r *http.Request) {
 	var user model.User
 	var err error
 
-	// 1. Resolve user by pair_code, auth_token, or telegram_id
+	// 1. Resolve user by pair_code, auth_token, or internal TelegramID
 	if req.PairCode != "" {
 		code := strings.ReplaceAll(strings.TrimSpace(req.PairCode), "-", "")
 		telegramID, pairErr := h.svc.db.VerifyAndConsumePairingCode(r.Context(), code)
@@ -173,20 +182,17 @@ func (h *handlers) postScheduleSync(w http.ResponseWriter, r *http.Request) {
 		user, err = h.svc.db.UpsertUser(r.Context(), telegramID, nil, nil)
 	} else if req.AuthToken != "" {
 		user, err = h.svc.db.GetUserByToken(r.Context(), strings.TrimSpace(req.AuthToken))
-	} else if req.TelegramID != 0 {
+	} else if tokenHeader := r.Header.Get("X-User-Token"); tokenHeader != "" {
+		user, err = h.svc.db.GetUserByToken(r.Context(), strings.TrimSpace(tokenHeader))
+	} else if req.TelegramID != 0 && r.Header.Get("X-Internal-Token") != "" {
+		// Only trusted internal services (e.g. Telegram Bot direct sync) can authenticate by TelegramID alone
 		user, err = h.svc.db.GetUserByTelegramID(r.Context(), req.TelegramID)
 		if errors.Is(err, storage.ErrNotFound) {
 			user, err = h.svc.db.UpsertUser(r.Context(), req.TelegramID, nil, nil)
 		}
 	} else {
-		// Check X-User-Token header as fallback
-		tokenHeader := r.Header.Get("X-User-Token")
-		if tokenHeader != "" {
-			user, err = h.svc.db.GetUserByToken(r.Context(), strings.TrimSpace(tokenHeader))
-		} else {
-			model.WriteError(w, http.StatusUnauthorized, model.ErrAuthRequired, "authentication required (pair_code or auth_token)")
-			return
-		}
+		model.WriteError(w, http.StatusUnauthorized, model.ErrAuthRequired, "authentication required (pair_code, auth_token, or valid internal token)")
+		return
 	}
 
 	if err != nil {
@@ -216,6 +222,11 @@ func (h *handlers) postScheduleSync(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	if len(req.Lessons) > 0 && len(parsedLessons) == 0 {
+		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "invalid lesson dates: expected format YYYY-MM-DD")
+		return
+	}
+
 	// 3. Resolve group name and group ID if provided
 	groupName := strings.TrimSpace(req.GroupName)
 	if groupName != "" {
@@ -223,7 +234,10 @@ func (h *handlers) postScheduleSync(w http.ResponseWriter, r *http.Request) {
 		if gErr == nil {
 			for _, g := range groups {
 				if strings.EqualFold(g.Name, groupName) {
-					user, _ = h.svc.db.UpsertUser(r.Context(), user.TelegramID, &g.ID, &g.Name)
+					updatedUser, uErr := h.svc.db.UpsertUser(r.Context(), user.TelegramID, &g.ID, &g.Name)
+					if uErr == nil {
+						user = updatedUser
+					}
 					break
 				}
 			}

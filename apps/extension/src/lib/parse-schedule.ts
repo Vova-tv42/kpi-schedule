@@ -54,11 +54,13 @@ export function parseScheduleEvents(events: RawFullCalendarEvent[]): {
       endTime = ev.end.split('T')[1] || '';
     }
 
-    // Fallback: If time has no seconds, ensure HH:MM:00
+    // Ensure standard HH:MM:SS format with 2-digit padded hour, minute, second
     const formatTime = (t: string) => {
       const parts = t.split(':');
-      if (parts.length === 2) return `${parts[0]}:${parts[1]}:00`;
-      return t;
+      const hour = parts[0]?.padStart(2, '0') || '00';
+      const minute = parts[1]?.padStart(2, '0') || '00';
+      const second = parts[2]?.padStart(2, '0') || '00';
+      return `${hour}:${minute}:${second}`;
     };
 
     const startTimeFormatted = formatTime(timePart);

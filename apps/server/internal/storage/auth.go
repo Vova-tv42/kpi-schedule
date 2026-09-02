@@ -14,17 +14,32 @@ import (
 
 var ErrInvalidOrExpiredCode = errors.New("invalid or expired pairing code")
 var ErrInvalidToken = errors.New("invalid user token")
+var ErrCodeCollision = errors.New("pairing code collision")
 
 // CreatePairingCode stores a 6-digit pairing code with an expiration timestamp.
 func (db *DB) CreatePairingCode(ctx context.Context, code string, telegramID int64, expiresAt time.Time) error {
-	_, err := db.SQL.ExecContext(ctx, `
+	now := time.Now().UTC()
+	// Purge expired codes
+	_, _ = db.SQL.ExecContext(ctx, `DELETE FROM pairing_codes WHERE expires_at < ?`, now)
+
+	// Clean any old active code for this specific telegramID
+	_, _ = db.SQL.ExecContext(ctx, `DELETE FROM pairing_codes WHERE telegram_id = ?`, telegramID)
+
+	// Insert new code; fail if collision on another user's active code
+	res, err := db.SQL.ExecContext(ctx, `
 		INSERT INTO pairing_codes (code, telegram_id, expires_at)
 		VALUES (?, ?, ?)
-		ON CONFLICT (code) DO UPDATE
-		SET telegram_id = excluded.telegram_id, expires_at = excluded.expires_at
+		ON CONFLICT (code) DO NOTHING
 	`, code, telegramID, expiresAt)
 	if err != nil {
 		return fmt.Errorf("creating pairing code: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking inserted rows: %w", err)
+	}
+	if n == 0 {
+		return ErrCodeCollision
 	}
 	return nil
 }
