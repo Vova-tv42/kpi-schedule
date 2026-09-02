@@ -9,8 +9,8 @@
 > else (health check, groups, time/current, the `ERR_AUTH_REQUIRED` path) still works exactly
 > as described.
 
-The Telegram bot now exists for a first slice of commands (`/start`, `/link`, `/today` with
-inline day-navigation — see [`docs/bot/telegram-bot-design.md`](../bot/telegram-bot-design.md)),
+The Telegram bot now exists for a first slice of commands (`/start`, `/link`, `/today`, `/week`,
+all as inline-button screens — see [`docs/bot/telegram-bot-design.md`](../bot/telegram-bot-design.md)),
 but it's optional for local API work: without `TELEGRAM_BOT_TOKEN` set, the server runs
 API-only and everything below still works exactly as described, exercised directly with
 `curl`.
@@ -101,14 +101,19 @@ locally (see [`docs/bot/telegram-bot-design.md`](../bot/telegram-bot-design.md))
 In Telegram, message your bot:
 
 ```
-/start   → onboarding text
+/start   → onboarding screen with a «Прив'язати акаунт» button; once a schedule has
+           been synced it also notes that and adds «Розклад на сьогодні»
 /link    → a 6-digit pairing code, valid 10 minutes
-/today   → schedule message with ◀️/🔄/▶️ inline buttons once linked
+/today   → day schedule with ◀️ Вчора / 📅 Сьогодні / Завтра ▶️ buttons once linked
+/week    → one academic week, with previous/current/next week slots
 ```
 
-Tapping ◀️/🔄/▶️ edits the same message in place rather than sending a new one — confirm no
-new message appears and the button's loading spinner clears each time. `/tomorrow`, `/week`,
-`/group`, `/settings`, `/help`, and morning reminders are not implemented yet.
+Every button edits the same message in place rather than sending a new one — confirm no new
+message appears and the button's loading spinner clears each time. Worth checking
+specifically: the `/start` button swaps that message over to the pairing code (and `◀️ Назад`
+swaps it back), and on `/week` the week slot you are already viewing renders as an inert
+`✅ …` button. `/tomorrow`, `/group`, `/settings`, `/help`, and morning reminders are not
+implemented yet.
 
 ## 8. Testing the actual deployment shape (Docker + persistent volume)
 

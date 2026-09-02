@@ -26,7 +26,7 @@ The Golang backend API serves as the core coordinator between the Telegram Bot, 
   - `429 Too Many Requests`: More than 20 requests/minute from this client IP (`ERR_RATE_LIMITED`) — see [`docs/architecture/error-handling-resilience.md`](../architecture/error-handling-resilience.md) §5.
   - `500 Internal Server Error`: Unrecoverable merging failure (accompanied by a structured error code).
 
-> **Note on the bot.** The Telegram bot (`/start`, `/link`, `/today` implemented so far — see [`docs/bot/telegram-bot-design.md`](../bot/telegram-bot-design.md)) runs **inside this same Go process** (see [`docs/project-repository.md` §4.1](../project-repository.md)) and calls the `api.Service`/`storage.DB` layer directly, in-process, rather than issuing HTTP requests to these routes — the `/schedule/*` and `/auth/pair/generate` endpoints exist as a separately internal-token-protected surface for other internal/admin callers, not as the bot's own client path.
+> **Note on the bot.** The Telegram bot (`/start`, `/link`, `/today`, `/week` implemented so far — see [`docs/bot/telegram-bot-design.md`](../bot/telegram-bot-design.md)) runs **inside this same Go process** (see [`docs/project-repository.md` §4.1](../project-repository.md)) and calls the `api.Service`/`storage.DB` layer directly, in-process, rather than issuing HTTP requests to these routes — the `/schedule/*` and `/auth/pair/generate` endpoints exist as a separately internal-token-protected surface for other internal/admin callers, not as the bot's own client path.
 
 ---
 

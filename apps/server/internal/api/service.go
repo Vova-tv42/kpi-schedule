@@ -52,11 +52,12 @@ func (s *Service) GeneratePairCode(ctx context.Context, telegramID int64) (code 
 	return "", 0, fmt.Errorf("failed to generate unique pairing code after retries")
 }
 
-// scheduleFreshness reports whether a user has a stored schedule and how
+// ScheduleFreshness reports whether a user has a stored schedule and how
 // stale it is. It makes no network calls and triggers no refresh — the
 // server cannot fetch a schedule on its own; see
-// docs/architecture/data-storage.md §1 and §4.
-func (s *Service) scheduleFreshness(ctx context.Context, user model.User) (hasData, stale bool, enrichment model.EnrichmentStatus, err error) {
+// docs/architecture/data-storage.md §1 and §4. Exported so the Telegram
+// bot's onboarding screen can tell an already-synced user from a new one.
+func (s *Service) ScheduleFreshness(ctx context.Context, user model.User) (hasData, stale bool, enrichment model.EnrichmentStatus, err error) {
 	state, stateErr := s.db.GetScheduleState(ctx, user.ID)
 	if stateErr != nil {
 		if errors.Is(stateErr, storage.ErrNotFound) {

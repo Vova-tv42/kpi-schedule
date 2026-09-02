@@ -17,7 +17,7 @@ import (
 // schedule handlers and the Telegram bot (internal/bot), which calls this
 // in-process rather than looping back through HTTP.
 func (s *Service) BuildDay(ctx context.Context, user model.User, targetDate time.Time) (dayView, error) {
-	hasData, stale, enrichment, err := s.scheduleFreshness(ctx, user)
+	hasData, stale, enrichment, err := s.ScheduleFreshness(ctx, user)
 	if err != nil {
 		return dayView{}, err
 	}
@@ -38,7 +38,7 @@ func (s *Service) BuildDay(ctx context.Context, user model.User, targetDate time
 	sort.Slice(views, func(i, j int) bool { return views[i].Time < views[j].Time })
 
 	isoDay := engine.ISODay(targetDate)
-	week, err := s.resolveWeek(ctx, targetDate)
+	week, err := s.ResolveWeekParity(ctx, targetDate)
 	if err != nil {
 		return dayView{}, err
 	}
@@ -58,7 +58,7 @@ func (s *Service) BuildDay(ctx context.Context, user model.User, targetDate time
 // BuildWeek assembles the response for a full academic week (or both).
 // Exported for the same reason as BuildDay above.
 func (s *Service) BuildWeek(ctx context.Context, user model.User, weekFilter int) (weekView, error) {
-	hasData, stale, enrichment, err := s.scheduleFreshness(ctx, user)
+	hasData, stale, enrichment, err := s.ScheduleFreshness(ctx, user)
 	if err != nil {
 		return weekView{}, err
 	}
@@ -142,9 +142,11 @@ func (s *Service) BuildWeek(ctx context.Context, user model.User, weekFilter int
 	return out, nil
 }
 
-// resolveWeek derives the KPI week parity for an arbitrary date from the
-// Campus API's current-time anchor (see engine.WeekAt).
-func (s *Service) resolveWeek(ctx context.Context, target time.Time) (int, error) {
+// ResolveWeekParity derives the KPI week parity (1 or 2) for an arbitrary
+// date from the Campus API's current-time anchor (see engine.WeekAt).
+// Exported so the Telegram bot's /week navigation can turn a calendar-week
+// offset into the parity BuildWeek expects.
+func (s *Service) ResolveWeekParity(ctx context.Context, target time.Time) (int, error) {
 	currentTime, err := s.campus.CurrentTime(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("resolving current academic week: %w", err)

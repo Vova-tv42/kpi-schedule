@@ -42,7 +42,8 @@ kpi-schedule-bot/
     │   │   ├── model/                  # Shared domain structs, error codes
     │   │   └── bot/                    # Telegram bot (gotgbot/v2), in-process — see
     │   │                                #   docs/bot/telegram-bot-design.md. /start, /link,
-    │   │                                #   /today implemented; rest still not built.
+    │   │                                #   /today, /week implemented as inline-button
+    │   │                                #   screens; rest still not built.
     │   ├── go.mod
     │   └── Dockerfile                  # Host-agnostic deployment artifact, VOLUME ["/data"]
     │                                    #   for the SQLite file

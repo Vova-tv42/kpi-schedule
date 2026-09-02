@@ -48,7 +48,10 @@ func New(token string, svc *api.Service, db *storage.DB) (*Bot, error) {
 	dispatcher.AddHandler(handlers.NewCommand("start", b.cmdStart))
 	dispatcher.AddHandler(handlers.NewCommand("link", b.cmdLink))
 	dispatcher.AddHandler(handlers.NewCommand("today", b.cmdToday))
+	dispatcher.AddHandler(handlers.NewCommand("week", b.cmdWeek))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(navCallbackPrefix), b.onNav))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(weekCallbackPrefix), b.onWeek))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(menuCallbackPrefix), b.onMenu))
 
 	b.dispatcher = dispatcher
 	b.updater = ext.NewUpdater(dispatcher, nil)
