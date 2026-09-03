@@ -55,7 +55,13 @@ func (h *CronHandler) HandleLessonAlerts(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	result, err := h.dispatcher.Dispatch(r.Context(), time.Now())
+	var result alerts.DispatchResult
+	var err error
+	if r.Method == http.MethodPost {
+		result, err = h.dispatcher.DispatchTest(r.Context(), time.Now())
+	} else {
+		result, err = h.dispatcher.Dispatch(r.Context(), time.Now())
+	}
 	if err != nil {
 		model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, err.Error())
 		return
