@@ -4,11 +4,11 @@ This document outlines the Continuous Integration and Continuous Deployment (CI/
 
 ---
 
-## 1. Overview & Strategy
+Fly.io operates on an API- and CLI-centric architecture rather than offering native Git repository triggers from its web dashboard. Automated testing and deployments are therefore orchestrated through **GitHub Actions**:
 
-Fly.io operates on an API- and CLI-centric architecture rather than offering native Git repository triggers from its web dashboard. Automated deployments on code pushes are therefore orchestrated through **GitHub Actions**.
+1. **Pull Request Tests**: [`.github/workflows/test.yml`](../../.github/workflows/test.yml) - Runs Go unit tests on PR creation and every subsequent push to the PR.
+2. **Main Branch Deployment**: [`.github/workflows/fly-deploy.yml`](../../.github/workflows/fly-deploy.yml) - Runs tests and continuously deploys to Fly.io on pushes to `main`.
 
-The workflow is defined at [`.github/workflows/fly-deploy.yml`](../../.github/workflows/fly-deploy.yml).
 
 ```
    [ Push to main ]
@@ -37,7 +37,18 @@ The workflow is defined at [`.github/workflows/fly-deploy.yml`](../../.github/wo
 
 ---
 
-## 2. Trigger Conditions & Monorepo Optimization
+## 2. Pull Request Test Workflow (`test.yml`)
+
+The [`.github/workflows/test.yml`](../../.github/workflows/test.yml) workflow provides automated testing for PRs:
+- **Trigger**: Runs on `pull_request` targeting `main` (automatically handles PR opening and any new pushes to the PR branch).
+- **Scope**: Filtered to `apps/server/**` and `.github/workflows/test.yml`.
+- **Concurrency**: Grouped per branch (`tests-${{ github.ref }}`) with `cancel-in-progress: true` so rapid pushes cancel stale test runs and immediately test the newest commit.
+- **Goal**: Guarantees that code is thoroughly tested before it can be merged into `main`.
+
+---
+
+## 3. Deployment Workflow Trigger Conditions & Monorepo Optimization
+
 
 Because this repository is a monorepo containing both the backend Go server (`apps/server`) and the Chrome extension (`apps/extension`), deployments are scoped using GitHub Actions path filters:
 
