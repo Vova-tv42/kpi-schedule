@@ -33,12 +33,20 @@ user_lessons         (id, user_id FK, date, week, day, slot, start_time, end_tim
                        lecturer_id, lecturer_name, location_title, location_uri, enriched,
                        is_recurring,
                        UNIQUE (user_id, date, start_time, subject_norm))
+user_lesson_urls     (id, user_id FK, subject_norm, tag, url, created_at, updated_at,
+                       UNIQUE (user_id, subject_norm, tag))
+user_url_prompts     (user_id PK/FK, telegram_id UNIQUE, prompt_message_id, subject_norm,
+                       tag, subject_name, updated_at)
 campus_cache         (key PK, value /* JSON */, fetched_at)
+pairing_codes        (code PK, telegram_id, expires_at)
+user_tokens          (token PK, user_id FK, created_at)
 ```
 
 Migrations live in `apps/server/internal/storage/migrations/` (embedded, applied on startup
-via `goose`). `00001_init.sql` was edited in place (again) to drop `user_sessions` rather
-than layered with a new migration file — nothing is deployed yet.
+via `goose`). `00001_init.sql` establishes core user and schedule storage, and `00002_lesson_urls.sql`
+introduces `user_lesson_urls` (persisting user-provided conference URLs keyed by `user_id, subject_norm, tag`
+so they survive schedule replacements) and `user_url_prompts` (tracking active URL prompt states for clean
+in-place message mutation and auto-deletion of user input messages).
 
 **Engine: SQLite, not PostgreSQL** (`modernc.org/sqlite`, pure Go — no CGO, so it stays
 compatible with the distroless final image). This reverses an earlier decision recorded in
@@ -75,6 +83,69 @@ schedule keeps rendering correctly without a live Campus fetch: `date` alone is 
 safe to show as permanent weekly fixtures and which are one-off sessions that should only
 ever appear on their actual occurring dates. See
 [`merging-engine.md`](merging-engine.md) §6.
+
+### 2.1 Custom Lesson URLs & Active Prompts (`user_lesson_urls`, `user_url_prompts`)
+
+To let students attach online conference links (Zoom, Google Meet, Teams, etc.) to their classes,
+migration `00002_lesson_urls.sql` adds two dedicated tables:
+
+#### Table `user_lesson_urls`
+```sql
+CREATE TABLE user_lesson_urls (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    subject_norm TEXT NOT NULL,
+    tag          TEXT NOT NULL DEFAULT '',
+    url          TEXT NOT NULL,
+    created_at   TIMESTAMP NOT NULL,
+    updated_at   TIMESTAMP NOT NULL,
+    UNIQUE (user_id, subject_norm, tag)
+);
+
+CREATE INDEX idx_user_lesson_urls_user ON user_lesson_urls (user_id);
+```
+
+- **Why a separate table instead of a column on `user_lessons`**:
+  `storage.ReplaceLessons` runs inside a transaction that deletes all existing `user_lessons` for
+  a student (`DELETE FROM user_lessons WHERE user_id = ?`) before inserting the freshly parsed batch.
+  Storing URLs directly in `user_lessons` would cause every extension re-sync to either erase all custom
+  URLs or require complicated pre-delete extraction and post-insert reconciliation. Storing URLs in
+  `user_lesson_urls` completely decouples student customization from schedule ingestion: schedule
+  replacements can happen at any time without touching `user_lesson_urls`.
+- **Lesson Identity Key (`subject_norm, tag`)**:
+  - `subject_norm`: Collapses whitespace, removes non-essential punctuation, and lower-cases the
+    course title via `engine.NormalizeSubject`. This shields stored URLs from trivial typography
+    changes between scrapes.
+  - `tag`: Distinguishes between lectures (`"lec"`), practices/seminars (`"prac"`), and labs (`"lab"`).
+    This allows students to assign distinct meeting links to lectures and practices of the same discipline.
+- **Online vs. Offline Handling**:
+  `model.LocationKind` inspects raw and enriched location strings. Offline classes (e.g. rooms like `"18-402"`)
+  are automatically excluded from the `/urls` configuration menu, preventing useless URL prompts for
+  on-campus classes.
+
+#### Table `user_url_prompts`
+```sql
+CREATE TABLE user_url_prompts (
+    user_id           TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    telegram_id       INTEGER NOT NULL UNIQUE,
+    prompt_message_id INTEGER NOT NULL,
+    subject_norm      TEXT NOT NULL,
+    tag               TEXT NOT NULL DEFAULT '',
+    subject_name      TEXT NOT NULL,
+    updated_at        TIMESTAMP NOT NULL
+);
+```
+
+- **Clean Chat UX via In-Place Mutation**:
+  When a student selects a lesson to edit in the bot, the server saves an active prompt row in
+  `user_url_prompts` recording the Telegram `prompt_message_id`. When the student replies with a URL:
+  1. The bot calls Telegram's `deleteMessage` API to **immediately delete the student's text message**,
+     preventing chat pollution when multiple URLs are entered.
+  2. The bot edits the original message (`prompt_message_id`) in place to show success or error states.
+- **Persistence Across Restarts**:
+  Because the prompt state is stored in SQLite (rather than volatile in-memory maps), active prompts survive
+  server restarts, deployments, and idle VM sleep cycles without dropping user interactions.
+
 
 ## 3. No Credential Storage, No Encryption
 

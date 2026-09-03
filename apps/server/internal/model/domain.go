@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -100,3 +101,47 @@ type ParsedLesson struct {
 	TeacherRaw  string
 	LocationRaw string
 }
+
+// UniqueLesson represents a distinct course session (grouped by subject and tag)
+// for managing online links.
+type UniqueLesson struct {
+	Subject     string
+	SubjectNorm string
+	Tag         string
+	IsOnline    bool
+	URL         string
+}
+
+// URLPrompt tracks an in-flight prompt asking the user to send a URL for a lesson.
+type URLPrompt struct {
+	UserID          uuid.UUID
+	TelegramID      int64
+	PromptMessageID int64
+	SubjectNorm     string
+	Tag             string
+	SubjectName     string
+	UpdatedAt       time.Time
+}
+
+// LocationKind returns "Онлайн" or "Оффлайн" based on location text.
+func LocationKind(location string) string {
+	if location == "" {
+		return "Онлайн"
+	}
+	lower := strings.ToLower(location)
+	if strings.Contains(lower, "онлайн") || strings.Contains(lower, "online") ||
+		strings.Contains(lower, "zoom") || strings.Contains(lower, "meet") ||
+		strings.Contains(lower, "teams") || strings.Contains(lower, "дистанц") ||
+		strings.Contains(lower, "webex") || strings.HasPrefix(lower, "http://") ||
+		strings.HasPrefix(lower, "https://") {
+		return "Онлайн"
+	}
+	return "Оффлайн"
+}
+
+// IsOnline reports whether a location represents an online lesson.
+func IsOnline(location string) bool {
+	return LocationKind(location) == "Онлайн"
+}
+
+

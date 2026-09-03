@@ -51,3 +51,4 @@ func NormalizeTag(typeLabel string) string {
 		return ""
 	}
 }
+

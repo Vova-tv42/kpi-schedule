@@ -14,6 +14,7 @@ import (
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters/callbackquery"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters/message"
 
 	"kpi-schedule-bot/server/internal/api"
 	"kpi-schedule-bot/server/internal/storage"
@@ -55,9 +56,12 @@ func New(token string, svc *api.Service, db *storage.DB, botOpts ...*gotgbot.Bot
 	dispatcher.AddHandler(handlers.NewCommand("link", b.cmdLink))
 	dispatcher.AddHandler(handlers.NewCommand("today", b.cmdToday))
 	dispatcher.AddHandler(handlers.NewCommand("week", b.cmdWeek))
+	dispatcher.AddHandler(handlers.NewCommand("urls", b.cmdURLs))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(navCallbackPrefix), b.onNav))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(weekCallbackPrefix), b.onWeek))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(menuCallbackPrefix), b.onMenu))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(urlsCallbackPrefix), b.onURLs))
+	dispatcher.AddHandler(handlers.NewMessage(message.All, b.onTextMessage))
 
 	b.dispatcher = dispatcher
 	b.updater = ext.NewUpdater(dispatcher, nil)

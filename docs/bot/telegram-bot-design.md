@@ -20,6 +20,7 @@ The Telegram Bot provides students with quick, frictionless access to their veri
 | :--- | :--- | :--- |
 | `/start` | ✅ Implemented | Onboarding screen: extension prerequisite + a button that swaps the message over to the pairing code; notes an existing sync and offers a direct schedule button when one is fresh (see §3.3). |
 | `/link` | ✅ Implemented | Generates a 6-digit one-time code for Browser Extension pairing — the same screen the `/start` button leads to. |
+| `/urls` | ✅ Implemented | Interactive menu to manage custom lesson conference URLs (Zoom, Meet, etc.) with prompt-and-delete chat flow (see §3.4). |
 | `/today` | ✅ Implemented | Shows today's classes with locations and teacher names, with ◀️ Вчора / 📅 Сьогодні / Завтра ▶️ inline day-navigation. |
 | `/week` | ✅ Implemented | Shows one academic week compactly, with previous/current/next week slots and a jump to today (see §3.2). |
 | `/tomorrow` | Not yet built | Shows tomorrow's classes. |
@@ -36,10 +37,10 @@ The Telegram Bot provides students with quick, frictionless access to their veri
 ```text
 📅 Розклад на 02.09 (Вівторок)
 
-08:30 Процеси розробки вбудованого ПЗ (Лек., Offline)
+08:30 Процеси розробки вбудованого ПЗ [Лек., Оффлайн]
 Викладач: Гуменний Д. О.
 
-10:25 Технології DevOps (Практ., Online)
+10:25 Технології DevOps [Практ., Онлайн]    ← clickable link if URL added
 Викладач: Колумбет В. П.
 
 [ ◀️ Вчора ]  [ 📅 Сьогодні ]  [ Завтра ▶️ ]
@@ -52,8 +53,9 @@ to. There is no separate "refresh" button: every render re-reads storage, so the
 always fresh — tapping 📅 Сьогодні while already on today is the refresh. The date is
 day/month only (no year) and the week/group summary row is gone entirely — a student
 already knows their own group, and the parity shows up on the `/week` screen. The
-room/online-meeting detail is reduced to a same-line `(Лек., Online)`-style tag: enough to
-know whether to walk somewhere, not the literal address.
+room/online-meeting detail is formatted as `[Лек.|Практ., Онлайн|Оффлайн]`: when a URL
+is available for this online lesson, the text is wrapped with an HTML link `<a href="...">...</a>`
+so students can tap it directly to join.
 
 ### 3.2 Weekly Schedule View (`/week`)
 
@@ -65,12 +67,12 @@ block for six days would not fit a Telegram message):
 Група: ІП-21
 
 ▎Понеділок
-10:25 Практичний курс іноземної мови. Частина 1 (лек.)
-12:20 Компоненти програмної інженерії. Частина 4 (лек.)
+10:25 Практичний курс іноземної мови. Частина 1 [Лек., Онлайн]
+12:20 Компоненти програмної інженерії. Частина 4 [Лек., Онлайн]
 
 ▎Середа - Сьогодні
-08:30 Процеси розробки вбудованого ПЗ (прак.)
-16:10 Основи розробки трансляторів (прак.)
+08:30 Процеси розробки вбудованого ПЗ [Практ., Оффлайн]
+16:10 Основи розробки трансляторів [Практ., Онлайн]
 
 [ ◀️ Минулий ]  [ ✅ Поточний ]  [ Наступний ▶️ ]
 [ 📅 Розклад на сьогодні ]
@@ -79,6 +81,9 @@ block for six days would not fit a Telegram message):
 ("Перший"/"Другий", "Група:", and the lesson time are HTML `<b>`/`<code>`; the day header
 (`▎…`) is a native Telegram `<blockquote>` — plain-text approximations here for
 readability.)
+
+Each lesson displays its `[Лек.|Практ., Онлайн|Оффлайн]` tag, wrapping it in an HTML link
+whenever a custom URL is stored.
 
 The three week buttons are **fixed slots** relative to the real current week (offsets −1,
 0, +1), not steps relative to what is on screen — so navigation never drifts further than
@@ -122,6 +127,55 @@ re-pairing is always possible:
 
 `◀️ Назад` re-evaluates this state rather than restoring a snapshot, so a student who pairs
 the extension in another tab and then goes back sees the updated screen.
+
+### 3.4 Lesson URLs Interactive Menu (`/urls`)
+
+Allows students to associate video conference links (Zoom, Google Meet, Teams, etc.) with their
+online lessons.
+
+#### Key Principles:
+1. **Deduplication & Refresh Resilience**:
+   - Identical lessons are grouped across the entire semester by `(subject_norm, tag)`.
+   - Lectures (`tag: "lec"`) and practices (`tag: "prac"`) are distinct items with separate URLs.
+   - URLs are stored in a dedicated table (`user_lesson_urls`), so they survive full schedule
+     re-syncs and replacements from the browser extension.
+2. **Offline Exclusion**:
+   - Classes determined to be in-person/offline (`[... , Оффлайн]`) are excluded from the editable
+     lessons menu.
+3. **Zero Chat Pollution (Auto-Deletion)**:
+   - When a student taps a lesson button, the interactive menu message edits in-place to prompt for the URL.
+   - Any message the user sends during this active prompt is **immediately deleted** via `deleteMessage`
+     (in both success and error cases), keeping the chat completely clean.
+4. **Validation & Inline Error Handling**:
+   - URLs are trimmed and validated (`http`/`https`, host domain, URI parsing).
+   - If invalid, the prompt message updates in place with an error notice and asks for a valid URL,
+     offering a `[ ◀️ Назад ]` button to cancel.
+   - If valid, the URL is saved, the active prompt is cleared, and the message edits back to the
+     lesson selection list with a confirmation banner.
+   - An existing URL can also be removed via `[ 🗑 Видалити посилання ]`.
+
+```text
+🔗 Посилання на онлайн-заняття
+
+• Технології DevOps [Лек., Онлайн] (https://zoom.us/...)
+• Технології DevOps [Практ., Онлайн]
+
+Обери заняття зі списку нижче, щоб додати або змінити посилання:
+
+[ 🔗 Технології DevOps (Лек.) ]
+[ ➕ Технології DevOps (Практ.) ]
+[ 📅 До розкладу ]
+
+        ↓ (tapped a lesson, message edited in-place)
+
+🔗 Технології DevOps [Лек., Онлайн]
+Поточне посилання: https://zoom.us/...
+
+Надішли посилання на це заняття (Zoom, Google Meet тощо):
+
+[ 🗑 Видалити посилання ]
+[ ◀️ Назад ]
+```
 
 ---
 

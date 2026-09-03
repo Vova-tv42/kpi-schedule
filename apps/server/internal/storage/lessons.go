@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -128,3 +129,184 @@ func (db *DB) GetLessonsByDateRange(ctx context.Context, userID uuid.UUID, start
 	}
 	return lessons, rows.Err()
 }
+
+// SetLessonURL saves or updates a custom URL for a lesson identified by user, normalized subject, and tag.
+func (db *DB) SetLessonURL(ctx context.Context, userID uuid.UUID, subjectNorm, tag, url string) error {
+	now := time.Now().UTC()
+	_, err := db.SQL.ExecContext(ctx, `
+		INSERT INTO user_lesson_urls (id, user_id, subject_norm, tag, url, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (user_id, subject_norm, tag) DO UPDATE
+		SET url = excluded.url, updated_at = excluded.updated_at
+	`, uuid.New(), userID, subjectNorm, tag, url, now, now)
+	if err != nil {
+		return fmt.Errorf("saving lesson url: %w", err)
+	}
+	return nil
+}
+
+// GetLessonURLs returns all stored custom URLs for user's lessons as a map keyed by "subject_norm|tag".
+func (db *DB) GetLessonURLs(ctx context.Context, userID uuid.UUID) (map[string]string, error) {
+	rows, err := db.SQL.QueryContext(ctx, `
+		SELECT subject_norm, tag, url FROM user_lesson_urls WHERE user_id = ?
+	`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("querying lesson urls: %w", err)
+	}
+	defer rows.Close()
+
+	urls := make(map[string]string)
+	for rows.Next() {
+		var sn, tag, url string
+		if err := rows.Scan(&sn, &tag, &url); err != nil {
+			return nil, fmt.Errorf("scanning lesson url: %w", err)
+		}
+		urls[sn+"|"+tag] = url
+	}
+	return urls, rows.Err()
+}
+
+// DeleteLessonURL deletes a stored custom URL for a lesson.
+func (db *DB) DeleteLessonURL(ctx context.Context, userID uuid.UUID, subjectNorm, tag string) error {
+	_, err := db.SQL.ExecContext(ctx, `
+		DELETE FROM user_lesson_urls WHERE user_id = ? AND subject_norm = ? AND tag = ?
+	`, userID, subjectNorm, tag)
+	if err != nil {
+		return fmt.Errorf("deleting lesson url: %w", err)
+	}
+	return nil
+}
+
+// SetURLPrompt records an active prompt for a user entering a URL.
+func (db *DB) SetURLPrompt(ctx context.Context, userID uuid.UUID, telegramID, promptMsgID int64, subjectNorm, tag, subjectName string) error {
+	_, err := db.SQL.ExecContext(ctx, `
+		INSERT INTO user_url_prompts (user_id, telegram_id, prompt_message_id, subject_norm, tag, subject_name, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (telegram_id) DO UPDATE
+		SET prompt_message_id = excluded.prompt_message_id,
+		    subject_norm = excluded.subject_norm,
+		    tag = excluded.tag,
+		    subject_name = excluded.subject_name,
+		    updated_at = excluded.updated_at
+	`, userID, telegramID, promptMsgID, subjectNorm, tag, subjectName, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("saving url prompt: %w", err)
+	}
+	return nil
+}
+
+// GetURLPrompt retrieves the active URL entry prompt for a Telegram user.
+func (db *DB) GetURLPrompt(ctx context.Context, telegramID int64) (*model.URLPrompt, error) {
+	row := db.SQL.QueryRowContext(ctx, `
+		SELECT user_id, telegram_id, prompt_message_id, subject_norm, tag, subject_name, updated_at
+		FROM user_url_prompts WHERE telegram_id = ?
+	`, telegramID)
+
+	var p model.URLPrompt
+	if err := row.Scan(&p.UserID, &p.TelegramID, &p.PromptMessageID, &p.SubjectNorm, &p.Tag, &p.SubjectName, &p.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("fetching url prompt: %w", err)
+	}
+	return &p, nil
+}
+
+// ClearURLPrompt removes the active URL entry prompt for a Telegram user.
+func (db *DB) ClearURLPrompt(ctx context.Context, telegramID int64) error {
+	_, err := db.SQL.ExecContext(ctx, `DELETE FROM user_url_prompts WHERE telegram_id = ?`, telegramID)
+	if err != nil {
+		return fmt.Errorf("clearing url prompt: %w", err)
+	}
+	return nil
+}
+
+// GetUniqueScheduleLessons returns deduplicated online lessons from user_lessons,
+// excluding offline classes, and populated with existing custom URLs.
+func (db *DB) GetUniqueScheduleLessons(ctx context.Context, userID uuid.UUID) ([]model.UniqueLesson, error) {
+	rows, err := db.SQL.QueryContext(ctx, `
+		SELECT subject, subject_norm, tag, location_raw, location_title
+		FROM user_lessons
+		WHERE user_id = ?
+		ORDER BY subject, tag
+	`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("querying unique lessons: %w", err)
+	}
+	defer rows.Close()
+
+	type groupData struct {
+		subject     string
+		subjectNorm string
+		tag         string
+		hasOnline   bool
+	}
+	groups := make(map[string]*groupData)
+	var groupKeys []string
+
+	for rows.Next() {
+		var subject, subjectNorm, tag, locRaw string
+		var locTitle *string
+		if err := rows.Scan(&subject, &subjectNorm, &tag, &locRaw, &locTitle); err != nil {
+			return nil, fmt.Errorf("scanning unique lesson row: %w", err)
+		}
+		key := subjectNorm + "|" + tag
+		loc := locRaw
+		if locTitle != nil && *locTitle != "" {
+			loc = *locTitle
+		}
+		isOnline := model.IsOnline(loc)
+
+		g, exists := groups[key]
+		if !exists {
+			g = &groupData{
+				subject:     subject,
+				subjectNorm: subjectNorm,
+				tag:         tag,
+				hasOnline:   isOnline,
+			}
+			groups[key] = g
+			groupKeys = append(groupKeys, key)
+		} else {
+			if isOnline {
+				g.hasOnline = true
+			}
+			if g.subject == "" && subject != "" {
+				g.subject = subject
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	urls, err := db.GetLessonURLs(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("getting lesson urls: %w", err)
+	}
+
+	var unique []model.UniqueLesson
+	for _, key := range groupKeys {
+		g := groups[key]
+		if !g.hasOnline {
+			continue
+		}
+		unique = append(unique, model.UniqueLesson{
+			Subject:     g.subject,
+			SubjectNorm: g.subjectNorm,
+			Tag:         g.tag,
+			IsOnline:    true,
+			URL:         urls[key],
+		})
+	}
+
+	sort.Slice(unique, func(i, j int) bool {
+		if unique[i].Subject != unique[j].Subject {
+			return unique[i].Subject < unique[j].Subject
+		}
+		return unique[i].Tag < unique[j].Tag
+	})
+
+	return unique, nil
+}
+

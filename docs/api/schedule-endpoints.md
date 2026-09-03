@@ -77,7 +77,8 @@ All schedule endpoints return the unified, deduplicated, and enriched schedule f
         "title": "5-508",
         "uri": "https://kpi.ua/k-5"
       },
-      "enriched": true
+      "enriched": true,
+      "url": "https://zoom.us/j/123456789"
     }
   ]
 }

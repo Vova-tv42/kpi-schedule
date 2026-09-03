@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
@@ -49,6 +52,7 @@ func (b *Bot) renderDay(ctx context.Context, telegramID int64, date time.Time) (
 			Tag:         l.Tag,
 			TeacherRaw:  l.TeacherRaw,
 			LocationRaw: l.LocationRaw,
+			URL:         l.URL,
 		}
 		if l.Lecturer != nil {
 			line.LecturerName = l.Lecturer.Name
@@ -105,11 +109,21 @@ func (b *Bot) renderWeek(ctx context.Context, telegramID int64, offset int) (tex
 	for _, d := range block.Days {
 		lessons := make([]lessonLine, 0, len(d.Lessons))
 		for _, l := range d.Lessons {
-			lessons = append(lessons, lessonLine{
-				Time: l.Time,
-				Name: l.Name,
-				Tag:  l.Tag,
-			})
+			line := lessonLine{
+				Time:        l.Time,
+				Name:        l.Name,
+				Tag:         l.Tag,
+				TeacherRaw:  l.TeacherRaw,
+				LocationRaw: l.LocationRaw,
+				URL:         l.URL,
+			}
+			if l.Lecturer != nil {
+				line.LecturerName = l.Lecturer.Name
+			}
+			if l.Location != nil {
+				line.LocationTitle = l.Location.Title
+			}
+			lessons = append(lessons, line)
 		}
 		days = append(days, weekDayLine{DayName: d.DayName, Lessons: lessons})
 	}
@@ -187,6 +201,126 @@ func (b *Bot) cmdWeek(bot *gotgbot.Bot, ctx *ext.Context) error {
 	return sendScreen(bot, ctx.EffectiveChat.Id, text, kb, hasKeyboard)
 }
 
+func (b *Bot) cmdURLs(bot *gotgbot.Bot, ctx *ext.Context) error {
+	reqCtx := context.Background()
+
+	user, err := b.resolveUser(reqCtx, ctx.EffectiveUser.Id)
+	if err != nil {
+		if errors.Is(err, ErrNotLinked) {
+			_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, notLinkedText, nil)
+			return sendErr
+		}
+		slog.Error("resolving user for /urls", "error", err, "telegram_id", ctx.EffectiveUser.Id)
+		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, genericErrorText, nil)
+		return sendErr
+	}
+
+	_ = b.db.ClearURLPrompt(reqCtx, ctx.EffectiveUser.Id)
+
+	lessons, err := b.db.GetUniqueScheduleLessons(reqCtx, user.ID)
+	if err != nil {
+		slog.Error("getting unique lessons for /urls", "error", err, "telegram_id", ctx.EffectiveUser.Id)
+		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, genericErrorText, nil)
+		return sendErr
+	}
+
+	text := formatLessonsMenu(lessons, "")
+	kb := urlsKeyboard(lessons)
+
+	_, err = bot.SendMessage(ctx.EffectiveChat.Id, text, &gotgbot.SendMessageOpts{
+		ParseMode:   "HTML",
+		ReplyMarkup: kb,
+	})
+	return err
+}
+
+func (b *Bot) onTextMessage(bot *gotgbot.Bot, ctx *ext.Context) error {
+	msg := ctx.EffectiveMessage
+	if msg == nil || msg.Text == "" {
+		return nil
+	}
+
+	reqCtx := context.Background()
+	prompt, err := b.db.GetURLPrompt(reqCtx, ctx.EffectiveUser.Id)
+	if err != nil {
+		slog.Error("checking url prompt", "error", err, "telegram_id", ctx.EffectiveUser.Id)
+		return nil
+	}
+	if prompt == nil {
+		return nil
+	}
+
+	// Delete user message immediately to avoid chat pollution
+	if _, err := bot.DeleteMessage(ctx.EffectiveChat.Id, msg.MessageId, nil); err != nil {
+		slog.Warn("could not delete user url message", "error", err, "chat_id", ctx.EffectiveChat.Id, "message_id", msg.MessageId)
+	}
+
+	if strings.HasPrefix(msg.Text, "/") {
+		_ = b.db.ClearURLPrompt(reqCtx, ctx.EffectiveUser.Id)
+		return nil
+	}
+
+	rawURL := strings.TrimSpace(msg.Text)
+	hash := lessonHash(prompt.SubjectNorm, prompt.Tag)
+	if !isValidURL(rawURL) {
+		text := formatURLPrompt(prompt.SubjectName, prompt.Tag, "", "Некоректне посилання. Будь ласка, надішли дійсне посилання (наприклад: https://zoom.us/j/...):")
+		kb := urlPromptKeyboard(false, hash)
+		opts := &gotgbot.EditMessageTextOpts{
+			ChatId:      ctx.EffectiveChat.Id,
+			MessageId:   prompt.PromptMessageID,
+			Text:        text,
+			ParseMode:   "HTML",
+			ReplyMarkup: kb,
+		}
+		_, _, _ = bot.EditMessageText(opts)
+		return nil
+	}
+
+	if err := b.db.SetLessonURL(reqCtx, prompt.UserID, prompt.SubjectNorm, prompt.Tag, rawURL); err != nil {
+		slog.Error("saving lesson url", "error", err, "telegram_id", ctx.EffectiveUser.Id)
+		return nil
+	}
+	_ = b.db.ClearURLPrompt(reqCtx, ctx.EffectiveUser.Id)
+
+	lessons, err := b.db.GetUniqueScheduleLessons(reqCtx, prompt.UserID)
+	if err != nil {
+		slog.Error("fetching unique lessons after url save", "error", err, "telegram_id", ctx.EffectiveUser.Id)
+		return nil
+	}
+
+	notice := fmt.Sprintf("✅ Посилання для «<b>%s (%s)</b>» збережено!", html.EscapeString(prompt.SubjectName), tagAbbr(prompt.Tag))
+	text := formatLessonsMenu(lessons, notice)
+	kb := urlsKeyboard(lessons)
+
+	opts := &gotgbot.EditMessageTextOpts{
+		ChatId:      ctx.EffectiveChat.Id,
+		MessageId:   prompt.PromptMessageID,
+		Text:        text,
+		ParseMode:   "HTML",
+		ReplyMarkup: kb,
+	}
+	_, _, _ = bot.EditMessageText(opts)
+	return nil
+}
+
+func isValidURL(raw string) bool {
+	if len(raw) < 10 || len(raw) > 2048 {
+		return false
+	}
+	u, err := url.ParseRequestURI(raw)
+	if err != nil {
+		return false
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return false
+	}
+	if u.Host == "" || !strings.Contains(u.Host, ".") {
+		return false
+	}
+	return true
+}
+
 // sendScreen posts a screen as a new message. Only typed commands do this —
 // button taps edit the existing message instead (see applyScreen).
 func sendScreen(bot *gotgbot.Bot, chatID int64, text string, kb gotgbot.InlineKeyboardMarkup, hasKeyboard bool) error {
@@ -197,3 +331,4 @@ func sendScreen(bot *gotgbot.Bot, chatID int64, text string, kb gotgbot.InlineKe
 	_, err := bot.SendMessage(chatID, text, opts)
 	return err
 }
+

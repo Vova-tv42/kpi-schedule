@@ -31,9 +31,15 @@ func (s *Service) BuildDay(ctx context.Context, user model.User, targetDate time
 		return dayView{}, fmt.Errorf("loading lessons: %w", err)
 	}
 
+	urls, err := s.db.GetLessonURLs(ctx, user.ID)
+	if err != nil {
+		return dayView{}, fmt.Errorf("loading lesson urls: %w", err)
+	}
+
 	views := make([]lessonView, 0, len(lessons))
 	for _, l := range lessons {
-		views = append(views, toLessonView(l))
+		url := urls[l.SubjectNorm+"|"+l.Tag]
+		views = append(views, toLessonView(l, url))
 	}
 	sort.Slice(views, func(i, j int) bool { return views[i].Time < views[j].Time })
 
@@ -95,6 +101,11 @@ func (s *Service) BuildWeek(ctx context.Context, user model.User, weekFilter int
 		return weekView{}, fmt.Errorf("loading lessons: %w", err)
 	}
 
+	urls, err := s.db.GetLessonURLs(ctx, user.ID)
+	if err != nil {
+		return weekView{}, fmt.Errorf("loading lesson urls: %w", err)
+	}
+
 	for _, w := range weeksToBuild {
 		byDay := make(map[int][]lessonView)
 		// The scan window above spans several real calendar weeks of the
@@ -115,7 +126,8 @@ func (s *Service) BuildWeek(ctx context.Context, user model.User, weekFilter int
 				continue
 			}
 			seen[key] = true
-			byDay[l.Day] = append(byDay[l.Day], toLessonView(l))
+			url := urls[l.SubjectNorm+"|"+l.Tag]
+			byDay[l.Day] = append(byDay[l.Day], toLessonView(l, url))
 		}
 
 		var days []weekDayView

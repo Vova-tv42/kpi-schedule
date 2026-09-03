@@ -34,9 +34,10 @@ type lessonView struct {
 	Lecturer    *lecturerView `json:"lecturer,omitempty"`
 	Location    *locationView `json:"location,omitempty"`
 	Enriched    bool          `json:"enriched"`
+	URL         string        `json:"url,omitempty"`
 }
 
-func toLessonView(l model.Lesson) lessonView {
+func toLessonView(l model.Lesson, url string) lessonView {
 	v := lessonView{
 		Date:        l.Date.Format("2006-01-02"),
 		Slot:        l.Slot,
@@ -47,6 +48,7 @@ func toLessonView(l model.Lesson) lessonView {
 		TeacherRaw:  l.TeacherRaw,
 		LocationRaw: l.LocationRaw,
 		Enriched:    l.Enriched,
+		URL:         url,
 	}
 	if l.Lecturer != nil {
 		v.Lecturer = &lecturerView{ID: l.Lecturer.ID, Name: l.Lecturer.Name}

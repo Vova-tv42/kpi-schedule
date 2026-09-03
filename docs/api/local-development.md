@@ -9,7 +9,7 @@
 > else (health check, groups, time/current, the `ERR_AUTH_REQUIRED` path) still works exactly
 > as described.
 
-The Telegram bot now exists for a first slice of commands (`/start`, `/link`, `/today`, `/week`,
+The Telegram bot now exists for a first slice of commands (`/start`, `/link`, `/today`, `/week`, `/urls`,
 all as inline-button screens — see [`docs/bot/telegram-bot-design.md`](../bot/telegram-bot-design.md)),
 but it's optional for local API work: without `TELEGRAM_BOT_TOKEN` set, the server runs
 API-only and everything below still works exactly as described, exercised directly with
@@ -121,6 +121,7 @@ In Telegram, message your bot:
 /link    → a 6-digit pairing code, valid 10 minutes
 /today   → day schedule with ◀️ Вчора / 📅 Сьогодні / Завтра ▶️ buttons once linked
 /week    → one academic week, with previous/current/next week slots
+/urls    → interactive menu to add, edit, or delete video conference URLs for online lessons
 ```
 
 Every button edits the same message in place rather than sending a new one — confirm no new

@@ -11,6 +11,8 @@ import (
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
+
+	"kpi-schedule-bot/server/internal/model"
 )
 
 // Each screen namespaces its buttons with its own CallbackData prefix, so one
@@ -20,6 +22,7 @@ const (
 	navCallbackPrefix  = "nav:"  // day screen: prev / today / next
 	weekCallbackPrefix = "week:" // week screen: week slots + jump to today
 	menuCallbackPrefix = "menu:" // onboarding screens: link / back / week
+	urlsCallbackPrefix = "urls:" // lesson URLs screens: edit / back / del / today
 )
 
 // navCallbackData encodes an action ("prev"/"next"/"today") plus the
@@ -110,6 +113,120 @@ func (b *Bot) onMenu(bot *gotgbot.Bot, ctx *ext.Context) error {
 		return answerSilently(bot, cq)
 	}
 }
+
+// onURLs handles callbacks from the lesson URLs screens.
+func (b *Bot) onURLs(bot *gotgbot.Bot, ctx *ext.Context) error {
+	cq := ctx.CallbackQuery
+	action := strings.TrimPrefix(cq.Data, urlsCallbackPrefix)
+
+	switch {
+	case action == "today":
+		_ = b.db.ClearURLPrompt(context.Background(), cq.From.Id)
+		return b.editToDay(bot, cq, time.Now())
+	case action == "back":
+		_ = b.db.ClearURLPrompt(context.Background(), cq.From.Id)
+		return b.editToLessonsMenu(bot, cq, "")
+	case strings.HasPrefix(action, "edit:"):
+		hash := strings.TrimPrefix(action, "edit:")
+		return b.editToURLPrompt(bot, cq, hash)
+	case strings.HasPrefix(action, "del:"):
+		hash := strings.TrimPrefix(action, "del:")
+		return b.handleDeleteURL(bot, cq, hash)
+	default:
+		return answerSilently(bot, cq)
+	}
+}
+
+func (b *Bot) editToLessonsMenu(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, notice string) error {
+	reqCtx := context.Background()
+	user, err := b.resolveUser(reqCtx, cq.From.Id)
+	if err != nil {
+		return answerWithError(bot, cq)
+	}
+
+	lessons, err := b.db.GetUniqueScheduleLessons(reqCtx, user.ID)
+	if err != nil {
+		slog.Error("fetching unique lessons for callback", "error", err, "telegram_id", cq.From.Id)
+		return answerWithError(bot, cq)
+	}
+
+	text := formatLessonsMenu(lessons, notice)
+	kb := urlsKeyboard(lessons)
+	return b.applyScreen(bot, cq, text, kb, true)
+}
+
+func (b *Bot) editToURLPrompt(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, hash string) error {
+	reqCtx := context.Background()
+	user, err := b.resolveUser(reqCtx, cq.From.Id)
+	if err != nil {
+		return answerWithError(bot, cq)
+	}
+
+	lessons, err := b.db.GetUniqueScheduleLessons(reqCtx, user.ID)
+	if err != nil {
+		slog.Error("fetching unique lessons for prompt", "error", err, "telegram_id", cq.From.Id)
+		return answerWithError(bot, cq)
+	}
+
+	var target *model.UniqueLesson
+	for _, l := range lessons {
+		if lessonHash(l.SubjectNorm, l.Tag) == hash {
+			lCopy := l
+			target = &lCopy
+			break
+		}
+	}
+	if target == nil {
+		return answerWithError(bot, cq)
+	}
+
+	msgID := cq.Message.GetMessageId()
+	if err := b.db.SetURLPrompt(reqCtx, user.ID, cq.From.Id, msgID, target.SubjectNorm, target.Tag, target.Subject); err != nil {
+		slog.Error("setting url prompt", "error", err, "telegram_id", cq.From.Id)
+		return answerWithError(bot, cq)
+	}
+
+	text := formatURLPrompt(target.Subject, target.Tag, target.URL, "")
+	kb := urlPromptKeyboard(target.URL != "", hash)
+	return b.applyScreen(bot, cq, text, kb, true)
+}
+
+func (b *Bot) handleDeleteURL(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, hash string) error {
+	reqCtx := context.Background()
+	user, err := b.resolveUser(reqCtx, cq.From.Id)
+	if err != nil {
+		return answerWithError(bot, cq)
+	}
+
+	lessons, err := b.db.GetUniqueScheduleLessons(reqCtx, user.ID)
+	if err != nil {
+		slog.Error("fetching unique lessons for delete", "error", err, "telegram_id", cq.From.Id)
+		return answerWithError(bot, cq)
+	}
+
+	var target *model.UniqueLesson
+	for _, l := range lessons {
+		if lessonHash(l.SubjectNorm, l.Tag) == hash {
+			lCopy := l
+			target = &lCopy
+			break
+		}
+	}
+	if target != nil {
+		if err := b.db.DeleteLessonURL(reqCtx, user.ID, target.SubjectNorm, target.Tag); err != nil {
+			slog.Error("deleting lesson url", "error", err, "telegram_id", cq.From.Id)
+			return answerWithError(bot, cq)
+		}
+	}
+	_ = b.db.ClearURLPrompt(reqCtx, cq.From.Id)
+
+	subjectLabel := ""
+	if target != nil {
+		subjectLabel = fmt.Sprintf(" «%s (%s)»", target.Subject, tagAbbr(target.Tag))
+	}
+	return b.editToLessonsMenu(bot, cq, fmt.Sprintf("🗑 Посилання для%s видалено.", subjectLabel))
+}
+
 
 func (b *Bot) editToDay(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, date time.Time) error {
 	text, kb, hasKeyboard, err := b.renderDay(context.Background(), cq.From.Id, date)

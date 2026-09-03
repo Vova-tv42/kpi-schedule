@@ -1,12 +1,16 @@
 package bot
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"html"
 	"strings"
 	"time"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
+
+	"kpi-schedule-bot/server/internal/model"
 )
 
 // lessonLine and dayInfo are plain, bot-local mirrors of the (unexported)
@@ -21,6 +25,7 @@ type lessonLine struct {
 	LocationRaw   string
 	LecturerName  string
 	LocationTitle string
+	URL           string
 }
 
 type dayInfo struct {
@@ -124,28 +129,20 @@ func shortDate(date string) string {
 	return t.Format("02.01")
 }
 
-// locationKind classifies a lesson's raw/enriched location as online or
-// on-campus by keyword, since that's the only thing worth surfacing inline
-// (see lessonModeSuffix) — the exact room number is dropped as clutter.
-func locationKind(location string) string {
-	if location == "" {
-		return ""
+// formatLessonMode renders "[Лек.|Практ., Онлайн|Оффлайн]" after a lesson name.
+// If url is provided, the text is wrapped in an HTML link.
+func formatLessonMode(tag, location, url string) string {
+	kind := model.LocationKind(location)
+	text := fmt.Sprintf("[%s, %s]", tagAbbr(tag), kind)
+	if url != "" {
+		return fmt.Sprintf(`<a href="%s">%s</a>`, html.EscapeString(url), html.EscapeString(text))
 	}
-	lower := strings.ToLower(location)
-	if strings.Contains(lower, "онлайн") || strings.Contains(lower, "zoom") {
-		return "Online"
-	}
-	return "Offline"
+	return html.EscapeString(text)
 }
 
-// lessonModeSuffix renders "(Лек., Online)"-style trailer text appended after
-// a lesson's name, replacing the separate location row it used to get.
-func lessonModeSuffix(location, tag string) string {
-	parts := []string{tagAbbr(tag)}
-	if kind := locationKind(location); kind != "" {
-		parts = append(parts, kind)
-	}
-	return "(" + strings.Join(parts, ", ") + ")"
+func lessonHash(subjectNorm, tag string) string {
+	h := sha256.Sum256([]byte(subjectNorm + "|" + tag))
+	return hex.EncodeToString(h[:6])
 }
 
 // formatDay renders a day's schedule as an HTML-parse-mode Telegram message,
@@ -176,7 +173,7 @@ func formatDay(d dayInfo) string {
 		if location == "" {
 			location = l.LocationRaw
 		}
-		fmt.Fprintf(&b, "<code>%s</code> %s <i>%s</i>\n", hhmm(l.Time), html.EscapeString(l.Name), lessonModeSuffix(location, l.Tag))
+		fmt.Fprintf(&b, "<code>%s</code> %s <i>%s</i>\n", hhmm(l.Time), html.EscapeString(l.Name), formatLessonMode(l.Tag, location, l.URL))
 
 		teacher := l.LecturerName
 		if teacher == "" {
@@ -235,15 +232,93 @@ func formatWeek(w weekInfo, offset int, group *string) string {
 		b.WriteString("</blockquote>\n")
 
 		for _, l := range d.Lessons {
-			fmt.Fprintf(&b, "<code>%s</code> %s", hhmm(l.Time), html.EscapeString(l.Name))
-			if tag := tagShort(l.Tag); tag != "" {
-				fmt.Fprintf(&b, " <i>(%s)</i>", tag)
+			location := l.LocationTitle
+			if location == "" {
+				location = l.LocationRaw
 			}
-			b.WriteString("\n")
+			fmt.Fprintf(&b, "<code>%s</code> %s <i>%s</i>\n", hhmm(l.Time), html.EscapeString(l.Name), formatLessonMode(l.Tag, location, l.URL))
 		}
 	}
 
 	return b.String()
+}
+
+func formatLessonsMenu(lessons []model.UniqueLesson, notice string) string {
+	var b strings.Builder
+	b.WriteString("🔗 <b>Посилання на онлайн-заняття</b>\n\n")
+
+	if notice != "" {
+		b.WriteString(notice)
+		b.WriteString("\n\n")
+	}
+
+	if len(lessons) == 0 {
+		b.WriteString("📭 У твоєму розкладі не знайдено онлайн-занять для додавання посилань.\n")
+		return b.String()
+	}
+
+	for _, l := range lessons {
+		mode := formatLessonMode(l.Tag, "Онлайн", l.URL)
+		fmt.Fprintf(&b, "• %s <i>%s</i>\n", html.EscapeString(l.Subject), mode)
+	}
+
+	b.WriteString("\nОбери заняття зі списку нижче, щоб додати або змінити посилання:")
+	return b.String()
+}
+
+func urlsKeyboard(lessons []model.UniqueLesson) gotgbot.InlineKeyboardMarkup {
+	var rows [][]gotgbot.InlineKeyboardButton
+	for _, l := range lessons {
+		prefix := "➕ "
+		if l.URL != "" {
+			prefix = "🔗 "
+		}
+		title := l.Subject
+		runes := []rune(title)
+		if len(runes) > 30 {
+			title = string(runes[:27]) + "..."
+		}
+		btnText := fmt.Sprintf("%s%s (%s)", prefix, title, tagAbbr(l.Tag))
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: btnText, CallbackData: urlsCallbackPrefix + "edit:" + lessonHash(l.SubjectNorm, l.Tag)},
+		})
+	}
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "📅 До розкладу", CallbackData: urlsCallbackPrefix + "today"},
+	})
+	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func formatURLPrompt(subjectName, tag, currentURL, errorMsg string) string {
+	var b strings.Builder
+	mode := formatLessonMode(tag, "Онлайн", currentURL)
+	fmt.Fprintf(&b, "🔗 <b>%s</b> <i>%s</i>\n\n", html.EscapeString(subjectName), mode)
+
+	if errorMsg != "" {
+		fmt.Fprintf(&b, "❌ <b>%s</b>\n\n", html.EscapeString(errorMsg))
+	}
+
+	if currentURL != "" {
+		fmt.Fprintf(&b, "Поточне посилання: <a href=\"%s\">%s</a>\n\n", html.EscapeString(currentURL), html.EscapeString(currentURL))
+	} else {
+		b.WriteString("Поточне посилання: <i>не встановлено</i>\n\n")
+	}
+
+	b.WriteString("Надішли посилання на це заняття (Zoom, Google Meet тощо):")
+	return b.String()
+}
+
+func urlPromptKeyboard(hasURL bool, hash string) gotgbot.InlineKeyboardMarkup {
+	var rows [][]gotgbot.InlineKeyboardButton
+	if hasURL {
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: "🗑 Видалити посилання", CallbackData: urlsCallbackPrefix + "del:" + hash},
+		})
+	}
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "◀️ Назад", CallbackData: urlsCallbackPrefix + "back"},
+	})
+	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 // dayKeyboard builds the ◀️/📅/▶️ day-navigation row. CallbackData encodes
