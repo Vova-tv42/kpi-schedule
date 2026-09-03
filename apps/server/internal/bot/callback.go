@@ -315,10 +315,11 @@ func (b *Bot) editToLinkScreen(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery) erro
 func (b *Bot) applyScreen(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, text string, kb gotgbot.InlineKeyboardMarkup, hasKeyboard bool) error {
 	msg := cq.Message
 	opts := &gotgbot.EditMessageTextOpts{
-		ChatId:    msg.GetChat().Id,
-		MessageId: msg.GetMessageId(),
-		Text:      text,
-		ParseMode: "HTML",
+		ChatId:             msg.GetChat().Id,
+		MessageId:          msg.GetMessageId(),
+		Text:               text,
+		ParseMode:          "HTML",
+		LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
 	}
 	if hasKeyboard {
 		opts.ReplyMarkup = kb

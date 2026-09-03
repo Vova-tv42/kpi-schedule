@@ -291,8 +291,9 @@ func (b *Bot) cmdStart(bot *gotgbot.Bot, ctx *ext.Context) error {
 	}
 
 	_, err = bot.SendMessage(ctx.EffectiveChat.Id, formatStartScreen(state), &gotgbot.SendMessageOpts{
-		ParseMode:   "HTML",
-		ReplyMarkup: startKeyboard(state),
+		ParseMode:          "HTML",
+		ReplyMarkup:        startKeyboard(state),
+		LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
 	})
 	return err
 }
@@ -313,8 +314,9 @@ func (b *Bot) showGroupBindPicker(bot *gotgbot.Bot, ctx *ext.Context, chatID int
 	text := formatGroupBindPicker(chatTitle, groups)
 	kb := groupBindPickerKeyboard(chatID, groups)
 	_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, text, &gotgbot.SendMessageOpts{
-		ParseMode:   "HTML",
-		ReplyMarkup: kb,
+		ParseMode:          "HTML",
+		ReplyMarkup:        kb,
+		LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
 	})
 	return sendErr
 }
@@ -329,8 +331,9 @@ func (b *Bot) showGroupConfigScreen(bot *gotgbot.Bot, chatID int64, groupID uuid
 	text := formatGroupConfig(group, notice)
 	kb := groupConfigKeyboard(group)
 	_, sendErr := bot.SendMessage(chatID, text, &gotgbot.SendMessageOpts{
-		ParseMode:   "HTML",
-		ReplyMarkup: kb,
+		ParseMode:          "HTML",
+		ReplyMarkup:        kb,
+		LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
 	})
 	return sendErr
 }
@@ -354,8 +357,9 @@ func (b *Bot) cmdLink(bot *gotgbot.Bot, ctx *ext.Context) error {
 	}
 
 	_, err = bot.SendMessage(ctx.EffectiveChat.Id, formatLinkText(code, expiresIn), &gotgbot.SendMessageOpts{
-		ParseMode:   "HTML",
-		ReplyMarkup: linkKeyboard(),
+		ParseMode:          "HTML",
+		ReplyMarkup:        linkKeyboard(),
+		LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
 	})
 	return err
 }
@@ -453,8 +457,9 @@ func (b *Bot) cmdURLs(bot *gotgbot.Bot, ctx *ext.Context) error {
 	kb := urlsKeyboard(lessons)
 
 	_, err = bot.SendMessage(ctx.EffectiveChat.Id, text, &gotgbot.SendMessageOpts{
-		ParseMode:   "HTML",
-		ReplyMarkup: kb,
+		ParseMode:          "HTML",
+		ReplyMarkup:        kb,
+		LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
 	})
 	return err
 }
@@ -478,7 +483,11 @@ func (b *Bot) cmdGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 					{{Text: "⚙️ Відкрити налаштування в особистих", Url: fmt.Sprintf("https://t.me/%s?start=cfg_%s", botUsername, group.ID.String())}},
 				},
 			}
-			_, sendErr := bot.SendMessage(chatID, msg, &gotgbot.SendMessageOpts{ParseMode: "HTML", ReplyMarkup: kb})
+			_, sendErr := bot.SendMessage(chatID, msg, &gotgbot.SendMessageOpts{
+				ParseMode:          "HTML",
+				ReplyMarkup:        kb,
+				LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
+			})
 			return sendErr
 		}
 
@@ -488,7 +497,11 @@ func (b *Bot) cmdGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 				{{Text: "⚙️ Налаштувати в особистих", Url: fmt.Sprintf("https://t.me/%s?start=bind_%d", botUsername, chatID)}},
 			},
 		}
-		_, sendErr := bot.SendMessage(chatID, msg, &gotgbot.SendMessageOpts{ParseMode: "HTML", ReplyMarkup: kb})
+		_, sendErr := bot.SendMessage(chatID, msg, &gotgbot.SendMessageOpts{
+			ParseMode:          "HTML",
+			ReplyMarkup:        kb,
+			LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
+		})
 		return sendErr
 	}
 
@@ -503,8 +516,9 @@ func (b *Bot) cmdGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 	text := formatGroupListMenu(groups, "")
 	kb := groupListKeyboard(groups)
 	_, err = bot.SendMessage(ctx.EffectiveChat.Id, text, &gotgbot.SendMessageOpts{
-		ParseMode:   "HTML",
-		ReplyMarkup: kb,
+		ParseMode:          "HTML",
+		ReplyMarkup:        kb,
+		LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
 	})
 	return err
 }
@@ -587,11 +601,12 @@ func (b *Bot) handleGroupInput(bot *gotgbot.Bot, ctx *ext.Context, prompt *model
 				kb = groupPromptBackKeyboard(groupCallbackPrefix + "view:" + groupIDStr)
 			}
 			opts := &gotgbot.EditMessageTextOpts{
-				ChatId:      ctx.EffectiveChat.Id,
-				MessageId:   prompt.PromptMessageID,
-				Text:        text,
-				ParseMode:   "HTML",
-				ReplyMarkup: kb,
+				ChatId:             ctx.EffectiveChat.Id,
+				MessageId:          prompt.PromptMessageID,
+				Text:               text,
+				ParseMode:          "HTML",
+				ReplyMarkup:        kb,
+				LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
 			}
 			_, _, _ = bot.EditMessageText(opts)
 			return nil
@@ -625,11 +640,12 @@ func (b *Bot) handleGroupInput(bot *gotgbot.Bot, ctx *ext.Context, prompt *model
 		text := formatGroupConfig(created, notice)
 		kb := groupConfigKeyboard(created)
 		opts := &gotgbot.EditMessageTextOpts{
-			ChatId:      ctx.EffectiveChat.Id,
-			MessageId:   prompt.PromptMessageID,
-			Text:        text,
-			ParseMode:   "HTML",
-			ReplyMarkup: kb,
+			ChatId:             ctx.EffectiveChat.Id,
+			MessageId:          prompt.PromptMessageID,
+			Text:               text,
+			ParseMode:          "HTML",
+			ReplyMarkup:        kb,
+			LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
 		}
 		_, _, _ = bot.EditMessageText(opts)
 		return nil
@@ -649,11 +665,12 @@ func (b *Bot) handleGroupInput(bot *gotgbot.Bot, ctx *ext.Context, prompt *model
 		text := formatGroupConfig(updated, notice)
 		kb := groupConfigKeyboard(updated)
 		opts := &gotgbot.EditMessageTextOpts{
-			ChatId:      ctx.EffectiveChat.Id,
-			MessageId:   prompt.PromptMessageID,
-			Text:        text,
-			ParseMode:   "HTML",
-			ReplyMarkup: kb,
+			ChatId:             ctx.EffectiveChat.Id,
+			MessageId:          prompt.PromptMessageID,
+			Text:               text,
+			ParseMode:          "HTML",
+			ReplyMarkup:        kb,
+			LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
 		}
 		_, _, _ = bot.EditMessageText(opts)
 		return nil
@@ -723,11 +740,12 @@ func (b *Bot) onTextMessage(bot *gotgbot.Bot, ctx *ext.Context) error {
 		text := formatURLPrompt(prompt.SubjectName, prompt.Tag, "", "Некоректне посилання. Будь ласка, надішли дійсне посилання (наприклад: https://zoom.us/j/...):")
 		kb := urlPromptKeyboard(false, hash)
 		opts := &gotgbot.EditMessageTextOpts{
-			ChatId:      ctx.EffectiveChat.Id,
-			MessageId:   prompt.PromptMessageID,
-			Text:        text,
-			ParseMode:   "HTML",
-			ReplyMarkup: kb,
+			ChatId:             ctx.EffectiveChat.Id,
+			MessageId:          prompt.PromptMessageID,
+			Text:               text,
+			ParseMode:          "HTML",
+			ReplyMarkup:        kb,
+			LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
 		}
 		_, _, _ = bot.EditMessageText(opts)
 		return nil
@@ -750,11 +768,12 @@ func (b *Bot) onTextMessage(bot *gotgbot.Bot, ctx *ext.Context) error {
 	kb := urlsKeyboard(lessons)
 
 	opts := &gotgbot.EditMessageTextOpts{
-		ChatId:      ctx.EffectiveChat.Id,
-		MessageId:   prompt.PromptMessageID,
-		Text:        text,
-		ParseMode:   "HTML",
-		ReplyMarkup: kb,
+		ChatId:             ctx.EffectiveChat.Id,
+		MessageId:          prompt.PromptMessageID,
+		Text:               text,
+		ParseMode:          "HTML",
+		ReplyMarkup:        kb,
+		LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
 	}
 	_, _, _ = bot.EditMessageText(opts)
 	return nil
@@ -780,7 +799,10 @@ func isValidURL(raw string) bool {
 
 // sendScreen posts a screen as a new message.
 func sendScreen(bot *gotgbot.Bot, chatID int64, text string, kb gotgbot.InlineKeyboardMarkup, hasKeyboard bool) error {
-	opts := &gotgbot.SendMessageOpts{ParseMode: "HTML"}
+	opts := &gotgbot.SendMessageOpts{
+		ParseMode:          "HTML",
+		LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
+	}
 	if hasKeyboard {
 		opts.ReplyMarkup = kb
 	}
