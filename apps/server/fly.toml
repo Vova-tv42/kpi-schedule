@@ -1,4 +1,4 @@
-# fly.toml app configuration file for kpi-schedule-bot
+# fly.toml app configuration file for kpi-schedule
 # See https://fly.io/docs/reference/configuration/ for details.
 #
 # Architecture:
@@ -7,8 +7,8 @@
 #   incoming HTTP requests (API calls or Telegram webhook updates).
 # - SQLite persistence: Stored on a persistent Fly Volume mounted at /data.
 
-app = "kpi-schedule-bot"
-primary_region = "waw"
+app = "kpi-schedule"
+primary_region = "fra"
 
 [build]
   dockerfile = "Dockerfile"
@@ -33,7 +33,7 @@ primary_region = "waw"
     hard_limit = 150
 
 # Fly Volume for SQLite database persistence across scale-to-zero stop/start cycles.
-# Create via: fly volumes create kpi_data --size 1 --region waw
+# Create via: fly volumes create kpi_data --size 1 --region fra
 [mounts]
   source = "kpi_data"
   destination = "/data"

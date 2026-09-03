@@ -146,8 +146,8 @@ curl -L https://fly.io/install.sh | sh
 ### 1. Launch & Volume Creation
 From the `apps/server/` directory:
 ```bash
-# 1. Create a persistent volume in the primary region (waw = Warsaw)
-fly volumes create kpi_data --size 1 --region waw
+# 1. Create a persistent volume in the primary region (fra = Frankfurt)
+fly volumes create kpi_data --size 1 --region fra
 
 # 2. Configure production secrets
 fly secrets set \
