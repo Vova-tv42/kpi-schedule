@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"log/slog"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -75,7 +76,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, now time.Time) (DispatchResul
 			urls, _ := d.db.GetLessonURLs(ctx, u.ID)
 
 			for _, l := range lessons {
-				alertType, matches := matchAlertWindow(nowKyiv, l.StartTime)
+				alertType, minsBefore, matches := matchAlertWindow(nowKyiv, l.StartTime)
 				if !matches {
 					continue
 				}
@@ -90,11 +91,16 @@ func (d *Dispatcher) Dispatch(ctx context.Context, now time.Time) (DispatchResul
 					url = urls[l.SubjectNorm+"|"+l.Tag]
 				}
 
-				msg := formatPersonalAlert(alertType, l, url)
-				_, sendErr := d.sender.SendMessage(u.TelegramID, msg, &gotgbot.SendMessageOpts{
+				msg := formatAlertMessage(alertType, minsBefore, l.StartTime, l.Subject, l.Tag)
+				opts := &gotgbot.SendMessageOpts{
 					ParseMode:          "HTML",
 					LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
-				})
+				}
+				if kb := buildAlertKeyboard(l.Subject, url); kb != nil {
+					opts.ReplyMarkup = *kb
+				}
+
+				_, sendErr := d.sender.SendMessage(u.TelegramID, msg, opts)
 				if sendErr != nil {
 					slog.Warn("sending personal lesson alert", "error", sendErr, "telegram_id", u.TelegramID)
 				} else {
@@ -155,7 +161,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, now time.Time) (DispatchResul
 						continue
 					}
 
-					alertType, matches := matchAlertWindow(nowKyiv, p.Time)
+					alertType, minsBefore, matches := matchAlertWindow(nowKyiv, p.Time)
 					if !matches {
 						continue
 					}
@@ -172,11 +178,16 @@ func (d *Dispatcher) Dispatch(ctx context.Context, now time.Time) (DispatchResul
 						url = urls[norm+"|"+tag]
 					}
 
-					msg := formatGroupAlert(alertType, g.AcademicGroupName, p, url)
-					_, sendErr := d.sender.SendMessage(*g.TelegramChatID, msg, &gotgbot.SendMessageOpts{
+					msg := formatAlertMessage(alertType, minsBefore, p.Time, p.Name, p.Tag)
+					opts := &gotgbot.SendMessageOpts{
 						ParseMode:          "HTML",
 						LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
-					})
+					}
+					if kb := buildAlertKeyboard(p.Name, url); kb != nil {
+						opts.ReplyMarkup = *kb
+					}
+
+					_, sendErr := d.sender.SendMessage(*g.TelegramChatID, msg, opts)
 					if sendErr != nil {
 						slog.Warn("sending group lesson alert", "error", sendErr, "chat_id", *g.TelegramChatID)
 					} else {
@@ -192,25 +203,31 @@ func (d *Dispatcher) Dispatch(ctx context.Context, now time.Time) (DispatchResul
 	return result, nil
 }
 
-func matchAlertWindow(nowKyiv time.Time, startTime string) (model.AlertType, bool) {
+// matchAlertWindow checks if nowKyiv falls into the 15-5m before window or 5m before to 5m after start window.
+func matchAlertWindow(nowKyiv time.Time, startTime string) (model.AlertType, int, bool) {
 	h, m, err := parseTimeHHMM(startTime)
 	if err != nil {
-		return "", false
+		return "", 0, false
 	}
 
 	lessonTime := time.Date(nowKyiv.Year(), nowKyiv.Month(), nowKyiv.Day(), h, m, 0, 0, nowKyiv.Location())
 	diff := lessonTime.Sub(nowKyiv).Minutes()
 
-	// 10 minutes before (window [8.0 .. 12.0] minutes)
-	if diff >= 8.0 && diff <= 12.0 {
-		return model.AlertBefore10m, true
-	}
-	// At start (window [-2.0 .. 2.0] minutes)
-	if diff >= -2.0 && diff <= 2.0 {
-		return model.AlertAtStart, true
+	// 15 to 5 minutes before lesson start: AlertBefore10m
+	if diff > 5.0 && diff <= 15.0 {
+		mins := int(math.Round(diff))
+		if mins <= 0 {
+			mins = 1
+		}
+		return model.AlertBefore10m, mins, true
 	}
 
-	return "", false
+	// 5 minutes before to 5 minutes after start: AlertAtStart
+	if diff >= -5.0 && diff <= 5.0 {
+		return model.AlertAtStart, 0, true
+	}
+
+	return "", 0, false
 }
 
 func parseTimeHHMM(s string) (int, int, error) {
@@ -242,17 +259,20 @@ var dayShortUA = map[int]string{
 	1: "Пн", 2: "Вв", 3: "Ср", 4: "Чт", 5: "Пт", 6: "Сб", 7: "Нд",
 }
 
-var tagAbbrLabels = map[string]string{
-	"lec":  "Лек.",
-	"prac": "Практ.",
-	"lab":  "Лаб.",
-}
-
-func tagAbbr(tag string) string {
-	if v, ok := tagAbbrLabels[tag]; ok {
-		return v
+func tagLabelUA(tag string) string {
+	switch strings.ToLower(tag) {
+	case "lec", "лек":
+		return "лек."
+	case "prac", "прак":
+		return "прак."
+	case "lab", "лаб":
+		return "лаб."
+	default:
+		if tag != "" {
+			return tag
+		}
+		return ""
 	}
-	return "Заняття"
 }
 
 func hhmm(t string) string {
@@ -262,83 +282,69 @@ func hhmm(t string) string {
 	return t
 }
 
-func formatPersonalAlert(alertType model.AlertType, lesson model.Lesson, url string) string {
-	timeDisplay := hhmm(lesson.StartTime)
-	var header string
-	if alertType == model.AlertBefore10m {
-		header = fmt.Sprintf("⏰ <b>Через 10 хвилин пара! (%s)</b>", timeDisplay)
-	} else {
-		header = fmt.Sprintf("🚀 <b>Пара розпочалася! (%s)</b>", timeDisplay)
+func minutesPluralUA(n int) string {
+	n100 := n % 100
+	if n100 >= 11 && n100 <= 19 {
+		return "хвилин"
 	}
-
-	kind := model.LocationKind(lesson.LocationRaw)
-	modeText := fmt.Sprintf("[%s, %s]", tagAbbr(lesson.Tag), kind)
-
-	var sb strings.Builder
-	sb.WriteString(header)
-	sb.WriteString("\n\n")
-	fmt.Fprintf(&sb, "📖 <b>%s</b> <i>%s</i>\n", html.EscapeString(lesson.Subject), html.EscapeString(modeText))
-
-	teacher := lesson.TeacherRaw
-	if lesson.Lecturer != nil && lesson.Lecturer.Name != "" {
-		teacher = lesson.Lecturer.Name
+	switch n % 10 {
+	case 1:
+		return "хвилину"
+	case 2, 3, 4:
+		return "хвилини"
+	default:
+		return "хвилин"
 	}
-	if teacher != "" {
-		fmt.Fprintf(&sb, "👨‍🏫 Викладач: %s\n", html.EscapeString(teacher))
-	}
-
-	location := lesson.LocationRaw
-	if lesson.Location != nil && lesson.Location.Title != "" {
-		location = lesson.Location.Title
-	}
-	if location != "" && !model.IsOnline(location) {
-		fmt.Fprintf(&sb, "📍 Аудиторія: %s\n", html.EscapeString(location))
-	}
-
-	if url != "" {
-		fmt.Fprintf(&sb, "\n🔗 <a href=\"%s\">Приєднатися до заняття</a>\n", html.EscapeString(url))
-	}
-
-	return sb.String()
 }
 
-func formatGroupAlert(alertType model.AlertType, groupName string, pair campus.Pair, url string) string {
-	timeDisplay := hhmm(pair.Time)
+func platformLabel(rawURL string) string {
+	lower := strings.ToLower(rawURL)
+	if strings.Contains(lower, "zoom") {
+		return "Zoom"
+	}
+	if strings.Contains(lower, "meet.google") || strings.Contains(lower, "meet") {
+		return "Meet"
+	}
+	if strings.Contains(lower, "teams.microsoft") || strings.Contains(lower, "teams") {
+		return "Teams"
+	}
+	if strings.Contains(lower, "webex") {
+		return "Webex"
+	}
+	if strings.Contains(lower, "youtube") || strings.Contains(lower, "youtu.be") {
+		return "YouTube"
+	}
+	return "Онлайн"
+}
+
+func formatAlertMessage(alertType model.AlertType, minutesBefore int, startTime, subject, tag string) string {
 	var header string
 	if alertType == model.AlertBefore10m {
-		header = fmt.Sprintf("⏰ <b>Через 10 хвилин пара! (%s)</b>", timeDisplay)
+		header = fmt.Sprintf("<blockquote>🔔 Пара почнеться через %d %s</blockquote>", minutesBefore, minutesPluralUA(minutesBefore))
 	} else {
-		header = fmt.Sprintf("🚀 <b>Пара розпочалася! (%s)</b>", timeDisplay)
+		header = "<blockquote>🔔 Почалась пара</blockquote>"
 	}
 
-	locTitle := ""
-	if pair.Location != nil {
-		locTitle = pair.Location.Title
-	}
-	kind := model.LocationKind(locTitle)
-	modeText := fmt.Sprintf("[%s, %s]", tagAbbr(pair.Tag), kind)
-
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "👥 <b>Група %s</b>\n", html.EscapeString(groupName))
-	sb.WriteString(header)
-	sb.WriteString("\n\n")
-	fmt.Fprintf(&sb, "📖 <b>%s</b> <i>%s</i>\n", html.EscapeString(pair.Name), html.EscapeString(modeText))
-
-	teacher := ""
-	if pair.Lecturer != nil && pair.Lecturer.Name != "" {
-		teacher = pair.Lecturer.Name
-	}
-	if teacher != "" {
-		fmt.Fprintf(&sb, "👨‍🏫 Викладач: %s\n", html.EscapeString(teacher))
+	timeStr := hhmm(startTime)
+	tagLabel := tagLabelUA(tag)
+	var tagStr string
+	if tagLabel != "" {
+		tagStr = fmt.Sprintf(" <i>(%s)</i>", html.EscapeString(tagLabel))
 	}
 
-	if locTitle != "" && !model.IsOnline(locTitle) {
-		fmt.Fprintf(&sb, "📍 Аудиторія: %s\n", html.EscapeString(locTitle))
-	}
+	return fmt.Sprintf("%s\n\n<code>%s</code>  %s%s", header, html.EscapeString(timeStr), html.EscapeString(subject), tagStr)
+}
 
-	if url != "" {
-		fmt.Fprintf(&sb, "\n🔗 <a href=\"%s\">Приєднатися до заняття</a>\n", html.EscapeString(url))
+func buildAlertKeyboard(subject, rawURL string) *gotgbot.InlineKeyboardMarkup {
+	if rawURL == "" {
+		return nil
 	}
-
-	return sb.String()
+	btnText := fmt.Sprintf("🤙 %s (%s)", subject, platformLabel(rawURL))
+	return &gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{Text: btnText, Url: rawURL},
+			},
+		},
+	}
 }

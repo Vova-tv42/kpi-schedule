@@ -7,8 +7,24 @@ This document details the architecture and operational guide for automated lesso
 ## 1. Overview & Notification Strategy
 
 Students and academic group chats can receive automated Telegram alerts for scheduled classes:
-- **10 Minutes Before**: `⏰ Через 10 хвилин пара! (HH:MM)` — provides lesson subject, type (`[Лек., Онлайн]`), teacher, classroom, and direct clickable conference link (Zoom, Meet, Teams).
-- **At Start**: `🚀 Пара розпочалася! (HH:MM)` — immediate reminder with meeting link at the official start bell.
+- **Pre-Lesson Alert (15 to 5 minutes before start)**:
+  ```html
+  <blockquote>🔔 Пара почнеться через 10 хвилин</blockquote>
+
+  <code>08:30</code>  Практичний курс іноземної мови. Частина 2 <i>(прак.)</i>
+  ```
+  *(Dynamic `N` minutes declension: `хвилину`, `хвилини`, `хвилин` based on moment of delivery).*
+- **Start Alert (5 minutes before to 5 minutes after start)**:
+  ```html
+  <blockquote>🔔 Почалась пара</blockquote>
+
+  <code>08:30</code>  Практичний курс іноземної мови. Частина 2 <i>(прак.)</i>
+  ```
+  *(Displays the exact scheduled lesson start time regardless of the exact minute the cron arrived).*
+- **Inline Conference Button**:
+  If the lesson has a configured conference link (Zoom, Google Meet, Teams, etc.), an inline button with a direct link is attached:
+  `[ 🤙 Практичний курс іноземної мови. Частина 2 (Zoom) ↗ ]`
+  If there is no URL, no button is attached.
 
 ### Personal vs. Group Notifications
 1. **Personal Students**:
@@ -43,7 +59,7 @@ Because the server VM shuts down after 15 minutes of inactivity (`IDLE_TIMEOUT=1
 ┌──────────────────────────────────────┐
 │       internal/alerts.Dispatcher     │
 │  1. Resolves Europe/Kyiv time        │
-│  2. Matches [8..12m] & [-2..2m]      │
+│  2. Matches (5..15m] & [-5..5m]      │
 │  3. Verifies sent_lesson_alerts      │
 │  4. Sends Telegram messages          │
 │  5. Records sent alert record        │

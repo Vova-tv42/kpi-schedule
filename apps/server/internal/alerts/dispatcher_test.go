@@ -3,6 +3,7 @@ package alerts_test
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,24 +16,28 @@ import (
 	"kpi-schedule-bot/server/internal/storage"
 )
 
-type mockTelegramSender struct {
-	sentMessages []struct {
-		ChatID int64
-		Text   string
-	}
+type mockSender struct {
+	sentMessages []sentMsg
 }
 
-func (m *mockTelegramSender) SendMessage(chatID int64, text string, opts *gotgbot.SendMessageOpts) (*gotgbot.Message, error) {
-	m.sentMessages = append(m.sentMessages, struct {
-		ChatID int64
-		Text   string
-	}{ChatID: chatID, Text: text})
+type sentMsg struct {
+	ChatID int64
+	Text   string
+	Opts   *gotgbot.SendMessageOpts
+}
+
+func (m *mockSender) SendMessage(chatID int64, text string, opts *gotgbot.SendMessageOpts) (*gotgbot.Message, error) {
+	m.sentMessages = append(m.sentMessages, sentMsg{
+		ChatID: chatID,
+		Text:   text,
+		Opts:   opts,
+	})
 	return &gotgbot.Message{MessageId: int64(len(m.sentMessages))}, nil
 }
 
 func TestDispatcherPersonalAlerts(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "test_dispatch.db")
+	dbPath := filepath.Join(t.TempDir(), "test_alerts_personal.db")
 	if err := storage.Migrate(dbPath); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -43,20 +48,20 @@ func TestDispatcherPersonalAlerts(t *testing.T) {
 	}
 	defer db.Close()
 
-	sender := &mockTelegramSender{}
-	d := alerts.NewDispatcher(db, nil, sender)
-
 	user, err := db.UpsertUser(ctx, 999111, nil, nil)
 	if err != nil {
 		t.Fatalf("upsert user: %v", err)
 	}
+
+	sender := &mockSender{}
+	d := alerts.NewDispatcher(db, nil, sender)
 
 	loc, _ := time.LoadLocation("Europe/Kyiv")
 	if loc == nil {
 		loc = time.FixedZone("EEST", 3*3600)
 	}
 
-	// Set date to 2026-09-04
+	// Friday, Sep 4, 2026. Lesson at 10:25
 	lessonDate := time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC)
 	err = db.ReplaceLessons(ctx, user.ID, []model.Lesson{
 		{
@@ -79,7 +84,10 @@ func TestDispatcherPersonalAlerts(t *testing.T) {
 		t.Fatalf("replace lessons: %v", err)
 	}
 
-	// 1. Dispatch at 10:00 (too early for 10:25 lesson) -> 0 alerts
+	// Set custom lesson URL to test inline button
+	_ = db.SetLessonURL(ctx, user.ID, "операційні системи", "lec", "https://zoom.us/j/987654321")
+
+	// 1. Dispatch at 10:00 (too early for 10:25 lesson, diff=25m > 15m) -> 0 alerts
 	timeEarly := time.Date(2026, 9, 4, 10, 0, 0, 0, loc)
 	res, err := d.Dispatch(ctx, timeEarly)
 	if err != nil {
@@ -98,8 +106,23 @@ func TestDispatcherPersonalAlerts(t *testing.T) {
 	if res.PersonalAlertsSent != 1 || len(sender.sentMessages) != 1 {
 		t.Fatalf("expected 1 alert, got %d (sent: %d)", res.PersonalAlertsSent, len(sender.sentMessages))
 	}
-	if sender.sentMessages[0].ChatID != 999111 {
-		t.Errorf("expected chatID 999111, got %d", sender.sentMessages[0].ChatID)
+	msg1 := sender.sentMessages[0]
+	if msg1.ChatID != 999111 {
+		t.Errorf("expected chatID 999111, got %d", msg1.ChatID)
+	}
+	if !strings.Contains(msg1.Text, "<blockquote>🔔 Пара почнеться через 10 хвилин</blockquote>") {
+		t.Errorf("expected 10m alert header in blockquote, got: %s", msg1.Text)
+	}
+	if !strings.Contains(msg1.Text, "<code>10:25</code>  Операційні системи <i>(лек.)</i>") {
+		t.Errorf("expected monospace time and subject, got: %s", msg1.Text)
+	}
+	kb, ok := msg1.Opts.ReplyMarkup.(gotgbot.InlineKeyboardMarkup)
+	if !ok || len(kb.InlineKeyboard) == 0 {
+		t.Fatalf("expected inline URL button")
+	}
+	btn := kb.InlineKeyboard[0][0]
+	if btn.Text != "🤙 Операційні системи (Zoom)" || btn.Url != "https://zoom.us/j/987654321" {
+		t.Errorf("unexpected button: %+v", btn)
 	}
 
 	// 3. Repeat dispatch at 10:16 (within window) -> deduplicated, 0 new alerts
@@ -120,6 +143,13 @@ func TestDispatcherPersonalAlerts(t *testing.T) {
 	}
 	if res.PersonalAlertsSent != 1 || len(sender.sentMessages) != 2 {
 		t.Fatalf("expected 1 alert at start, got %d (total sent: %d)", res.PersonalAlertsSent, len(sender.sentMessages))
+	}
+	msg2 := sender.sentMessages[1]
+	if !strings.Contains(msg2.Text, "<blockquote>🔔 Почалась пара</blockquote>") {
+		t.Errorf("expected start alert header in blockquote, got: %s", msg2.Text)
+	}
+	if !strings.Contains(msg2.Text, "<code>10:25</code>  Операційні системи <i>(лек.)</i>") {
+		t.Errorf("expected monospace time and subject, got: %s", msg2.Text)
 	}
 
 	// 5. Test disabling notifications for user
@@ -160,7 +190,7 @@ func TestDispatcherPersonalAlerts(t *testing.T) {
 
 func TestDispatcherGroupAlerts(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "test_group_dispatch.db")
+	dbPath := filepath.Join(t.TempDir(), "test_alerts_group.db")
 	if err := storage.Migrate(dbPath); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -171,18 +201,18 @@ func TestDispatcherGroupAlerts(t *testing.T) {
 	}
 	defer db.Close()
 
+	sender := &mockSender{}
 	campusClient := campus.NewClient(db)
-	sender := &mockTelegramSender{}
 	d := alerts.NewDispatcher(db, campusClient, sender)
 
-	// Seed time cache (Week 1, Friday)
-	// 2026-09-04 is a Friday (Day 5)
-	timePayload := campus.CurrentAcademicTime{CurrentWeek: 1, CurrentDay: 5, CurrentLesson: 1}
-	if err := db.CacheSet(ctx, "time:current", timePayload); err != nil {
-		t.Fatalf("seed time cache: %v", err)
+	// Seed cache for CurrentTime and GroupSchedule
+	currentTimePayload := campus.CurrentAcademicTime{
+		CurrentWeek: 1,
+	}
+	if err := db.CacheSet(ctx, "campus:current_time", currentTimePayload); err != nil {
+		t.Fatalf("seed current time cache: %v", err)
 	}
 
-	// Seed group schedule cache (group 4402)
 	fridaySched := []campus.DaySchedule{
 		{
 			Day: "Пт",
@@ -211,6 +241,9 @@ func TestDispatcherGroupAlerts(t *testing.T) {
 		t.Fatalf("create group: %v", err)
 	}
 
+	// Set group URL
+	_ = db.SetGroupLessonURL(ctx, group.ID, "архітектура комп'ютерів", "lec", "https://meet.google.com/abc-def-ghi")
+
 	loc, _ := time.LoadLocation("Europe/Kyiv")
 	if loc == nil {
 		loc = time.FixedZone("EEST", 3*3600)
@@ -225,8 +258,23 @@ func TestDispatcherGroupAlerts(t *testing.T) {
 	if res.GroupAlertsSent != 1 || len(sender.sentMessages) != 1 {
 		t.Fatalf("expected 1 group alert, got %d (sent: %d)", res.GroupAlertsSent, len(sender.sentMessages))
 	}
-	if sender.sentMessages[0].ChatID != chatID {
-		t.Errorf("expected chatID %d, got %d", chatID, sender.sentMessages[0].ChatID)
+	msg1 := sender.sentMessages[0]
+	if msg1.ChatID != chatID {
+		t.Errorf("expected chatID %d, got %d", chatID, msg1.ChatID)
+	}
+	if !strings.Contains(msg1.Text, "<blockquote>🔔 Пара почнеться через 10 хвилин</blockquote>") {
+		t.Errorf("unexpected group alert text: %s", msg1.Text)
+	}
+	if !strings.Contains(msg1.Text, "<code>08:30</code>  Архітектура комп&#39;ютерів <i>(лек.)</i>") {
+		t.Errorf("unexpected group alert content: %s", msg1.Text)
+	}
+	groupKb, ok := msg1.Opts.ReplyMarkup.(gotgbot.InlineKeyboardMarkup)
+	if !ok || len(groupKb.InlineKeyboard) == 0 {
+		t.Fatalf("expected inline URL button for group")
+	}
+	btn := groupKb.InlineKeyboard[0][0]
+	if btn.Text != "🤙 Архітектура комп'ютерів (Meet)" || btn.Url != "https://meet.google.com/abc-def-ghi" {
+		t.Errorf("unexpected group button: %+v", btn)
 	}
 
 	// Repeat at 08:21 -> deduplicated
@@ -255,3 +303,85 @@ func TestDispatcherGroupAlerts(t *testing.T) {
 	}
 }
 
+func TestMatchAlertWindowsAndMessages(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "test_alerts_windows.db")
+	if err := storage.Migrate(dbPath); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	db, err := storage.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	user, err := db.UpsertUser(ctx, 111222, nil, nil)
+	if err != nil {
+		t.Fatalf("upsert user: %v", err)
+	}
+
+	sender := &mockSender{}
+	d := alerts.NewDispatcher(db, nil, sender)
+	loc, _ := time.LoadLocation("Europe/Kyiv")
+
+	lessonDate := time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC)
+	err = db.ReplaceLessons(ctx, user.ID, []model.Lesson{
+		{
+			ID:          uuid.New(),
+			UserID:      user.ID,
+			Date:        lessonDate,
+			Week:        1,
+			Day:         5,
+			StartTime:   "10:25:00",
+			EndTime:     "12:00:00",
+			Subject:     "Математичний аналіз",
+			SubjectNorm: "математичний аналіз",
+			Tag:         "prac",
+			IsRecurring: true,
+		},
+	}, model.EnrichmentFull, nil)
+	if err != nil {
+		t.Fatalf("replace lessons: %v", err)
+	}
+
+	// 1. At 10:05 (20 mins before) -> Outside window
+	res, _ := d.Dispatch(ctx, time.Date(2026, 9, 4, 10, 5, 0, 0, loc))
+	if res.PersonalAlertsSent != 0 {
+		t.Errorf("expected 0 alerts at 10:05, got %d", res.PersonalAlertsSent)
+	}
+
+	// 2. At 10:17 (8 mins before) -> Window 1 (15-5m before), should say "через 8 хвилин"
+	res, _ = d.Dispatch(ctx, time.Date(2026, 9, 4, 10, 17, 0, 0, loc))
+	if res.PersonalAlertsSent != 1 {
+		t.Fatalf("expected 1 alert at 10:17, got %d", res.PersonalAlertsSent)
+	}
+	if !strings.Contains(sender.sentMessages[0].Text, "<blockquote>🔔 Пара почнеться через 8 хвилин</blockquote>") {
+		t.Errorf("expected 'через 8 хвилин', got: %s", sender.sentMessages[0].Text)
+	}
+	if !strings.Contains(sender.sentMessages[0].Text, "<code>10:25</code>  Математичний аналіз <i>(прак.)</i>") {
+		t.Errorf("expected exact lesson line, got: %s", sender.sentMessages[0].Text)
+	}
+	// No URL was set -> reply markup must be nil
+	if sender.sentMessages[0].Opts.ReplyMarkup != nil {
+		t.Errorf("expected no button when URL is empty")
+	}
+
+	// 3. At 10:28 (3 mins after start) -> Window 2 (-5 to +5m), should say "Почалась пара" with 10:25 start time
+	res, _ = d.Dispatch(ctx, time.Date(2026, 9, 4, 10, 28, 0, 0, loc))
+	if res.PersonalAlertsSent != 1 {
+		t.Fatalf("expected 1 alert at 10:28, got %d", res.PersonalAlertsSent)
+	}
+	if !strings.Contains(sender.sentMessages[1].Text, "<blockquote>🔔 Почалась пара</blockquote>") {
+		t.Errorf("expected 'Почалась пара', got: %s", sender.sentMessages[1].Text)
+	}
+	if !strings.Contains(sender.sentMessages[1].Text, "<code>10:25</code>  Математичний аналіз <i>(прак.)</i>") {
+		t.Errorf("expected exact lesson line with start time 10:25, got: %s", sender.sentMessages[1].Text)
+	}
+
+	// 4. At 10:32 (7 mins after start) -> Outside window
+	res, _ = d.Dispatch(ctx, time.Date(2026, 9, 4, 10, 32, 0, 0, loc))
+	if res.PersonalAlertsSent != 0 {
+		t.Errorf("expected 0 alerts at 10:32, got %d", res.PersonalAlertsSent)
+	}
+}
