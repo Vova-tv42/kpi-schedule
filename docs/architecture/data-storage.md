@@ -37,16 +37,20 @@ user_lesson_urls     (id, user_id FK, subject_norm, tag, url, created_at, update
                        UNIQUE (user_id, subject_norm, tag))
 user_url_prompts     (user_id PK/FK, telegram_id UNIQUE, prompt_message_id, subject_norm,
                        tag, subject_name, updated_at)
+bot_groups           (id PK, creator_telegram_id, academic_group_id, academic_group_name,
+                       faculty, telegram_chat_id UNIQUE, telegram_chat_title, created_at, updated_at)
+user_group_prompts   (telegram_id PK, prompt_message_id, action, group_id, bind_chat_id,
+                       bind_chat_title, updated_at)
 campus_cache         (key PK, value /* JSON */, fetched_at)
 pairing_codes        (code PK, telegram_id, expires_at)
 user_tokens          (token PK, user_id FK, created_at)
 ```
 
 Migrations live in `apps/server/internal/storage/migrations/` (embedded, applied on startup
-via `goose`). `00001_init.sql` establishes core user and schedule storage, and `00002_lesson_urls.sql`
-introduces `user_lesson_urls` (persisting user-provided conference URLs keyed by `user_id, subject_norm, tag`
-so they survive schedule replacements) and `user_url_prompts` (tracking active URL prompt states for clean
-in-place message mutation and auto-deletion of user input messages).
+via `goose`). `00001_init.sql` establishes core user and schedule storage; `00002_lesson_urls.sql`
+introduces `user_lesson_urls` and `user_url_prompts`; `00003_groups.sql` introduces `bot_groups`
+(persisting user-configured academic group bindings for Telegram group chats) and `user_group_prompts`
+(tracking interactive prompt states for group creation and academic group updates with zero chat pollution).
 
 **Engine: SQLite, not PostgreSQL** (`modernc.org/sqlite`, pure Go — no CGO, so it stays
 compatible with the distroless final image). This reverses an earlier decision recorded in

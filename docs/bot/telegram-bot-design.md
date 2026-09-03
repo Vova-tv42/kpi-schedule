@@ -2,12 +2,13 @@
 
 > **Runtime note.** The bot is **not a separate service**. It runs inside the single Go backend (`apps/server/internal/bot/`, using `gotgbot/v2`) and shares its process, database, cache, and scheduler. It calls `internal/api.Service` and `internal/storage.DB` directly, in-process — not over HTTP with `X-Internal-Token`, even though the `/api/v1/auth/pair/generate` and `/api/v1/schedule/*` endpoints exist and are internal-token-protected for other internal/admin callers. Updates arrive via webhook (`POST /api/v1/telegram/webhook`), authenticated by `secret_token` via the `X-Telegram-Bot-Api-Secret-Token` header and exempt from IP rate limiting (see `docs/architecture/error-handling-resilience.md` §5). Both local development (via ngrok/tunnel) and production use webhooks — no long polling is used. See [`docs/project-repository.md` §4.1](../project-repository.md) for the rationale.
 >
-> **Implementation status.** `/start`, `/link`, `/today`, and `/week` are implemented, all four as button screens that edit the message in place. `/tomorrow`, `/group`, `/settings`, `/help`, morning reminders, and the stale-schedule background check are **not implemented yet** — see §6.
+> **Implementation status.** `/start`, `/link`, `/today`, `/week`, `/urls`, `/group`, `/group_today`, and `/group_week` are implemented. `/tomorrow`, `/settings`, `/help`, morning reminders, and the stale-schedule background check are **not implemented yet** — see §6.
 
 ## 1. Bot Purpose & Features
 
 The Telegram Bot provides students with quick, frictionless access to their verified daily and weekly schedules. It combines:
 - **Interactive Inline Buttons**: Seamless switching between Days, Weeks, and Disciplines.
+- **Group Chat Integration**: Adding the bot to academic group chats with dedicated group schedules and caller attribution.
 - **Smart Enrichments**: Direct links to campus buildings/rooms (`https://kpi.ua/k-5`) and lecturer profiles.
 - **Morning Briefings**: Configurable automated reminders before the first class of the day.
 - **Stale Schedule Alerts**: Notification if the browser extension hasn't pushed an update in a while — there is no server-side session to expire any more, see [`docs/architecture/data-storage.md`](../architecture/data-storage.md) §4.
@@ -16,17 +17,21 @@ The Telegram Bot provides students with quick, frictionless access to their veri
 
 ## 2. Command Reference
 
-| Command | Status | Action Description |
-| :--- | :--- | :--- |
-| `/start` | ✅ Implemented | Onboarding screen: extension prerequisite + a button that swaps the message over to the pairing code; notes an existing sync and offers a direct schedule button when one is fresh (see §3.3). |
-| `/link` | ✅ Implemented | Generates a 6-digit one-time code for Browser Extension pairing — the same screen the `/start` button leads to. |
-| `/urls` | ✅ Implemented | Interactive menu to manage custom lesson conference URLs (Zoom, Meet, etc.) with prompt-and-delete chat flow (see §3.4). |
-| `/today` | ✅ Implemented | Shows today's classes with locations and teacher names, with ◀️ Вчора / 📅 Сьогодні / Завтра ▶️ inline day-navigation. |
-| `/week` | ✅ Implemented | Shows one academic week compactly, with previous/current/next week slots and a jump to today (see §3.2). |
-| `/tomorrow` | Not yet built | Shows tomorrow's classes. |
-| `/group` | Not yet built | Set or change the academic group (e.g. `ІП-21`). |
-| `/settings` | Not yet built | Manage morning reminders, timezone, and account linking status. |
-| `/help` | Not yet built | FAQ, troubleshooting, and links to web extension. |
+Commands are scoped via Telegram's `setMyCommands` API (`BotCommandScopeAllPrivateChats` and `BotCommandScopeAllGroupChats`). If a scoped command is invoked in the wrong chat type, a clear Ukrainian error notice is returned.
+
+| Command | Scope | Menu Description | Status | Action Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `/start` | DM / Groups | `Знайомство та головне меню` | ✅ Implemented | In DMs: onboarding screen or deep-link router (`bind_<chatID>`, `cfg_<groupID>`). In groups: introduces the bot and explains available commands. |
+| `/link` | DM only | `Отримати код прив'язки браузерного розширення` | ✅ Implemented | Generates a 6-digit one-time code for Browser Extension pairing. |
+| `/urls` | DM only | `Посилання на онлайн-заняття` | ✅ Implemented | Interactive menu to manage custom lesson conference URLs (Zoom, Meet, etc.) with prompt-and-delete chat flow (see §3.4). |
+| `/today` | DM & Groups | DM: `Показати розклад на сьогодні`<br>Group: `Показати персональний розклад на сьогодні` | ✅ Implemented | Shows today's personal classes. In groups, prepends `👤 Розклад: <Користувач>` attributing who last triggered or navigated the schedule (see §3.5). |
+| `/week` | DM & Groups | DM: `Показати розклад на тиждень`<br>Group: `Показати персональний розклад на тиждень` | ✅ Implemented | Shows one academic week compactly. In groups, also carries caller attribution (see §3.5). |
+| `/group` | DM menu (usable in groups) | `Керування академічними групами` | ✅ Implemented | In DMs: interactive group management menu (create, view, edit academic group, unbind, delete). In groups: hidden from menu suggestions, but if typed by an admin, checks rights and provides a deep-link button to configure in DM. |
+| `/group_today` (`/group-today`) | Groups only | `Показати розклад групи на сьогодні` | ✅ Implemented | Shows today's overall group schedule fetched directly from the secondary Campus API (`api.campus.kpi.ua`). |
+| `/group_week` (`/group-week`) | Groups only | `Показати розклад групи на тиждень` | ✅ Implemented | Shows one academic week of the overall group schedule from the secondary Campus API. |
+| `/tomorrow` | Both | `Показати розклад на завтра` | Not yet built | Shows tomorrow's classes. |
+| `/settings` | DM only | `Налаштування сповіщень` | Not yet built | Manage morning reminders, timezone, and account linking status. |
+| `/help` | Both | `Довідка та інструкції` | Not yet built | FAQ, troubleshooting, and links to web extension. |
 
 ---
 
@@ -176,6 +181,36 @@ online lessons.
 [ 🗑 Видалити посилання ]
 [ ◀️ Назад ]
 ```
+
+### 3.5 Group Support, Administration & Caller Attribution
+
+The bot supports Telegram group and supergroup chats with strict privacy, zero chat pollution, and contextual command menus:
+
+#### 1. Command Scopes & Isolation
+- **Command Scoping**: Telegram command lists are registered via `setMyCommands` using `BotCommandScopeAllPrivateChats` (personal schedule, URLs, pairing) and `BotCommandScopeAllGroupChats` (personal schedule in group, group schedule, group settings).
+- **Enforced Isolation**: Commands designed for DMs only (`/link`, `/urls`) return `⚠️ Ця команда доступна лише в особистих повідомленнях з ботом.` if invoked in a group. Conversely, group schedule commands (`/group_today`, `/group_week`) return `⚠️ Ця команда доступна лише у групових чатах.` if invoked in DMs.
+- **Hyphen & Underscore Aliases**: Group schedule commands are registered in Telegram as `/group_today` and `/group_week`, while message parsing also transparently supports `/group-today` and `/group-week`.
+
+#### 2. Group Administration in DM
+To prevent chat flooding and unauthorized modifications:
+- When `/group` is sent in a group chat, the bot verifies the caller's administrator status (`administrator` or `creator` via `getChatMember`/`getChatAdministrators`). Non-admins receive an alert.
+- Administrators receive a reply with an inline deep-link button `[ ⚙️ Налаштувати в особистих ]` (`t.me/<bot>?start=bind_<chatID>`).
+- All configuration occurs in the private chat:
+  - **Group Management Menu**: lists existing group configurations + `[ ➕ Нова група ]`.
+  - **Interactive Creation**: prompts for the KPI academic group name (e.g. `ІП-21`). User inputs are validated in real time against `api.campus.kpi.ua` and auto-deleted immediately upon arrival.
+  - **Group Settings Screen**: displays academic group, faculty, Campus ID, and bound chat; offers buttons to edit academic group, unbind from chat, or delete the group with confirmation.
+
+#### 3. Caller Attribution on `/today` and `/week` in Groups
+- When `/today` or `/week` is invoked in a group chat, it fetches the personalized schedule of the invoking user and prefixes the message with:
+  `👤 Розклад: <b>Ім'я Користувача (@username)</b>`
+- When any member clicks a navigation button (`◀️ Вчора`, `📅 Сьогодні`, `Завтра ▶️`, or week slots), the schedule is refetched for that specific clicking member, and the caller title updates dynamically in place.
+- If an unlinked member taps a navigation button, the group message is preserved and a personal popup alert is returned: `🔒 Твій акаунт ще не прив'язано...`.
+- In private chats (DMs), caller attribution is omitted completely, preserving personal UX intact.
+
+#### 4. Secondary Group Schedules (`/group_today` & `/group_week`)
+- Fetched directly from `api.campus.kpi.ua` for the academic group bound to that Telegram chat.
+- Provides the official, non-personalized group timetable.
+- Inline navigation buttons (`gnav:` and `gweek:`) navigate dates and weeks for the entire group.
 
 ---
 

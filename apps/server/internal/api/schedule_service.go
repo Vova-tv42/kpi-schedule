@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"kpi-schedule-bot/server/internal/campus"
 	"kpi-schedule-bot/server/internal/engine"
 	"kpi-schedule-bot/server/internal/model"
 )
@@ -164,4 +165,188 @@ func (s *Service) ResolveWeekParity(ctx context.Context, target time.Time) (int,
 		return 0, fmt.Errorf("resolving current academic week: %w", err)
 	}
 	return engine.WeekAt(time.Now(), currentTime.CurrentWeek, target), nil
+}
+
+// BuildGroupDay fetches and formats a group's schedule for a single calendar date
+// directly from the secondary Campus API.
+func (s *Service) BuildGroupDay(ctx context.Context, groupID int, targetDate time.Time) (dayView, error) {
+	parity, err := s.ResolveWeekParity(ctx, targetDate)
+	if err != nil {
+		return dayView{}, fmt.Errorf("resolving week parity: %w", err)
+	}
+
+	sched, err := s.campus.GroupSchedule(ctx, groupID)
+	if err != nil {
+		return dayView{}, fmt.Errorf("fetching group schedule: %w", err)
+	}
+
+	var weekSchedule []campus.DaySchedule
+	if parity == 1 {
+		weekSchedule = sched.ScheduleFirstWeek
+	} else {
+		weekSchedule = sched.ScheduleSecondWeek
+	}
+
+	isoDay := engine.ISODay(targetDate)
+	dayShort := dayShortUA[isoDay]
+
+	var matchingDay *campus.DaySchedule
+	for _, d := range weekSchedule {
+		if d.Day == dayShort {
+			dCopy := d
+			matchingDay = &dCopy
+			break
+		}
+	}
+
+	targetDateStr := targetDate.Format("2006-01-02")
+	var views []lessonView
+	if matchingDay != nil {
+		for _, p := range matchingDay.Pairs {
+			if len(p.Dates) > 0 {
+				found := false
+				for _, d := range p.Dates {
+					if d == targetDateStr {
+						found = true
+						break
+					}
+				}
+				if !found {
+					continue
+				}
+			}
+			var lView *lecturerView
+			if p.Lecturer != nil {
+				lView = &lecturerView{ID: p.Lecturer.ID, Name: p.Lecturer.Name}
+			}
+			var locView *locationView
+			if p.Location != nil {
+				locView = &locationView{Title: p.Location.Title, URI: p.Location.URI}
+			}
+			teacherRaw := ""
+			if p.Lecturer != nil {
+				teacherRaw = p.Lecturer.Name
+			}
+			locRaw := ""
+			if p.Location != nil {
+				locRaw = p.Location.Title
+			}
+			views = append(views, lessonView{
+				Date:        targetDateStr,
+				Time:        p.Time,
+				Name:        p.Name,
+				Tag:         p.Tag,
+				TeacherRaw:  teacherRaw,
+				LocationRaw: locRaw,
+				Lecturer:    lView,
+				Location:    locView,
+				Enriched:    true,
+			})
+		}
+	}
+
+	sort.Slice(views, func(i, j int) bool { return views[i].Time < views[j].Time })
+
+	return dayView{
+		Date:             targetDateStr,
+		Week:             parity,
+		DayName:          dayNamesUA[isoDay],
+		DayShort:         dayShort,
+		IsDayOff:         len(views) == 0,
+		EnrichmentStatus: "full",
+		Stale:            false,
+		Lessons:          views,
+	}, nil
+}
+
+// BuildGroupWeek fetches and formats a group's schedule for a full academic week
+// directly from the secondary Campus API.
+func (s *Service) BuildGroupWeek(ctx context.Context, groupID int, weekFilter int) (weekView, error) {
+	currentTime, err := s.campus.CurrentTime(ctx)
+	if err != nil {
+		return weekView{}, fmt.Errorf("resolving current academic week: %w", err)
+	}
+
+	sched, err := s.campus.GroupSchedule(ctx, groupID)
+	if err != nil {
+		return weekView{}, fmt.Errorf("fetching group schedule: %w", err)
+	}
+
+	weeksToBuild := []int{1, 2}
+	if weekFilter == 1 || weekFilter == 2 {
+		weeksToBuild = []int{weekFilter}
+	}
+
+	weekNames := map[int]string{1: "Перший тиждень (Чисельник)", 2: "Другий тиждень (Знаменник)"}
+	out := weekView{
+		CurrentWeek:      currentTime.CurrentWeek,
+		EnrichmentStatus: "full",
+		Stale:            false,
+	}
+
+	for _, w := range weeksToBuild {
+		var weekSched []campus.DaySchedule
+		if w == 1 {
+			weekSched = sched.ScheduleFirstWeek
+		} else {
+			weekSched = sched.ScheduleSecondWeek
+		}
+
+		dayMap := make(map[string][]campus.Pair)
+		for _, d := range weekSched {
+			dayMap[d.Day] = d.Pairs
+		}
+
+		var days []weekDayView
+		for dayIdx := 1; dayIdx <= 7; dayIdx++ {
+			short := dayShortUA[dayIdx]
+			pairs := dayMap[short]
+			if len(pairs) == 0 {
+				continue
+			}
+			var views []lessonView
+			for _, p := range pairs {
+				var lView *lecturerView
+				if p.Lecturer != nil {
+					lView = &lecturerView{ID: p.Lecturer.ID, Name: p.Lecturer.Name}
+				}
+				var locView *locationView
+				if p.Location != nil {
+					locView = &locationView{Title: p.Location.Title, URI: p.Location.URI}
+				}
+				teacherRaw := ""
+				if p.Lecturer != nil {
+					teacherRaw = p.Lecturer.Name
+				}
+				locRaw := ""
+				if p.Location != nil {
+					locRaw = p.Location.Title
+				}
+				views = append(views, lessonView{
+					Time:        p.Time,
+					Name:        p.Name,
+					Tag:         p.Tag,
+					TeacherRaw:  teacherRaw,
+					LocationRaw: locRaw,
+					Lecturer:    lView,
+					Location:    locView,
+					Enriched:    true,
+				})
+			}
+			sort.Slice(views, func(i, j int) bool { return views[i].Time < views[j].Time })
+			days = append(days, weekDayView{
+				Day:     short,
+				DayName: dayNamesUA[dayIdx],
+				Lessons: views,
+			})
+		}
+
+		out.Weeks = append(out.Weeks, weekBlockView{
+			WeekNumber: w,
+			WeekName:   weekNames[w],
+			Days:       days,
+		})
+	}
+
+	return out, nil
 }

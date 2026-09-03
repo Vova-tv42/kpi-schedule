@@ -57,16 +57,53 @@ func New(token string, svc *api.Service, db *storage.DB, botOpts ...*gotgbot.Bot
 	dispatcher.AddHandler(handlers.NewCommand("today", b.cmdToday))
 	dispatcher.AddHandler(handlers.NewCommand("week", b.cmdWeek))
 	dispatcher.AddHandler(handlers.NewCommand("urls", b.cmdURLs))
+	dispatcher.AddHandler(handlers.NewCommand("group", b.cmdGroup))
+	dispatcher.AddHandler(handlers.NewCommand("group_today", b.cmdGroupToday))
+	dispatcher.AddHandler(handlers.NewCommand("group_week", b.cmdGroupWeek))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(navCallbackPrefix), b.onNav))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(weekCallbackPrefix), b.onWeek))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(menuCallbackPrefix), b.onMenu))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(urlsCallbackPrefix), b.onURLs))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupCallbackPrefix), b.onGroup))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupNavCallbackPrefix), b.onGroupNav))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupWeekCallbackPrefix), b.onGroupWeek))
 	dispatcher.AddHandler(handlers.NewMessage(message.All, b.onTextMessage))
 
 	b.dispatcher = dispatcher
 	b.updater = ext.NewUpdater(dispatcher, nil)
 
 	return b, nil
+}
+
+// SetupCommands registers command menus separately for private and group chats.
+func (b *Bot) SetupCommands() error {
+	privateCommands := []gotgbot.BotCommand{
+		{Command: "today", Description: "Показати розклад на сьогодні"},
+		{Command: "week", Description: "Показати розклад на тиждень"},
+		{Command: "urls", Description: "Посилання на онлайн-заняття"},
+		{Command: "group", Description: "Керування академічними групами"},
+		{Command: "link", Description: "Отримати код прив'язки браузерного розширення"},
+		{Command: "start", Description: "Знайомство та головне меню"},
+	}
+	if _, err := b.gbot.SetMyCommands(privateCommands, &gotgbot.SetMyCommandsOpts{
+		Scope: gotgbot.BotCommandScopeAllPrivateChats{},
+	}); err != nil {
+		slog.Warn("setting private chat commands", "error", err)
+	}
+
+	groupCommands := []gotgbot.BotCommand{
+		{Command: "today", Description: "Показати персональний розклад на сьогодні"},
+		{Command: "week", Description: "Показати персональний розклад на тиждень"},
+		{Command: "group_today", Description: "Показати розклад групи на сьогодні"},
+		{Command: "group_week", Description: "Показати розклад групи на тиждень"},
+	}
+	if _, err := b.gbot.SetMyCommands(groupCommands, &gotgbot.SetMyCommandsOpts{
+		Scope: gotgbot.BotCommandScopeAllGroupChats{},
+	}); err != nil {
+		slog.Warn("setting group chat commands", "error", err)
+	}
+
+	return nil
 }
 
 // WebhookPath is the URL path where the HTTP server receives Telegram updates.
@@ -86,6 +123,8 @@ func (b *Bot) AddWebhook(secretToken string) error {
 // RegisterWebhook prepares the updater to receive updates on WebhookPath and
 // registers the public webhookURL with Telegram's Bot API.
 func (b *Bot) RegisterWebhook(webhookURL, secretToken string) error {
+	_ = b.SetupCommands()
+
 	if err := b.AddWebhook(secretToken); err != nil {
 		return err
 	}

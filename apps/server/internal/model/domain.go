@@ -144,4 +144,26 @@ func IsOnline(location string) bool {
 	return LocationKind(location) == "Онлайн"
 }
 
+// BotGroup represents a configured group for Telegram group chats.
+type BotGroup struct {
+	ID                uuid.UUID
+	CreatorTelegramID int64
+	AcademicGroupID   int
+	AcademicGroupName string
+	Faculty           string
+	TelegramChatID    *int64
+	TelegramChatTitle string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
 
+// GroupPrompt tracks an in-flight prompt for creating or configuring a group.
+type GroupPrompt struct {
+	TelegramID      int64
+	PromptMessageID int64
+	Action          string // "create", "edit_academic"
+	GroupID         *uuid.UUID
+	BindChatID      *int64
+	BindChatTitle   string
+	UpdatedAt       time.Time
+}

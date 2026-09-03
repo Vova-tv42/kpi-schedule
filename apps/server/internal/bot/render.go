@@ -34,6 +34,7 @@ type dayInfo struct {
 	IsDayOff         bool
 	EnrichmentStatus string
 	Stale            bool
+	CallerName       string
 	Lessons          []lessonLine
 }
 
@@ -48,6 +49,7 @@ type weekInfo struct {
 	WeekNumber       int
 	EnrichmentStatus string
 	Stale            bool
+	CallerName       string
 	Days             []weekDayLine
 }
 
@@ -152,6 +154,10 @@ func lessonHash(subjectNorm, tag string) string {
 func formatDay(d dayInfo) string {
 	var b strings.Builder
 
+	if d.CallerName != "" {
+		fmt.Fprintf(&b, "👤 Розклад: <b>%s</b>\n\n", html.EscapeString(d.CallerName))
+	}
+
 	fmt.Fprintf(&b, "📅 Розклад на <b>%s</b> (%s)\n", html.EscapeString(shortDate(d.Date)), html.EscapeString(d.DayName))
 
 	switch {
@@ -194,6 +200,10 @@ func formatDay(d dayInfo) string {
 // current one (offset 0) — otherwise no day in it is "today".
 func formatWeek(w weekInfo, offset int, group *string) string {
 	var b strings.Builder
+
+	if w.CallerName != "" {
+		fmt.Fprintf(&b, "👤 Розклад: <b>%s</b>\n\n", html.EscapeString(w.CallerName))
+	}
 
 	fmt.Fprintf(&b, "🗓 <b>%s</b> тиждень — %s\n", weekOrdinal(w.WeekNumber), weekOffsetLabel(offset))
 	if group != nil && *group != "" {
@@ -421,4 +431,302 @@ func formatLinkText(code string, expiresIn int) string {
 		"🔑 Код прив'язки: <code>%s-%s</code>\n\nДійсний %d хвилин. Відкрий браузерне розширення KPI Schedule, увійди на my.kpi.ua і введи цей код, щоб синхронізувати розклад.",
 		code[:3], code[3:], expiresIn/60,
 	)
+}
+
+// formatGroupDay renders a group's schedule for a single date.
+func formatGroupDay(d dayInfo, groupName string) string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "👥 <b>Розклад групи %s</b>\n", html.EscapeString(groupName))
+	fmt.Fprintf(&b, "📅 Розклад на <b>%s</b> (%s)\n", html.EscapeString(shortDate(d.Date)), html.EscapeString(d.DayName))
+
+	if d.IsDayOff || len(d.Lessons) == 0 {
+		b.WriteString("\n🎉 Пар немає — вихідний!\n")
+		return b.String()
+	}
+
+	for _, l := range d.Lessons {
+		b.WriteString("\n")
+
+		location := l.LocationTitle
+		if location == "" {
+			location = l.LocationRaw
+		}
+		fmt.Fprintf(&b, "<code>%s</code> %s <i>%s</i>\n", hhmm(l.Time), html.EscapeString(l.Name), formatLessonMode(l.Tag, location, l.URL))
+
+		teacher := l.LecturerName
+		if teacher == "" {
+			teacher = l.TeacherRaw
+		}
+		if teacher != "" {
+			fmt.Fprintf(&b, "<b>Викладач:</b> %s\n", html.EscapeString(teacher))
+		}
+	}
+
+	return b.String()
+}
+
+func groupDayKeyboard(date time.Time, groupID int) gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{Text: "◀️ Вчора", CallbackData: fmt.Sprintf("%sprev:%s:%d", groupNavCallbackPrefix, date.Format("2006-01-02"), groupID)},
+				{Text: "📅 Сьогодні", CallbackData: fmt.Sprintf("%stoday:%s:%d", groupNavCallbackPrefix, date.Format("2006-01-02"), groupID)},
+				{Text: "Завтра ▶️", CallbackData: fmt.Sprintf("%snext:%s:%d", groupNavCallbackPrefix, date.Format("2006-01-02"), groupID)},
+			},
+		},
+	}
+}
+
+// formatGroupWeek renders a group's schedule for an academic week.
+func formatGroupWeek(w weekInfo, offset int, groupName string) string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "👥 <b>Розклад групи %s</b>\n", html.EscapeString(groupName))
+	fmt.Fprintf(&b, "🗓 <b>%s</b> тиждень — %s\n", weekOrdinal(w.WeekNumber), weekOffsetLabel(offset))
+
+	if len(w.Days) == 0 {
+		b.WriteString("\n🎉 Занять цього тижня немає.\n")
+		return b.String()
+	}
+
+	var todayName, tomorrowName string
+	if offset == 0 {
+		today := isoWeekday(time.Now())
+		todayName = isoDayNamesUA[today]
+		tomorrowName = isoDayNamesUA[today%7+1]
+	}
+
+	for _, d := range w.Days {
+		b.WriteString("\n<blockquote><b>")
+		b.WriteString(html.EscapeString(d.DayName))
+		b.WriteString("</b>")
+		switch d.DayName {
+		case todayName:
+			b.WriteString(" - <i>Сьогодні</i>")
+		case tomorrowName:
+			b.WriteString(" - <i>Завтра</i>")
+		}
+		b.WriteString("</blockquote>\n")
+
+		for _, l := range d.Lessons {
+			location := l.LocationTitle
+			if location == "" {
+				location = l.LocationRaw
+			}
+			fmt.Fprintf(&b, "<code>%s</code> %s <i>%s</i>\n", hhmm(l.Time), html.EscapeString(l.Name), formatLessonMode(l.Tag, location, l.URL))
+		}
+	}
+
+	return b.String()
+}
+
+func groupWeekKeyboard(offset int, groupID int) gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				groupWeekNavButton(-1, offset, groupID, "◀️ Минулий"),
+				groupWeekNavButton(0, offset, groupID, "Поточний"),
+				groupWeekNavButton(1, offset, groupID, "Наступний ▶️"),
+			},
+			{
+				{Text: "📅 Розклад на сьогодні", CallbackData: fmt.Sprintf("%stoday:%d", groupWeekCallbackPrefix, groupID)},
+			},
+		},
+	}
+}
+
+func groupWeekNavButton(target, displayed, groupID int, label string) gotgbot.InlineKeyboardButton {
+	if target == displayed {
+		return gotgbot.InlineKeyboardButton{
+			Text:         "✅ " + weekOffsetLabel(target),
+			CallbackData: fmt.Sprintf("%snoop", groupWeekCallbackPrefix),
+		}
+	}
+	return gotgbot.InlineKeyboardButton{
+		Text:         label,
+		CallbackData: fmt.Sprintf("%sgoto:%d:%d", groupWeekCallbackPrefix, target, groupID),
+	}
+}
+
+func formatGroupListMenu(groups []model.BotGroup, notice string) string {
+	var b strings.Builder
+	b.WriteString("👥 <b>Керування групами</b>\n\n")
+
+	if notice != "" {
+		b.WriteString(notice)
+		b.WriteString("\n\n")
+	}
+
+	if len(groups) == 0 {
+		b.WriteString("У тебе ще немає налаштованих груп для використання у чатах.\n" +
+			"Натисни кнопку <b>«➕ Нова група»</b> нижче, щоб додати академічну групу.")
+		return b.String()
+	}
+
+	b.WriteString("Обери групу для перегляду та налаштування, або додай нову:")
+	return b.String()
+}
+
+func groupListKeyboard(groups []model.BotGroup) gotgbot.InlineKeyboardMarkup {
+	var rows [][]gotgbot.InlineKeyboardButton
+	for _, g := range groups {
+		title := g.AcademicGroupName
+		if g.Faculty != "" {
+			title += fmt.Sprintf(" (%s)", g.Faculty)
+		}
+		if g.TelegramChatTitle != "" {
+			title += fmt.Sprintf(" — 💬 %s", g.TelegramChatTitle)
+		}
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: "👥 " + title, CallbackData: groupCallbackPrefix + "view:" + g.ID.String()},
+		})
+	}
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "➕ Нова група", CallbackData: groupCallbackPrefix + "new"},
+	})
+	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func formatGroupConfig(g model.BotGroup, notice string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "⚙️ <b>Налаштування групи: %s</b>\n\n", html.EscapeString(g.AcademicGroupName))
+
+	if notice != "" {
+		b.WriteString(notice)
+		b.WriteString("\n\n")
+	}
+
+	faculty := g.Faculty
+	if faculty == "" {
+		faculty = "не вказано"
+	}
+	fmt.Fprintf(&b, "• <b>Академічна група:</b> %s (%s)\n", html.EscapeString(g.AcademicGroupName), html.EscapeString(faculty))
+	fmt.Fprintf(&b, "• <b>ID в Campus:</b> <code>%d</code>\n", g.AcademicGroupID)
+
+	if g.TelegramChatID != nil {
+		chatName := g.TelegramChatTitle
+		if chatName == "" {
+			chatName = fmt.Sprintf("ID: %d", *g.TelegramChatID)
+		}
+		fmt.Fprintf(&b, "• <b>Прив'язаний чат:</b> 💬 %s\n", html.EscapeString(chatName))
+	} else {
+		b.WriteString("• <b>Прив'язаний чат:</b> <i>Не прив'язано</i>\n")
+	}
+
+	return b.String()
+}
+
+func groupConfigKeyboard(g model.BotGroup) gotgbot.InlineKeyboardMarkup {
+	var rows [][]gotgbot.InlineKeyboardButton
+	idStr := g.ID.String()
+
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "✏️ Змінити академічну групу", CallbackData: groupCallbackPrefix + "edit_acad:" + idStr},
+	})
+	if g.TelegramChatID != nil {
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: "❌ Відв'язати від чату", CallbackData: groupCallbackPrefix + "unbind:" + idStr},
+		})
+	} else {
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: "🔗 Як прив'язати чат", CallbackData: groupCallbackPrefix + "bind_help:" + idStr},
+		})
+	}
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "🗑 Видалити групу", CallbackData: groupCallbackPrefix + "del_ask:" + idStr},
+	})
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "◀️ Назад до списку", CallbackData: groupCallbackPrefix + "list"},
+	})
+	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func formatGroupDeleteConfirm(g model.BotGroup) string {
+	return fmt.Sprintf("⚠️ <b>Видалення групи</b>\n\nТи впевнений, що хочеш видалити групу <b>%s</b>?\nРозклад цієї групи більше не буде доступний у прив'язаному чаті.", html.EscapeString(g.AcademicGroupName))
+}
+
+func groupDeleteConfirmKeyboard(groupID string) gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{Text: "🗑 Так, видалити", CallbackData: groupCallbackPrefix + "del_confirm:" + groupID},
+				{Text: "◀️ Скасувати", CallbackData: groupCallbackPrefix + "view:" + groupID},
+			},
+		},
+	}
+}
+
+func formatGroupCreationPrompt(errorMsg string) string {
+	var b strings.Builder
+	b.WriteString("➕ <b>Створення нової групи</b>\n\n")
+
+	if errorMsg != "" {
+		fmt.Fprintf(&b, "❌ <b>%s</b>\n\n", html.EscapeString(errorMsg))
+	}
+
+	b.WriteString("Надішли назву академічної групи КПІ (наприклад, <code>ІП-21</code>):")
+	return b.String()
+}
+
+func formatGroupEditAcadPrompt(currentName, errorMsg string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "✏️ <b>Зміна академічної групи для %s</b>\n\n", html.EscapeString(currentName))
+
+	if errorMsg != "" {
+		fmt.Fprintf(&b, "❌ <b>%s</b>\n\n", html.EscapeString(errorMsg))
+	}
+
+	b.WriteString("Надішли нову назву академічної групи КПІ (наприклад, <code>ІП-22</code>):")
+	return b.String()
+}
+
+func groupPromptBackKeyboard(callback string) gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{{Text: "◀️ Назад", CallbackData: callback}},
+		},
+	}
+}
+
+func formatGroupBindPicker(chatTitle string, groups []model.BotGroup) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "🔗 <b>Прив'язка чату «%s»</b>\n\n", html.EscapeString(chatTitle))
+
+	if len(groups) == 0 {
+		b.WriteString("У тебе ще немає створених груп. Натисни «➕ Нова група», щоб ввести академічну групу КПІ та прив'язати цей чат.")
+	} else {
+		b.WriteString("Обери збережену групу зі списку нижче або створи нову:")
+	}
+	return b.String()
+}
+
+func groupBindPickerKeyboard(chatID int64, groups []model.BotGroup) gotgbot.InlineKeyboardMarkup {
+	var rows [][]gotgbot.InlineKeyboardButton
+	for _, g := range groups {
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: "👥 " + g.AcademicGroupName, CallbackData: fmt.Sprintf("%sbind_to:%s:%d", groupCallbackPrefix, g.ID.String(), chatID)},
+		})
+	}
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "➕ Нова група", CallbackData: fmt.Sprintf("%sbind_new:%d", groupCallbackPrefix, chatID)},
+	})
+	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func formatUserName(u *gotgbot.User) string {
+	if u == nil {
+		return "користувача"
+	}
+	name := strings.TrimSpace(u.FirstName + " " + u.LastName)
+	if name == "" {
+		if u.Username != "" {
+			return "@" + u.Username
+		}
+		return fmt.Sprintf("ID:%d", u.Id)
+	}
+	if u.Username != "" {
+		return fmt.Sprintf("%s (@%s)", name, u.Username)
+	}
+	return name
 }

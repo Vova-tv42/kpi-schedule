@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -11,7 +12,9 @@ import (
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
+	"github.com/google/uuid"
 
+	"kpi-schedule-bot/server/internal/api"
 	"kpi-schedule-bot/server/internal/model"
 )
 
@@ -19,10 +22,13 @@ import (
 // dispatcher handler is registered per screen rather than one that has to
 // demultiplex every button in the bot.
 const (
-	navCallbackPrefix  = "nav:"  // day screen: prev / today / next
-	weekCallbackPrefix = "week:" // week screen: week slots + jump to today
-	menuCallbackPrefix = "menu:" // onboarding screens: link / back / week
-	urlsCallbackPrefix = "urls:" // lesson URLs screens: edit / back / del / today
+	navCallbackPrefix       = "nav:"   // day screen: prev / today / next
+	weekCallbackPrefix      = "week:"  // week screen: week slots + jump to today
+	menuCallbackPrefix      = "menu:"  // onboarding screens: link / back / week
+	urlsCallbackPrefix      = "urls:"  // lesson URLs screens: edit / back / del / today
+	groupCallbackPrefix     = "grp:"   // group admin screens: list / new / view / edit / unbind / delete / bind
+	groupNavCallbackPrefix  = "gnav:"  // group schedule day screen: prev / today / next
+	groupWeekCallbackPrefix = "gweek:" // group schedule week screen: slots / today
 )
 
 // navCallbackData encodes an action ("prev"/"next"/"today") plus the
@@ -229,8 +235,28 @@ func (b *Bot) handleDeleteURL(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, hash 
 
 
 func (b *Bot) editToDay(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, date time.Time) error {
-	text, kb, hasKeyboard, err := b.renderDay(context.Background(), cq.From.Id, date)
+	callerName := ""
+	isGroup := cq.Message != nil && cq.Message.GetChat().Type != "private"
+	if isGroup {
+		callerName = formatUserName(&cq.From)
+	}
+
+	text, kb, hasKeyboard, err := b.renderDay(context.Background(), cq.From.Id, date, callerName)
 	if err != nil {
+		if isGroup && errors.Is(err, ErrNotLinked) {
+			_, answerErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+				Text:      "🔒 Твій акаунт ще не прив'язано. Напиши боту в особисті повідомлення /start, щоб підключити розклад.",
+				ShowAlert: true,
+			})
+			return answerErr
+		}
+		if isGroup && errors.Is(err, api.ErrNoScheduleData) {
+			_, answerErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+				Text:      "📭 Твій розклад ще не синхронізовано з браузерного розширення.",
+				ShowAlert: true,
+			})
+			return answerErr
+		}
 		slog.Error("rendering day callback", "error", err, "telegram_id", cq.From.Id)
 		return answerWithError(bot, cq)
 	}
@@ -238,8 +264,28 @@ func (b *Bot) editToDay(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, date time.T
 }
 
 func (b *Bot) editToWeek(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, offset int) error {
-	text, kb, hasKeyboard, err := b.renderWeek(context.Background(), cq.From.Id, offset)
+	callerName := ""
+	isGroup := cq.Message != nil && cq.Message.GetChat().Type != "private"
+	if isGroup {
+		callerName = formatUserName(&cq.From)
+	}
+
+	text, kb, hasKeyboard, err := b.renderWeek(context.Background(), cq.From.Id, offset, callerName)
 	if err != nil {
+		if isGroup && errors.Is(err, ErrNotLinked) {
+			_, answerErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+				Text:      "🔒 Твій акаунт ще не прив'язано. Напиши боту в особисті повідомлення /start, щоб підключити розклад.",
+				ShowAlert: true,
+			})
+			return answerErr
+		}
+		if isGroup && errors.Is(err, api.ErrNoScheduleData) {
+			_, answerErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+				Text:      "📭 Твій розклад ще не синхронізовано з браузерного розширення.",
+				ShowAlert: true,
+			})
+			return answerErr
+		}
 		slog.Error("rendering week callback", "error", err, "telegram_id", cq.From.Id)
 		return answerWithError(bot, cq)
 	}
@@ -302,4 +348,281 @@ func answerWithError(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery) error {
 		ShowAlert: true,
 	})
 	return err
+}
+
+// onGroupNav handles day navigation for group schedules (gnav:action:date:groupID).
+func (b *Bot) onGroupNav(bot *gotgbot.Bot, ctx *ext.Context) error {
+	cq := ctx.CallbackQuery
+	parts := strings.Split(strings.TrimPrefix(cq.Data, groupNavCallbackPrefix), ":")
+	if len(parts) != 3 {
+		return answerSilently(bot, cq)
+	}
+	action, dateStr, groupIDStr := parts[0], parts[1], parts[2]
+
+	date, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return answerSilently(bot, cq)
+	}
+	groupID, err := strconv.Atoi(groupIDStr)
+	if err != nil {
+		return answerSilently(bot, cq)
+	}
+
+	switch action {
+	case "prev":
+		date = date.AddDate(0, 0, -1)
+	case "next":
+		date = date.AddDate(0, 0, 1)
+	case "today":
+		date = time.Now()
+	default:
+		return answerSilently(bot, cq)
+	}
+
+	group := model.BotGroup{AcademicGroupID: groupID, AcademicGroupName: fmt.Sprintf("ID:%d", groupID)}
+	if cq.Message != nil {
+		if g, err := b.db.GetBotGroupByChatID(context.Background(), cq.Message.GetChat().Id); err == nil {
+			group = g
+		}
+	}
+
+	text, kb, hasKeyboard, rErr := b.renderGroupDay(context.Background(), group, date)
+	if rErr != nil {
+		slog.Error("rendering group day callback", "error", rErr, "group_id", groupID)
+		return answerWithError(bot, cq)
+	}
+	return b.applyScreen(bot, cq, text, kb, hasKeyboard)
+}
+
+// onGroupWeek handles week navigation for group schedules (gweek:action...).
+func (b *Bot) onGroupWeek(bot *gotgbot.Bot, ctx *ext.Context) error {
+	cq := ctx.CallbackQuery
+	action := strings.TrimPrefix(cq.Data, groupWeekCallbackPrefix)
+
+	if action == "noop" {
+		return answerSilently(bot, cq)
+	}
+
+	parts := strings.Split(action, ":")
+	if len(parts) < 2 {
+		return answerSilently(bot, cq)
+	}
+
+	act := parts[0]
+	switch act {
+	case "today":
+		groupID, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return answerSilently(bot, cq)
+		}
+		group := model.BotGroup{AcademicGroupID: groupID, AcademicGroupName: fmt.Sprintf("ID:%d", groupID)}
+		if cq.Message != nil {
+			if g, err := b.db.GetBotGroupByChatID(context.Background(), cq.Message.GetChat().Id); err == nil {
+				group = g
+			}
+		}
+		text, kb, hasKeyboard, rErr := b.renderGroupDay(context.Background(), group, time.Now())
+		if rErr != nil {
+			return answerWithError(bot, cq)
+		}
+		return b.applyScreen(bot, cq, text, kb, hasKeyboard)
+
+	case "goto":
+		if len(parts) != 3 {
+			return answerSilently(bot, cq)
+		}
+		offset, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return answerSilently(bot, cq)
+		}
+		groupID, err := strconv.Atoi(parts[2])
+		if err != nil {
+			return answerSilently(bot, cq)
+		}
+		group := model.BotGroup{AcademicGroupID: groupID, AcademicGroupName: fmt.Sprintf("ID:%d", groupID)}
+		if cq.Message != nil {
+			if g, err := b.db.GetBotGroupByChatID(context.Background(), cq.Message.GetChat().Id); err == nil {
+				group = g
+			}
+		}
+		text, kb, hasKeyboard, rErr := b.renderGroupWeek(context.Background(), group, offset)
+		if rErr != nil {
+			return answerWithError(bot, cq)
+		}
+		return b.applyScreen(bot, cq, text, kb, hasKeyboard)
+
+	default:
+		return answerSilently(bot, cq)
+	}
+}
+
+// onGroup handles callbacks from group administration screens (grp:...).
+func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
+	cq := ctx.CallbackQuery
+	action := strings.TrimPrefix(cq.Data, groupCallbackPrefix)
+	reqCtx := context.Background()
+
+	switch {
+	case action == "list":
+		_ = b.db.ClearGroupPrompt(reqCtx, cq.From.Id)
+		groups, err := b.db.GetBotGroupsByCreator(reqCtx, cq.From.Id)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		return b.applyScreen(bot, cq, formatGroupListMenu(groups, ""), groupListKeyboard(groups), true)
+
+	case action == "new":
+		msgID := cq.Message.GetMessageId()
+		err := b.db.SetGroupPrompt(reqCtx, model.GroupPrompt{
+			TelegramID:      cq.From.Id,
+			PromptMessageID: msgID,
+			Action:          "create",
+		})
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		return b.applyScreen(bot, cq, formatGroupCreationPrompt(""), groupPromptBackKeyboard(groupCallbackPrefix+"list"), true)
+
+	case strings.HasPrefix(action, "view:"):
+		idStr := strings.TrimPrefix(action, "view:")
+		gid, err := uuid.Parse(idStr)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		_ = b.db.ClearGroupPrompt(reqCtx, cq.From.Id)
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		return b.applyScreen(bot, cq, formatGroupConfig(g, ""), groupConfigKeyboard(g), true)
+
+	case strings.HasPrefix(action, "edit_acad:"):
+		idStr := strings.TrimPrefix(action, "edit_acad:")
+		gid, err := uuid.Parse(idStr)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		msgID := cq.Message.GetMessageId()
+		err = b.db.SetGroupPrompt(reqCtx, model.GroupPrompt{
+			TelegramID:      cq.From.Id,
+			PromptMessageID: msgID,
+			Action:          "edit_academic",
+			GroupID:         &gid,
+		})
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		return b.applyScreen(bot, cq, formatGroupEditAcadPrompt(g.AcademicGroupName, ""), groupPromptBackKeyboard(groupCallbackPrefix+"view:"+idStr), true)
+
+	case strings.HasPrefix(action, "unbind:"):
+		idStr := strings.TrimPrefix(action, "unbind:")
+		gid, err := uuid.Parse(idStr)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		if err := b.db.UnbindBotGroupChat(reqCtx, gid); err != nil {
+			return answerWithError(bot, cq)
+		}
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		return b.applyScreen(bot, cq, formatGroupConfig(g, "✅ Чат успішно відв'язано."), groupConfigKeyboard(g), true)
+
+	case strings.HasPrefix(action, "bind_help:"):
+		idStr := strings.TrimPrefix(action, "bind_help:")
+		helpText := "🔗 <b>Як прив'язати цю групу до Telegram-чату:</b>\n\n" +
+			"1. Додай цього бота до свого групового чату.\n" +
+			"2. Напиши в чаті команду <code>/group</code>.\n" +
+			"3. Натисни кнопку налаштування — бот надішле кнопку переходу в особисті повідомлення для прив'язки чату."
+		kb := groupPromptBackKeyboard(groupCallbackPrefix + "view:" + idStr)
+		return b.applyScreen(bot, cq, helpText, kb, true)
+
+	case strings.HasPrefix(action, "del_ask:"):
+		idStr := strings.TrimPrefix(action, "del_ask:")
+		gid, err := uuid.Parse(idStr)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		return b.applyScreen(bot, cq, formatGroupDeleteConfirm(g), groupDeleteConfirmKeyboard(idStr), true)
+
+	case strings.HasPrefix(action, "del_confirm:"):
+		idStr := strings.TrimPrefix(action, "del_confirm:")
+		gid, err := uuid.Parse(idStr)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		g, _ := b.db.GetBotGroupByID(reqCtx, gid)
+		if err := b.db.DeleteBotGroup(reqCtx, gid); err != nil {
+			return answerWithError(bot, cq)
+		}
+		groups, err := b.db.GetBotGroupsByCreator(reqCtx, cq.From.Id)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		notice := fmt.Sprintf("🗑 Групу «<b>%s</b>» успішно видалено.", html.EscapeString(g.AcademicGroupName))
+		return b.applyScreen(bot, cq, formatGroupListMenu(groups, notice), groupListKeyboard(groups), true)
+
+	case strings.HasPrefix(action, "bind_to:"):
+		rest := strings.TrimPrefix(action, "bind_to:")
+		parts := strings.Split(rest, ":")
+		if len(parts) != 2 {
+			return answerSilently(bot, cq)
+		}
+		gid, err := uuid.Parse(parts[0])
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		chatID, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		chatTitle := fmt.Sprintf("ID: %d", chatID)
+		if tgChat, err := bot.GetChat(chatID, nil); err == nil && tgChat.Title != "" {
+			chatTitle = tgChat.Title
+		}
+		if err := b.db.BindBotGroupChat(reqCtx, gid, chatID, chatTitle); err != nil {
+			return answerWithError(bot, cq)
+		}
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		notice := fmt.Sprintf("✅ Чат «<b>%s</b>» успішно прив'язано до групи <b>%s</b>!", html.EscapeString(chatTitle), html.EscapeString(g.AcademicGroupName))
+		return b.applyScreen(bot, cq, formatGroupConfig(g, notice), groupConfigKeyboard(g), true)
+
+	case strings.HasPrefix(action, "bind_new:"):
+		chatIDStr := strings.TrimPrefix(action, "bind_new:")
+		chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		chatTitle := fmt.Sprintf("ID: %d", chatID)
+		if tgChat, err := bot.GetChat(chatID, nil); err == nil && tgChat.Title != "" {
+			chatTitle = tgChat.Title
+		}
+		msgID := cq.Message.GetMessageId()
+		err = b.db.SetGroupPrompt(reqCtx, model.GroupPrompt{
+			TelegramID:      cq.From.Id,
+			PromptMessageID: msgID,
+			Action:          "create",
+			BindChatID:      &chatID,
+			BindChatTitle:   chatTitle,
+		})
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		return b.applyScreen(bot, cq, formatGroupCreationPrompt(""), groupPromptBackKeyboard(groupCallbackPrefix+"list"), true)
+
+	default:
+		return answerSilently(bot, cq)
+	}
 }
