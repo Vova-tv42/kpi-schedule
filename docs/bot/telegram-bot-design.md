@@ -1,6 +1,6 @@
 # Telegram Bot Architecture & User Experience
 
-> **Runtime note.** The bot is **not a separate service**. It runs inside the single Go backend (`apps/server/internal/bot/`, using `gotgbot/v2`) and shares its process, database, cache, and scheduler. It calls `internal/api.Service` and `internal/storage.DB` directly, in-process — not over HTTP with `X-Internal-Token`, even though the `/api/v1/auth/pair/generate` and `/api/v1/schedule/*` endpoints exist and are internal-token-protected for other internal/admin callers. Updates arrive via webhook (`POST /api/v1/telegram/webhook`) in production (**not implemented yet** — needs its own per-Telegram-user rate limiting, see `docs/architecture/error-handling-resilience.md` §5) and via long polling in local development (implemented). See [`docs/project-repository.md` §4.1](../project-repository.md) for the rationale.
+> **Runtime note.** The bot is **not a separate service**. It runs inside the single Go backend (`apps/server/internal/bot/`, using `gotgbot/v2`) and shares its process, database, cache, and scheduler. It calls `internal/api.Service` and `internal/storage.DB` directly, in-process — not over HTTP with `X-Internal-Token`, even though the `/api/v1/auth/pair/generate` and `/api/v1/schedule/*` endpoints exist and are internal-token-protected for other internal/admin callers. Updates arrive via webhook (`POST /api/v1/telegram/webhook`), authenticated by `secret_token` via the `X-Telegram-Bot-Api-Secret-Token` header and exempt from IP rate limiting (see `docs/architecture/error-handling-resilience.md` §5). Both local development (via ngrok/tunnel) and production use webhooks — no long polling is used. See [`docs/project-repository.md` §4.1](../project-repository.md) for the rationale.
 >
 > **Implementation status.** `/start`, `/link`, `/today`, and `/week` are implemented, all four as button screens that edit the message in place. `/tomorrow`, `/group`, `/settings`, `/help`, morning reminders, and the stale-schedule background check are **not implemented yet** — see §6.
 
@@ -176,4 +176,4 @@ The server runs an in-process scheduler (`apps/server/internal/scheduler/`):
 
 Per-user reminders are **not** individual cron entries. A single short-interval tick drains a table of due reminders (outbox pattern), so pending notifications survive restarts and redeploys.
 
-Sending a reminder is a plain outbound HTTPS call to `api.telegram.org`, independent of whether updates are delivered by webhook or long polling.
+Sending a reminder is a plain outbound HTTPS call to `api.telegram.org`.

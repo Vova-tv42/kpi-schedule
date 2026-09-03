@@ -42,12 +42,13 @@ The Golang backend API serves as the core coordinator between the Telegram Bot, 
 | **GET** | `/api/v1/schedule/date` | Read stored combined schedule for a specific date | `X-Internal-Token` |
 | **GET** | `/api/v1/groups` | Search & list all academic groups | `X-Internal-Token` |
 | **GET** | `/api/v1/time/current` | Query current academic week & day | `X-Internal-Token` |
+| **POST**| `/api/v1/telegram/webhook` | Receive Telegram Bot API update payload | `X-Telegram-Bot-Api-Secret-Token` |
 
 All `/schedule/*` reads are passive lookups of whatever was last stored — there is no
 inline fetch and no `force_refresh` parameter any more (see
 [`docs/api/schedule-endpoints.md`](schedule-endpoints.md)).
 
-The Telegram bot's production webhook route (`POST /api/v1/telegram/webhook`) is deferred to a
-later iteration — local dev uses long polling instead (see
-[`docs/bot/telegram-bot-design.md`](../bot/telegram-bot-design.md)); see the "Not yet created"
-note in `docs/project-repository.md` §2 for what else is still pending.
+The Telegram bot's webhook route (`POST /api/v1/telegram/webhook`) is authenticated via the
+`X-Telegram-Bot-Api-Secret-Token` header and is deliberately exempt from the standard `/api/v1`
+IP rate limiter (see [`docs/architecture/error-handling-resilience.md`](../architecture/error-handling-resilience.md) §5).
+Long polling is not used — both local dev (via ngrok) and production use webhooks.

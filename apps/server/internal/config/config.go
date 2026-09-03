@@ -13,7 +13,9 @@ type Config struct {
 	HTTPAddr         string
 	// TelegramBotToken is optional: if empty, the bot is not started and the
 	// server runs API-only, as it did before the bot existed.
-	TelegramBotToken string
+	TelegramBotToken      string
+	TelegramWebhookURL    string
+	TelegramWebhookSecret string
 }
 
 func Load() (Config, error) {
@@ -22,10 +24,12 @@ func Load() (Config, error) {
 	_ = godotenv.Load()
 
 	cfg := Config{
-		DatabasePath:     os.Getenv("DATABASE_PATH"),
-		InternalAPIToken: os.Getenv("INTERNAL_API_TOKEN"),
-		HTTPAddr:         os.Getenv("HTTP_ADDR"),
-		TelegramBotToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
+		DatabasePath:          os.Getenv("DATABASE_PATH"),
+		InternalAPIToken:      os.Getenv("INTERNAL_API_TOKEN"),
+		HTTPAddr:              os.Getenv("HTTP_ADDR"),
+		TelegramBotToken:      os.Getenv("TELEGRAM_BOT_TOKEN"),
+		TelegramWebhookURL:    os.Getenv("TELEGRAM_WEBHOOK_URL"),
+		TelegramWebhookSecret: os.Getenv("TELEGRAM_WEBHOOK_SECRET"),
 	}
 
 	if cfg.DatabasePath == "" {
@@ -36,6 +40,14 @@ func Load() (Config, error) {
 	}
 	if cfg.HTTPAddr == "" {
 		cfg.HTTPAddr = ":8080"
+	}
+	if cfg.TelegramBotToken != "" {
+		if cfg.TelegramWebhookURL == "" {
+			return Config{}, fmt.Errorf("TELEGRAM_WEBHOOK_URL is required when TELEGRAM_BOT_TOKEN is set")
+		}
+		if cfg.TelegramWebhookSecret == "" {
+			return Config{}, fmt.Errorf("TELEGRAM_WEBHOOK_SECRET is required when TELEGRAM_BOT_TOKEN is set")
+		}
 	}
 
 	return cfg, nil

@@ -37,7 +37,8 @@ encryption key to generate any more — the server stores no credentials (see
 `TELEGRAM_BOT_TOKEN` is optional and unset by default — leave it blank to run API-only. To
 also run the bot locally: message **@BotFather** on Telegram, send `/newbot`, follow its
 prompts (display name, then a username ending in `bot`), and paste the token it gives you into
-`.env`.
+`.env`. When `TELEGRAM_BOT_TOKEN` is set, `TELEGRAM_WEBHOOK_URL` (public HTTPS URL, e.g. from
+an ngrok tunnel) and `TELEGRAM_WEBHOOK_SECRET` are also required (see §7).
 
 ## 3. Run the server
 
@@ -92,11 +93,25 @@ that endpoint is built, `user_lessons` can only be populated by inserting rows d
 via a Go script against the `DATABASE_PATH` file) for manual `/schedule/*` testing — there is
 no supported end-to-end path from a real `my.kpi.ua` account today.
 
-## 7. Testing the Telegram bot locally (long polling)
+## 7. Testing the Telegram bot locally (webhook via ngrok)
 
-With `TELEGRAM_BOT_TOKEN` set in `.env` (see §2), `go run ./cmd/server` logs "telegram bot
-started (long polling)" and the bot starts receiving updates — no public URL/webhook needed
-locally (see [`docs/bot/telegram-bot-design.md`](../bot/telegram-bot-design.md)).
+Because Telegram delivers updates via webhooks (`POST /api/v1/telegram/webhook`) rather than
+long polling, testing the bot locally requires exposing your local HTTP server over a public
+HTTPS URL. Telegram cannot connect to `localhost`.
+
+1. Start an HTTPS tunnel in another terminal:
+   ```bash
+   ngrok http 8080
+   ```
+2. Copy the public forwarding HTTPS URL (e.g. `https://abc-123.ngrok-free.app`).
+3. Set the bot configuration in `apps/server/.env`:
+   ```env
+   TELEGRAM_BOT_TOKEN=<your-bot-token>
+   TELEGRAM_WEBHOOK_URL=https://abc-123.ngrok-free.app/api/v1/telegram/webhook
+   TELEGRAM_WEBHOOK_SECRET=my_local_dev_secret_token
+   ```
+4. Start the server (`go run ./cmd/server`). On boot, it registers the webhook with Telegram,
+   logs `"telegram bot started (webhook)"`, and begins receiving updates.
 
 In Telegram, message your bot:
 

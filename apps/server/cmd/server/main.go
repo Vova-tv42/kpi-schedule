@@ -41,21 +41,23 @@ func main() {
 	campusClient := campus.NewClient(db)
 	svc := api.NewService(db, campusClient)
 
-	router := api.NewRouter(svc, cfg.InternalAPIToken)
-
 	var tgBot *bot.Bot
+	var webhookHandler http.HandlerFunc
 	if cfg.TelegramBotToken != "" {
 		tgBot, err = bot.New(cfg.TelegramBotToken, svc, db)
 		if err != nil {
 			log.Fatalf("bot: %v", err)
 		}
-		if err := tgBot.StartPolling(); err != nil {
-			log.Fatalf("bot polling: %v", err)
+		if err := tgBot.RegisterWebhook(cfg.TelegramWebhookURL, cfg.TelegramWebhookSecret); err != nil {
+			log.Fatalf("bot webhook: %v", err)
 		}
-		slog.Info("telegram bot started (long polling)")
+		webhookHandler = tgBot.WebhookHandler()
+		slog.Info("telegram bot started (webhook)", "url", cfg.TelegramWebhookURL)
 	} else {
 		slog.Info("TELEGRAM_BOT_TOKEN not set — telegram bot disabled")
 	}
+
+	router := api.NewRouter(svc, cfg.InternalAPIToken, webhookHandler)
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,

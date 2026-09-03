@@ -7,7 +7,8 @@ package bot
 import (
 	"fmt"
 	"log/slog"
-	"time"
+	"net/http"
+	"strings"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
@@ -29,10 +30,14 @@ type Bot struct {
 }
 
 // New builds a Bot and registers its command/callback handlers. It does not
-// start receiving updates yet — call StartPolling for that. NewBot validates
-// the token with a GetMe call, so a bad token fails here, loudly.
-func New(token string, svc *api.Service, db *storage.DB) (*Bot, error) {
-	gbot, err := gotgbot.NewBot(token, nil)
+// start receiving updates yet — call RegisterWebhook for that. New validates
+// the token with a GetMe call unless DisableTokenCheck is set in optional botOpts.
+func New(token string, svc *api.Service, db *storage.DB, botOpts ...*gotgbot.BotOpts) (*Bot, error) {
+	var opts *gotgbot.BotOpts
+	if len(botOpts) > 0 {
+		opts = botOpts[0]
+	}
+	gbot, err := gotgbot.NewBot(token, opts)
 	if err != nil {
 		return nil, fmt.Errorf("creating telegram bot: %w", err)
 	}
@@ -40,6 +45,7 @@ func New(token string, svc *api.Service, db *storage.DB) (*Bot, error) {
 	b := &Bot{gbot: gbot, svc: svc, db: db}
 
 	dispatcher := ext.NewDispatcher(&ext.DispatcherOpts{
+		MaxRoutines: -1,
 		Error: func(_ *gotgbot.Bot, _ *ext.Context, err error) ext.DispatcherAction {
 			slog.Error("telegram handler error", "error", err)
 			return ext.DispatcherActionNoop
@@ -59,36 +65,54 @@ func New(token string, svc *api.Service, db *storage.DB) (*Bot, error) {
 	return b, nil
 }
 
-// pollTimeoutSeconds is how long we ask Telegram to hold each getUpdates
-// call open server-side while waiting for a new update (the actual
-// "long" part of long polling).
-const pollTimeoutSeconds = 9
+// WebhookPath is the URL path where the HTTP server receives Telegram updates.
+const WebhookPath = "/api/v1/telegram/webhook"
 
-// StartPolling begins long-polling for updates. This is the local-dev
-// delivery mode; production is meant to use a webhook instead (not
-// implemented yet — see docs/bot/telegram-bot-design.md). Non-blocking: the
-// updater runs polling in its own background goroutine.
-func (b *Bot) StartPolling() error {
-	return b.updater.StartPolling(b.gbot, &ext.PollingOpts{
-		DropPendingUpdates: true,
-		GetUpdatesOpts: &gotgbot.GetUpdatesOpts{
-			Timeout:        pollTimeoutSeconds,
-			AllowedUpdates: []string{"message", "callback_query"},
-			// The HTTP client's own request timeout must exceed
-			// pollTimeoutSeconds, or it cancels the request before
-			// Telegram's long-poll window can resolve server-side —
-			// gotgbot's default RequestOpts.Timeout is only 5s.
-			RequestOpts: &gotgbot.RequestOpts{
-				Timeout: (pollTimeoutSeconds + 5) * time.Second,
-			},
-		},
-	})
+// AddWebhook prepares the updater to receive updates on WebhookPath with the
+// given secretToken authentication.
+func (b *Bot) AddWebhook(secretToken string) error {
+	if err := b.updater.AddWebhook(b.gbot, WebhookPath, &ext.AddWebhookOpts{
+		SecretToken: secretToken,
+	}); err != nil {
+		return fmt.Errorf("adding webhook to updater: %w", err)
+	}
+	return nil
 }
 
-// Stop shuts the bot down. Deliberately does not use updater.Idle(), which
-// installs its own OS-signal handler — main.go already owns graceful
-// shutdown, so Stop is just wired into that existing signal-wait/shutdown
-// sequence instead of running a second one.
+// RegisterWebhook prepares the updater to receive updates on WebhookPath and
+// registers the public webhookURL with Telegram's Bot API.
+func (b *Bot) RegisterWebhook(webhookURL, secretToken string) error {
+	if err := b.AddWebhook(secretToken); err != nil {
+		return err
+	}
+
+	cleanURL := strings.TrimRight(webhookURL, "/")
+	if !strings.HasSuffix(cleanURL, WebhookPath) {
+		cleanURL += WebhookPath
+	}
+
+	_, err := b.gbot.SetWebhook(cleanURL, &gotgbot.SetWebhookOpts{
+		SecretToken:        secretToken,
+		AllowedUpdates:     []string{"message", "callback_query"},
+		DropPendingUpdates: true,
+	})
+	if err != nil {
+		return fmt.Errorf("setting telegram webhook: %w", err)
+	}
+
+	return nil
+}
+
+// WebhookHandler returns an http.HandlerFunc that routes incoming Telegram webhook
+// updates to the dispatcher, verifying the secret token.
+func (b *Bot) WebhookHandler() http.HandlerFunc {
+	return b.updater.GetHandlerFunc("/")
+}
+
+// Stop shuts the bot down: closes update channels and stops the dispatcher.
+// Deliberately does not use updater.Idle(), which installs its own OS-signal
+// handler — main.go already owns graceful shutdown, so Stop is just wired into
+// that existing signal-wait/shutdown sequence instead of running a second one.
 func (b *Bot) Stop() {
 	if err := b.updater.Stop(); err != nil {
 		slog.Error("stopping telegram bot", "error", err)

@@ -104,21 +104,18 @@ specific host is chosen, switch to `middleware.ClientIPFromXFF(trustedProxyCIDR)
 `ClientIPFromHeader` for a known CDN like Cloudflare) so the real client IP behind that proxy
 is resolved correctly instead.
 
-**This limiter does not, and cannot, apply to Telegram webhook traffic.** When the (not yet
-built) Telegram bot runs in webhook mode, every one of its end users' messages arrives at
+**This limiter does not, and cannot, apply to Telegram webhook traffic.** When the Telegram
+bot runs in webhook mode, every one of its end users' messages arrives at
 `POST /api/v1/telegram/webhook` from Telegram's own small set of shared edge IPs
 (`149.154.160.0/20` and `91.108.4.0/22` per Telegram's Bot API docs) — an IP-keyed limit on
 that route would throttle the bot's entire real user base, not abusers, once more than ~20
-messages/minute arrive in aggregate. That route will need its own, separate design instead,
-to be built alongside the webhook handler itself:
-- **Authenticity**: verify the `X-Telegram-Bot-Api-Secret-Token` header against the
-  `secret_token` configured via `setWebhook` (gotgbot's `ext.WebhookOpts.SecretToken`
-  supports this natively) — a reliable identity check, unlike IP filtering alone.
-- **Per-user limiting**: key the limiter off the Telegram `user.id` inside the parsed update
-  payload, not the source IP, since the IP is meaningless (shared by every user) on this
-  route.
+messages/minute arrive in aggregate.
 
-This is deliberately **not implemented yet**, since the webhook route and the bot itself
-don't exist in this codebase — building the limiter in isolation with no update parser or
-route to attach it to would just be untested, speculative code. See
-[`docs/bot/telegram-bot-design.md`](../bot/telegram-bot-design.md).
+For this reason, `POST /api/v1/telegram/webhook` is mounted **outside** `ipRateLimitMiddleware`:
+- **Authenticity**: requests are authenticated by verifying the `X-Telegram-Bot-Api-Secret-Token`
+  header against `TELEGRAM_WEBHOOK_SECRET` (handled via gotgbot's `ext.AddWebhookOpts.SecretToken`),
+  rejecting invalid requests with HTTP 401.
+- **Per-user limiting**: future user-level throttling should key off the Telegram `user.id`
+  inside the parsed update payload rather than source IP.
+See [`docs/bot/telegram-bot-design.md`](../bot/telegram-bot-design.md).
+

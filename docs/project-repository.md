@@ -84,7 +84,7 @@ These were considered and **intentionally left out** until a concrete need appea
 
 - **Language**: Go 1.23+
 - **HTTP Router**: `chi` (`github.com/go-chi/chi/v5`) — minimal overhead, readable middleware chaining.
-- **Rate Limiting**: `github.com/go-chi/httprate`, 20 req/min per client IP on all `/api/v1/*` routes — see [`docs/architecture/error-handling-resilience.md`](architecture/error-handling-resilience.md) §5 for why the (not yet built) Telegram webhook route will need a different, per-user limiter instead of this one.
+- **Rate Limiting**: `github.com/go-chi/httprate`, 20 req/min per client IP on all `/api/v1/*` routes (except the Telegram webhook route `POST /api/v1/telegram/webhook`, which is exempt and authenticated via secret token) — see [`docs/architecture/error-handling-resilience.md`](architecture/error-handling-resilience.md) §5.
 - **Telegram Bot**: `gotgbot/v2` (`github.com/PaulSonOfLars/gotgbot/v2`) — code-generated from the Bot API specification, fully type-safe, standard library only. Chosen because message *mutation* methods (`editMessageText`, `editMessageReplyMarkup`, `deleteMessage`, `answerCallbackQuery`) map 1:1 to the Bot API, which the inline-keyboard navigation depends on.
 - **my.kpi.ua Client**: none — the server never fetches `my.kpi.ua`. That fetch (a small regexp extraction of the FullCalendar events URL embedded in the calendar shell page's inline script, then the JSON events feed itself; see `docs/schedules/main/data-extraction.md`) is now the browser extension's job, done client-side.
 - **Persistence**: SQLite (`modernc.org/sqlite`, pure Go, CGO-free) via `database/sql`, on a mounted persistent-disk volume. A prior decision here rejected SQLite for ephemeral-disk deployment targets; the target host is now confirmed to have a persistent disk, and the host VM is meant to sleep when idle to save cost, which is exactly what makes SQLite the better fit — see `docs/architecture/data-storage.md` §5.
@@ -126,11 +126,11 @@ worker only — there is no schedule-*refresh* cron at all any more, since the s
 self-triggers a `my.kpi.ua` fetch (see §3.1 above and `docs/architecture/data-storage.md` §4).
 
 ### 4.3 Telegram update delivery
+ 
+- **Delivery**: webhook → `POST /api/v1/telegram/webhook`, protected by `setWebhook`'s `secret_token` and verified against the `X-Telegram-Bot-Api-Secret-Token` header.
+- **Testing**: in local development, an HTTPS tunnel (e.g. ngrok) exposes `:8080` to Telegram. Long polling is not used.
 
-- **Production**: webhook → `POST /api/v1/telegram/webhook`, protected by `setWebhook`'s `secret_token` and verified against the `X-Telegram-Bot-Api-Secret-Token` header.
-- **Local development**: long polling (`bot.Start()`), requiring no public URL or tunnel.
-
-Both modes drive identical handler code. Note that *sending* messages (e.g. scheduled reminders) is an ordinary outbound HTTPS call and is unaffected by which delivery mode is active.
+Note that *sending* messages (e.g. scheduled reminders) is an ordinary outbound HTTPS call to `api.telegram.org`.
 
 ---
 
