@@ -2,7 +2,7 @@
 
 > **Runtime note.** The bot is **not a separate service**. It runs inside the single Go backend (`apps/server/internal/bot/`, using `gotgbot/v2`) and shares its process, database, cache, and scheduler. It calls `internal/api.Service` and `internal/storage.DB` directly, in-process — not over HTTP with `X-Internal-Token`, even though the `/api/v1/auth/pair/generate` and `/api/v1/schedule/*` endpoints exist and are internal-token-protected for other internal/admin callers. Updates arrive via webhook (`POST /api/v1/telegram/webhook`), authenticated by `secret_token` via the `X-Telegram-Bot-Api-Secret-Token` header and exempt from IP rate limiting (see `docs/architecture/error-handling-resilience.md` §5). Both local development (via ngrok/tunnel) and production use webhooks — no long polling is used. See [`docs/project-repository.md` §4.1](../project-repository.md) for the rationale.
 >
-> **Implementation status.** `/start`, `/install`, `/link`, `/today`, `/week`, `/urls`, `/group`, `/group_today`, and `/group_week` are implemented. `/tomorrow`, `/settings`, `/help`, morning reminders, and the stale-schedule background check are **not implemented yet** — see §6.
+> **Implementation status.** `/start`, `/install`, `/link`, `/today`, `/week`, `/urls`, `/group`, `/group_today`, `/group_week`, and `/settings` are implemented. `/tomorrow`, `/help`, morning reminders, and the stale-schedule background check are **not implemented yet** — see §6.
 
 ## 1. Bot Purpose & Features
 
@@ -10,7 +10,7 @@ The Telegram Bot provides students with quick, frictionless access to their veri
 - **Interactive Inline Buttons**: Seamless switching between Days, Weeks, and Disciplines.
 - **Group Chat Integration**: Adding the bot to academic group chats with dedicated group schedules and caller attribution.
 - **Smart Enrichments**: Direct links to campus buildings/rooms (`https://kpi.ua/k-5`) and lecturer profiles.
-- **Morning Briefings**: Configurable automated reminders before the first class of the day.
+- **Automated Lesson Alerts**: Configurable reminders 10 minutes before and at the start of classes for students and groups.
 - **Stale Schedule Alerts**: Notification if the browser extension hasn't pushed an update in a while — there is no server-side session to expire any more, see [`docs/architecture/data-storage.md`](../architecture/data-storage.md) §4.
 
 ---
@@ -27,11 +27,11 @@ Commands are scoped via Telegram's `setMyCommands` API (`BotCommandScopeAllPriva
 | `/urls` | DM only | `Посилання на онлайн-заняття` | ✅ Implemented | Interactive menu to manage custom lesson conference URLs (Zoom, Meet, etc.) with prompt-and-delete chat flow (see §3.4). |
 | `/today` | DM & Groups | DM: `Показати розклад на сьогодні`<br>Group: `Показати персональний розклад на сьогодні` | ✅ Implemented | Shows today's personal classes. In groups, prepends `👤 Розклад: <Користувач>` attributing who last triggered or navigated the schedule (see §3.5). |
 | `/week` | DM & Groups | DM: `Показати розклад на тиждень`<br>Group: `Показати персональний розклад на тиждень` | ✅ Implemented | Shows one academic week compactly. In groups, also carries caller attribution (see §3.5). |
-| `/group` | DM menu (usable in groups) | `Керування академічними групами` | ✅ Implemented | In DMs: interactive group management menu (create, view, edit academic group, unbind, delete). In groups: hidden from menu suggestions, but if typed by an admin, checks rights and provides a deep-link button to configure in DM. |
+| `/group` | DM menu (usable in groups) | `Керування академічними групами` | ✅ Implemented | In DMs: interactive group management menu (create, view, edit academic group, unbind, delete, toggle notifications). In groups: hidden from menu suggestions, but if typed by an admin, checks rights and provides a deep-link button to configure in DM. |
 | `/group_today` (`/group-today`) | Groups only | `Показати розклад групи на сьогодні` | ✅ Implemented | Shows today's overall group schedule fetched directly from the secondary Campus API (`api.campus.kpi.ua`). |
 | `/group_week` (`/group-week`) | Groups only | `Показати розклад групи на тиждень` | ✅ Implemented | Shows one academic week of the overall group schedule from the secondary Campus API. |
+| `/settings` | DM only | `Налаштування сповіщень` | ✅ Implemented | Manage lesson reminders (10m before and at start) with in-place toggle. |
 | `/tomorrow` | Both | `Показати розклад на завтра` | Not yet built | Shows tomorrow's classes. |
-| `/settings` | DM only | `Налаштування сповіщень` | Not yet built | Manage morning reminders, timezone, and account linking status. |
 | `/help` | Both | `Довідка та інструкції` | Not yet built | FAQ, troubleshooting, and links to web extension. |
 
 ---
@@ -278,16 +278,17 @@ Each screen namespaces its buttons with its own `callback_data` prefix — `menu
 
 ---
 
-## 6. Automated Background Worker
+## 6. Automated Background Worker & Lesson Alerts
 
-> **Not implemented yet.** `apps/server/internal/scheduler/` does not exist yet, and there is
-> no DB table backing per-user reminder settings or an outbox of due reminders either. The
-> design below is the target shape.
+The server runs an automated alerts engine (`apps/server/internal/alerts/`) coupled with external scheduled webhooks (`POST /api/v1/cron/lesson-alerts`, see [`docs/architecture/notifications-and-cron.md`](../architecture/notifications-and-cron.md)):
+- **Lesson Notification Dispatcher**: Evaluates pending lessons 10 minutes before (`before_10m`) and at the start (`at_start`) for personal users and bound academic group chats.
+- **Idempotency Outbox**: Dispatched notifications are logged in `sent_lesson_alerts` table, ensuring zero duplicate messages even across multiple cron ticks or retries.
+- **Settings & Opt-out**:
+  - Personal students can toggle notifications in private chat via `/settings` (enabled by default).
+  - Academic group admins can toggle group-wide notifications in `/group` settings (enabled by default).
+- **Scale-to-Zero Integration**: Pings to `/api/v1/cron/lesson-alerts` wake the stopped Fly.io machine, process pending alerts, and allow it to return to sleep after 15m idle. In local development (`IDLE_TIMEOUT=0`), an in-process 1-minute ticker runs automatically.
 
-The server runs an in-process scheduler (`apps/server/internal/scheduler/`):
-- **Morning Reminder Worker**: Fires every morning (e.g. at 07:30 or 08:00) for opted-in users who have classes scheduled on that day.
-- **Stale Schedule Check Worker**: Periodically checks `user_schedule_state.refreshed_at` and alerts users gracefully to re-sync the extension if it's gone stale (see [`docs/architecture/data-storage.md`](../architecture/data-storage.md) §4) — there are no session cookies to validate any more, only a push timestamp to watch.
+Future planned workers:
+- **Morning Briefing Worker**: Optional daily summary before the first class of the day.
+- **Stale Schedule Check Worker**: Periodically checks `user_schedule_state.refreshed_at` and alerts users gracefully to re-sync the extension if it's gone stale (see [`docs/architecture/data-storage.md`](../architecture/data-storage.md) §4).
 
-Per-user reminders are **not** individual cron entries. A single short-interval tick drains a table of due reminders (outbox pattern), so pending notifications survive restarts and redeploys.
-
-Sending a reminder is a plain outbound HTTPS call to `api.telegram.org`.

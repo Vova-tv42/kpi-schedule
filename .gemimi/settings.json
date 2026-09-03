@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "command(go test)",
+      "command(go run)",
+      "command(bun test)"
+    ]
+  }
+}

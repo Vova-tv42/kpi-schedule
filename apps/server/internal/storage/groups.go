@@ -12,13 +12,13 @@ import (
 	"kpi-schedule-bot/server/internal/model"
 )
 
-const botGroupColumns = `id, creator_telegram_id, academic_group_id, academic_group_name, faculty, telegram_chat_id, telegram_chat_title, created_at, updated_at`
+const botGroupColumns = `id, creator_telegram_id, academic_group_id, academic_group_name, faculty, telegram_chat_id, telegram_chat_title, notifications_enabled, created_at, updated_at`
 
 func scanBotGroup(row interface{ Scan(...any) error }) (model.BotGroup, error) {
 	var g model.BotGroup
 	var idStr string
 	var chatID sql.NullInt64
-	err := row.Scan(&idStr, &g.CreatorTelegramID, &g.AcademicGroupID, &g.AcademicGroupName, &g.Faculty, &chatID, &g.TelegramChatTitle, &g.CreatedAt, &g.UpdatedAt)
+	err := row.Scan(&idStr, &g.CreatorTelegramID, &g.AcademicGroupID, &g.AcademicGroupName, &g.Faculty, &chatID, &g.TelegramChatTitle, &g.NotificationsEnabled, &g.CreatedAt, &g.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return model.BotGroup{}, ErrNotFound
@@ -42,23 +42,24 @@ func (db *DB) CreateBotGroup(ctx context.Context, creatorTelegramID int64, acade
 	id := uuid.New()
 
 	_, err := db.SQL.ExecContext(ctx, `
-		INSERT INTO bot_groups (id, creator_telegram_id, academic_group_id, academic_group_name, faculty, telegram_chat_id, telegram_chat_title, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO bot_groups (id, creator_telegram_id, academic_group_id, academic_group_name, faculty, telegram_chat_id, telegram_chat_title, notifications_enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
 	`, id.String(), creatorTelegramID, academicGroupID, academicGroupName, faculty, telegramChatID, telegramChatTitle, now, now)
 	if err != nil {
 		return model.BotGroup{}, fmt.Errorf("inserting bot group: %w", err)
 	}
 
 	return model.BotGroup{
-		ID:                id,
-		CreatorTelegramID: creatorTelegramID,
-		AcademicGroupID:   academicGroupID,
-		AcademicGroupName: academicGroupName,
-		Faculty:           faculty,
-		TelegramChatID:    telegramChatID,
-		TelegramChatTitle: telegramChatTitle,
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		ID:                   id,
+		CreatorTelegramID:    creatorTelegramID,
+		AcademicGroupID:      academicGroupID,
+		AcademicGroupName:    academicGroupName,
+		Faculty:              faculty,
+		TelegramChatID:       telegramChatID,
+		TelegramChatTitle:    telegramChatTitle,
+		NotificationsEnabled: true,
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}, nil
 }
 
@@ -299,4 +300,48 @@ func (db *DB) DeleteGroupLessonURL(ctx context.Context, groupID uuid.UUID, subje
 		return fmt.Errorf("deleting group lesson url: %w", err)
 	}
 	return nil
+}
+
+// SetBotGroupNotifications toggles notifications_enabled for a bot group.
+func (db *DB) SetBotGroupNotifications(ctx context.Context, id uuid.UUID, enabled bool) error {
+	now := time.Now().UTC()
+	res, err := db.SQL.ExecContext(ctx, `
+		UPDATE bot_groups
+		SET notifications_enabled = ?, updated_at = ?
+		WHERE id = ?
+	`, enabled, now, id.String())
+	if err != nil {
+		return fmt.Errorf("updating bot group notifications: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// GetActiveBotGroupsWithNotifications returns all groups with a bound Telegram chat and notifications enabled.
+func (db *DB) GetActiveBotGroupsWithNotifications(ctx context.Context) ([]model.BotGroup, error) {
+	rows, err := db.SQL.QueryContext(ctx, `
+		SELECT `+botGroupColumns+`
+		FROM bot_groups
+		WHERE telegram_chat_id IS NOT NULL AND notifications_enabled = 1
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("querying active bot groups with notifications: %w", err)
+	}
+	defer rows.Close()
+
+	var groups []model.BotGroup
+	for rows.Next() {
+		g, err := scanBotGroup(rows)
+		if err != nil {
+			return nil, err
+		}
+		groups = append(groups, g)
+	}
+	return groups, rows.Err()
 }

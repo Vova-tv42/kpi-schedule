@@ -15,6 +15,7 @@ type handlers struct {
 // RouterOpts holds optional dependencies and configuration for NewRouterWithOpts.
 type RouterOpts struct {
 	TelegramWebhookHandler http.HandlerFunc
+	CronHandler            *CronHandler
 }
 
 // NewRouter builds the full /api/v1 route tree. Optional telegramWebhookHandler
@@ -57,6 +58,11 @@ func NewRouterWithOpts(svc *Service, internalToken string, opts RouterOpts) http
 		// Must NOT be wrapped by ipRateLimitMiddleware — Telegram edge IPs are shared across all users.
 		if opts.TelegramWebhookHandler != nil {
 			r.Post("/telegram/webhook", opts.TelegramWebhookHandler)
+		}
+
+		// Cron webhook route (authenticity verified via cron token).
+		if opts.CronHandler != nil {
+			r.HandleFunc("/cron/lesson-alerts", opts.CronHandler.HandleLessonAlerts)
 		}
 
 		// Rate-limit incoming requests

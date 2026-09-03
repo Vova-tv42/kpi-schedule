@@ -888,3 +888,28 @@ func sendScreen(bot *gotgbot.Bot, chatID int64, text string, kb gotgbot.InlineKe
 	_, err := bot.SendMessage(chatID, text, opts)
 	return err
 }
+
+func (b *Bot) cmdSettings(bot *gotgbot.Bot, ctx *ext.Context) error {
+	if isGroupChat(ctx.EffectiveChat) {
+		_, err := bot.SendMessage(ctx.EffectiveChat.Id, "⚠️ Команда /settings доступна лише в особистих повідомленнях з ботом.", nil)
+		return err
+	}
+
+	reqCtx := context.Background()
+	user, err := b.db.GetUserByTelegramID(reqCtx, ctx.EffectiveUser.Id)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			user, err = b.db.UpsertUser(reqCtx, ctx.EffectiveUser.Id, nil, nil)
+			if err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	}
+
+	text := formatUserSettings(user.NotificationsEnabled)
+	kb := userSettingsKeyboard(user.NotificationsEnabled)
+	return sendScreen(bot, ctx.EffectiveChat.Id, text, kb, true)
+}
+

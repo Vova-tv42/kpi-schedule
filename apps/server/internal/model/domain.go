@@ -19,12 +19,13 @@ const (
 // telegram_id is kept as the external key even without a bot wired up yet,
 // so manual testing and the future bot need no schema change.
 type User struct {
-	ID         uuid.UUID
-	TelegramID int64
-	GroupID    *int
-	GroupName  *string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID                   uuid.UUID
+	TelegramID           int64
+	GroupID              *int
+	GroupName            *string
+	NotificationsEnabled bool
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 // ScheduleState tracks when a user's lesson set was last synced. There is no
@@ -146,16 +147,25 @@ func IsOnline(location string) bool {
 
 // BotGroup represents a configured group for Telegram group chats.
 type BotGroup struct {
-	ID                uuid.UUID
-	CreatorTelegramID int64
-	AcademicGroupID   int
-	AcademicGroupName string
-	Faculty           string
-	TelegramChatID    *int64
-	TelegramChatTitle string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID                   uuid.UUID
+	CreatorTelegramID    int64
+	AcademicGroupID      int
+	AcademicGroupName    string
+	Faculty              string
+	TelegramChatID       *int64
+	TelegramChatTitle    string
+	NotificationsEnabled bool
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
+
+// AlertType identifies whether a notification is sent 10 minutes prior or at the start.
+type AlertType string
+
+const (
+	AlertBefore10m AlertType = "before_10m"
+	AlertAtStart   AlertType = "at_start"
+)
 
 // GroupPrompt tracks an in-flight prompt for creating or configuring a group or group lesson URL.
 type GroupPrompt struct {

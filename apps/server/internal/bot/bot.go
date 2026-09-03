@@ -53,6 +53,11 @@ func (b *Bot) ExtensionDownloadURL() string {
 	return b.ExtensionInstallURL()
 }
 
+// GBot returns the underlying gotgbot.Bot client.
+func (b *Bot) GBot() *gotgbot.Bot {
+	return b.gbot
+}
+
 // New builds a Bot and registers its command/callback handlers. It does not
 // start receiving updates yet — call RegisterWebhook for that. New validates
 // the token with a GetMe call unless DisableTokenCheck is set in optional botOpts.
@@ -84,6 +89,7 @@ func New(token string, svc *api.Service, db *storage.DB, botOpts ...*gotgbot.Bot
 	dispatcher.AddHandler(handlers.NewCommand("group", b.cmdGroup))
 	dispatcher.AddHandler(handlers.NewCommand("group_today", b.cmdGroupToday))
 	dispatcher.AddHandler(handlers.NewCommand("group_week", b.cmdGroupWeek))
+	dispatcher.AddHandler(handlers.NewCommand("settings", b.cmdSettings))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(navCallbackPrefix), b.onNav))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(weekCallbackPrefix), b.onWeek))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(menuCallbackPrefix), b.onMenu))
@@ -91,6 +97,7 @@ func New(token string, svc *api.Service, db *storage.DB, botOpts ...*gotgbot.Bot
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupCallbackPrefix), b.onGroup))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupNavCallbackPrefix), b.onGroupNav))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupWeekCallbackPrefix), b.onGroupWeek))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix("settings:"), b.onSettings))
 	dispatcher.AddHandler(handlers.NewMessage(message.All, b.onTextMessage))
 
 	b.dispatcher = dispatcher
@@ -106,6 +113,7 @@ func (b *Bot) SetupCommands() error {
 		{Command: "week", Description: "Показати розклад на тиждень"},
 		{Command: "urls", Description: "Посилання на онлайн-заняття"},
 		{Command: "group", Description: "Керування академічними групами"},
+		{Command: "settings", Description: "Налаштування сповіщень"},
 		{Command: "install", Description: "Інструкція та завантаження розширення"},
 		{Command: "link", Description: "Отримати код прив'язки браузерного розширення"},
 		{Command: "start", Description: "Знайомство та головне меню"},

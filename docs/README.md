@@ -15,6 +15,7 @@ Welcome to the technical documentation for the **KPI Personalized Schedule Platf
 - [Error Handling & Resilience](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/error-handling-resilience.md): Stale-push handling, Campus API circuit breaking, and the standard error envelope.
 - [Data Storage & Sync Policy](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/data-storage.md): SQLite schema (including the disk-backed `campus_cache` table), why no credentials are ever stored, and the extension-push sync model.
 - [Fly.io Scale-to-Zero & 15m Idle](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/fly-scale-to-zero.md): Firecracker microVM scale-to-zero, in-app 15m idle shutdown, wake-on-request proxy, and volume persistence.
+- [Notifications & Scheduled Cron](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/notifications-and-cron.md): Automated lesson alerts (10m before and at start), idempotency, and cron-job.org setup.
 
 ### 📁 Schedule Sources
 - **Main Schedule (`my.kpi.ua`)**:

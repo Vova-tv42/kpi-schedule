@@ -16,6 +16,7 @@ import (
 
 	"kpi-schedule-bot/server/internal/api"
 	"kpi-schedule-bot/server/internal/model"
+	"kpi-schedule-bot/server/internal/storage"
 )
 
 // Each screen namespaces its buttons with its own CallbackData prefix, so one
@@ -117,6 +118,8 @@ func (b *Bot) onMenu(bot *gotgbot.Bot, ctx *ext.Context) error {
 		return b.editToWeek(bot, cq, 0)
 	case "today":
 		return b.editToDay(bot, cq, time.Now())
+	case "settings":
+		return b.editToSettingsScreen(bot, cq)
 	default:
 		return answerSilently(bot, cq)
 	}
@@ -235,6 +238,55 @@ func (b *Bot) handleDeleteURL(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, hash 
 	return b.editToLessonsMenu(bot, cq, fmt.Sprintf("🗑 Посилання для%s видалено.", subjectLabel))
 }
 
+func (b *Bot) editToSettingsScreen(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery) error {
+	reqCtx := context.Background()
+	user, err := b.db.GetUserByTelegramID(reqCtx, cq.From.Id)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			user, err = b.db.UpsertUser(reqCtx, cq.From.Id, nil, nil)
+			if err != nil {
+				return answerWithError(bot, cq)
+			}
+		} else {
+			return answerWithError(bot, cq)
+		}
+	}
+	text := formatUserSettings(user.NotificationsEnabled)
+	kb := userSettingsKeyboard(user.NotificationsEnabled)
+	return b.applyScreen(bot, cq, text, kb, true)
+}
+
+func (b *Bot) onSettings(bot *gotgbot.Bot, ctx *ext.Context) error {
+	cq := ctx.CallbackQuery
+	action := strings.TrimPrefix(cq.Data, "settings:")
+
+	if action == "toggle_notify" {
+		reqCtx := context.Background()
+		user, err := b.db.GetUserByTelegramID(reqCtx, cq.From.Id)
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				user, err = b.db.UpsertUser(reqCtx, cq.From.Id, nil, nil)
+				if err != nil {
+					return answerWithError(bot, cq)
+				}
+			} else {
+				return answerWithError(bot, cq)
+			}
+		}
+
+		newStatus := !user.NotificationsEnabled
+		if err := b.db.SetUserNotifications(reqCtx, cq.From.Id, newStatus); err != nil {
+			slog.Error("toggling user notifications", "error", err, "telegram_id", cq.From.Id)
+			return answerWithError(bot, cq)
+		}
+
+		text := formatUserSettings(newStatus)
+		kb := userSettingsKeyboard(newStatus)
+		return b.applyScreen(bot, cq, text, kb, true)
+	}
+
+	return answerSilently(bot, cq)
+}
 
 func (b *Bot) editToDay(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, date time.Time) error {
 	callerName := ""
@@ -502,6 +554,28 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 			return answerWithError(bot, cq)
 		}
 		return b.applyScreen(bot, cq, formatGroupConfig(g, ""), groupConfigKeyboard(g), true)
+
+	case strings.HasPrefix(action, "toggle_notify:"):
+		idStr := strings.TrimPrefix(action, "toggle_notify:")
+		gid, err := uuid.Parse(idStr)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		newStatus := !g.NotificationsEnabled
+		if err := b.db.SetBotGroupNotifications(reqCtx, gid, newStatus); err != nil {
+			slog.Error("toggling bot group notifications", "error", err, "group_id", gid)
+			return answerWithError(bot, cq)
+		}
+		g.NotificationsEnabled = newStatus
+		notice := "✅ Сповіщення для групи увімкнено."
+		if !newStatus {
+			notice = "🔕 Сповіщення для групи вимкнено."
+		}
+		return b.applyScreen(bot, cq, formatGroupConfig(g, notice), groupConfigKeyboard(g), true)
 
 	case strings.HasPrefix(action, "urls:"):
 		idStr := strings.TrimPrefix(action, "urls:")

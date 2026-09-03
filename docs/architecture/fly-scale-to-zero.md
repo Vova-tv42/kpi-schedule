@@ -1,6 +1,6 @@
 # Fly.io Scale-to-Zero & 15-Minute Idle Architecture
 
-This document describes the hosting architecture on **Fly.io Fly Machines**, specifically how the server sleeps after 15 minutes of inactivity to minimize hosting costs, and wakes up automatically upon receiving any incoming HTTP request (API call, browser extension sync, or Telegram webhook).
+This document describes the hosting architecture on **Fly.io Fly Machines**, specifically how the server sleeps after 15 minutes of inactivity to minimize hosting costs, and wakes up automatically upon receiving any incoming HTTP request (API call, browser extension sync, Telegram webhook, or scheduled cron alert).
 
 ---
 
@@ -16,7 +16,7 @@ Because schedule queries and Telegram interactions occur in bursts (e.g. morning
 
 ```
                           [ Incoming HTTP Request ]
-                   (Telegram Webhook / Extension Sync / API)
+             (Telegram Webhook / Extension Sync / API / Cron Alerts)
                                      │
                                      ▼
                            ┌──────────────────┐
@@ -177,3 +177,15 @@ fly deploy
    ```
 4. Send `/today` to the Telegram bot or make a `curl https://<your-app-name>.fly.dev/api/v1/schedule/today` request.
 5. The machine boots automatically, handles the request, and resets the 15-minute idle countdown.
+
+---
+
+## 9. Scheduled Cron Wake-Ups & Automated Alerts
+
+To send automated lesson reminders (10 minutes before and at lesson start) without sacrificing scale-to-zero:
+- An external free cron scheduler (e.g. `cron-job.org`) sends an HTTP request to `POST /api/v1/cron/lesson-alerts` with `Authorization: Bearer <CRON_SECRET>` at KPI lesson times (08:20, 08:30, 10:15, 10:25, etc.).
+- Fly Proxy intercepts the HTTP request, boots the stopped machine in < 500ms, and routes the request to the Go server.
+- The server dispatches pending Telegram notifications for that window, records deduplication hashes in `sent_lesson_alerts`, and returns `200 OK`.
+- After 15 minutes of idle time, the machine gracefully powers off. Total compute time is only ~2–3 hours per day, only on class days (Monday–Saturday).
+- For complete setup and cron schedules, see [`docs/architecture/notifications-and-cron.md`](notifications-and-cron.md).
+

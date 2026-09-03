@@ -651,6 +651,12 @@ func formatGroupConfig(g model.BotGroup, notice string) string {
 		b.WriteString("• <b>Прив'язаний чат:</b> <i>Не прив'язано</i>\n")
 	}
 
+	if g.NotificationsEnabled {
+		b.WriteString("• <b>Сповіщення про пари:</b> 🔔 Увімкнено\n")
+	} else {
+		b.WriteString("• <b>Сповіщення про пари:</b> 🔕 Вимкнено\n")
+	}
+
 	return b.String()
 }
 
@@ -660,6 +666,13 @@ func groupConfigKeyboard(g model.BotGroup) gotgbot.InlineKeyboardMarkup {
 
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
 		{Text: "🔗 Посилання на заняття", CallbackData: groupCallbackPrefix + "urls:" + idStr},
+	})
+	toggleNotifyText := "🔔 Сповіщення: Увімкнено"
+	if !g.NotificationsEnabled {
+		toggleNotifyText = "🔕 Сповіщення: Вимкнено"
+	}
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: toggleNotifyText, CallbackData: groupCallbackPrefix + "toggle_notify:" + idStr},
 	})
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
 		{Text: "✏️ Змінити академічну групу", CallbackData: groupCallbackPrefix + "edit_acad:" + idStr},
@@ -829,3 +842,28 @@ func groupURLPromptKeyboard(groupID string, hasExistingURL bool, hash string) go
 	})
 	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
+
+func formatUserSettings(notificationsEnabled bool) string {
+	var b strings.Builder
+	b.WriteString("⚙️ <b>Налаштування сповіщень</b>\n\n")
+	if notificationsEnabled {
+		b.WriteString("• <b>Сповіщення про пари:</b> 🔔 Увімкнено\n\n<i>Бот надсилатиме сповіщення за 10 хвилин до початку та на початку кожної пари.</i>")
+	} else {
+		b.WriteString("• <b>Сповіщення про пари:</b> 🔕 Вимкнено\n\n<i>Сповіщення про пари вимкнено. Ти не отримуватимеш нагадувань.</i>")
+	}
+	return b.String()
+}
+
+func userSettingsKeyboard(notificationsEnabled bool) gotgbot.InlineKeyboardMarkup {
+	toggleText := "🔔 Сповіщення: Увімкнено"
+	if !notificationsEnabled {
+		toggleText = "🔕 Сповіщення: Вимкнено"
+	}
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{{Text: toggleText, CallbackData: "settings:toggle_notify"}},
+			{{Text: "◀️ Назад", CallbackData: menuCallbackData("back")}},
+		},
+	}
+}
+
