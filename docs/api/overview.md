@@ -34,6 +34,10 @@ The Golang backend API serves as the core coordinator between the Telegram Bot, 
 
 | Method | Endpoint | Description | Auth Required |
 | :--- | :--- | :--- | :--- |
+| **GET** | `/api/v1/extension/download` | Download pre-built `kpi-schedule-sync.zip` browser extension archive | None (Public) |
+| **POST**| `/api/v1/auth/pair/verify` | Verify 6-digit code and exchange for client auth token | None (Pair Code) |
+| **POST**| `/api/v1/schedule/sync` | Ingest parsed personal schedule from browser extension | Bearer token / `X-Internal-Token` |
+| **POST**| `/api/v1/auth/pair/generate` | Generate 6-digit one-time pairing code | `X-Internal-Token` |
 | **GET** | `/api/v1/auth/status/{telegramId}` | Check if user is `LINKED` (has a pushed schedule) or `NOT_LINKED` | `X-Internal-Token` |
 | **DELETE**| `/api/v1/auth/unlink/{telegramId}` | Delete the user and all stored lessons | `X-Internal-Token` |
 | **GET** | `/api/v1/schedule/today` | Read stored combined schedule for today | `X-Internal-Token` |

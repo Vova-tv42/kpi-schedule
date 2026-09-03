@@ -8,14 +8,36 @@ import (
 )
 
 type handlers struct {
-	svc           *Service
-	internalToken string
+	svc              *Service
+	internalToken    string
+	extensionZipPath string
+}
+
+// RouterOpts holds optional dependencies and configuration for NewRouterWithOpts.
+type RouterOpts struct {
+	TelegramWebhookHandler http.HandlerFunc
+	ExtensionZipPath       string
 }
 
 // NewRouter builds the full /api/v1 route tree. Optional telegramWebhookHandler
 // mounts the POST /api/v1/telegram/webhook route outside of IP rate limiting.
 func NewRouter(svc *Service, internalToken string, telegramWebhookHandler ...http.HandlerFunc) http.Handler {
-	h := &handlers{svc: svc, internalToken: internalToken}
+	var webhook http.HandlerFunc
+	if len(telegramWebhookHandler) > 0 {
+		webhook = telegramWebhookHandler[0]
+	}
+	return NewRouterWithOpts(svc, internalToken, RouterOpts{
+		TelegramWebhookHandler: webhook,
+	})
+}
+
+// NewRouterWithOpts builds the route tree with explicit options.
+func NewRouterWithOpts(svc *Service, internalToken string, opts RouterOpts) http.Handler {
+	h := &handlers{
+		svc:              svc,
+		internalToken:    internalToken,
+		extensionZipPath: opts.ExtensionZipPath,
+	}
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -36,8 +58,8 @@ func NewRouter(svc *Service, internalToken string, telegramWebhookHandler ...htt
 	r.Route("/api/v1", func(r chi.Router) {
 		// Telegram webhook route (public, authenticity verified via secret token header).
 		// Must NOT be wrapped by ipRateLimitMiddleware — Telegram edge IPs are shared across all users.
-		if len(telegramWebhookHandler) > 0 && telegramWebhookHandler[0] != nil {
-			r.Post("/telegram/webhook", telegramWebhookHandler[0])
+		if opts.TelegramWebhookHandler != nil {
+			r.Post("/telegram/webhook", opts.TelegramWebhookHandler)
 		}
 
 		// Rate-limit incoming requests
@@ -45,6 +67,7 @@ func NewRouter(svc *Service, internalToken string, telegramWebhookHandler ...htt
 			r.Use(ipRateLimitMiddleware())
 
 			// Public extension endpoints (authenticated via pair_code or user_token in payload/header)
+			r.Get("/extension/download", h.getExtensionDownload)
 			r.Post("/auth/pair/verify", h.postAuthPairVerify)
 			r.Post("/schedule/sync", h.postScheduleSync)
 

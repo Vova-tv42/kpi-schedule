@@ -124,3 +124,26 @@ flowchart TD
    - No `cookies`, `tabs`, `activeTab`, or `<all_urls>` permissions.
 3. **Zero Sensitive Data Transmission**:
    - The extension only pushes the parsed, sanitized lesson schedule. Passwords, session cookies, and login credentials never leave the browser.
+
+---
+
+## 6. Distribution & Installation
+
+### 6.1 Packaging (`scripts/pack.ts`)
+The extension bundle is built and zipped via:
+```bash
+bun run build:zip
+```
+This runs `vite build` into `dist/` and executes `scripts/pack.ts`, creating a clean `dist/kpi-schedule-sync.zip` without external zip dependencies.
+
+### 6.2 Distribution Channels
+1. **Server Ingestion / Direct Download**:
+   - The backend server serves the pre-built archive directly at `GET /api/v1/extension/download`.
+   - The Telegram bot provides an inline button linking directly to this download URL (or `EXTENSION_DOWNLOAD_URL` if an external release asset or CDN is configured).
+2. **Developer Mode Sideloading (Chrome / Edge / Brave / Opera)**:
+   - Students download and extract `kpi-schedule-sync.zip`.
+   - Navigate to `chrome://extensions` (or `edge://extensions`).
+   - Toggle **Developer mode** (*Режим розробника*) ON.
+   - Click **Load unpacked** (*Завантажити розпаковане розширення*) and select the unzipped directory.
+3. **Chrome Web Store Publication**:
+   - Store listing metadata, justifications, and disclosures are fully prepared in [`CHROMEWEBSTORE.md`](../../CHROMEWEBSTORE.md) for single-click web store installation.

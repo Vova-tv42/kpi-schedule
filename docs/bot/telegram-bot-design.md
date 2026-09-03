@@ -2,7 +2,7 @@
 
 > **Runtime note.** The bot is **not a separate service**. It runs inside the single Go backend (`apps/server/internal/bot/`, using `gotgbot/v2`) and shares its process, database, cache, and scheduler. It calls `internal/api.Service` and `internal/storage.DB` directly, in-process — not over HTTP with `X-Internal-Token`, even though the `/api/v1/auth/pair/generate` and `/api/v1/schedule/*` endpoints exist and are internal-token-protected for other internal/admin callers. Updates arrive via webhook (`POST /api/v1/telegram/webhook`), authenticated by `secret_token` via the `X-Telegram-Bot-Api-Secret-Token` header and exempt from IP rate limiting (see `docs/architecture/error-handling-resilience.md` §5). Both local development (via ngrok/tunnel) and production use webhooks — no long polling is used. See [`docs/project-repository.md` §4.1](../project-repository.md) for the rationale.
 >
-> **Implementation status.** `/start`, `/link`, `/today`, `/week`, `/urls`, `/group`, `/group_today`, and `/group_week` are implemented. `/tomorrow`, `/settings`, `/help`, morning reminders, and the stale-schedule background check are **not implemented yet** — see §6.
+> **Implementation status.** `/start`, `/install`, `/link`, `/today`, `/week`, `/urls`, `/group`, `/group_today`, and `/group_week` are implemented. `/tomorrow`, `/settings`, `/help`, morning reminders, and the stale-schedule background check are **not implemented yet** — see §6.
 
 ## 1. Bot Purpose & Features
 
@@ -22,6 +22,7 @@ Commands are scoped via Telegram's `setMyCommands` API (`BotCommandScopeAllPriva
 | Command | Scope | Menu Description | Status | Action Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `/start` | DM / Groups | `Знайомство та головне меню` | ✅ Implemented | In DMs: onboarding screen or deep-link router (`bind_<chatID>`, `cfg_<groupID>`). In groups: introduces the bot and explains available commands. |
+| `/install` | DM only | `Інструкція та завантаження розширення` | ✅ Implemented | Shows step-by-step developer mode installation guide and direct download button for `kpi-schedule-sync.zip`. |
 | `/link` | DM only | `Отримати код прив'язки браузерного розширення` | ✅ Implemented | Generates a 6-digit one-time code for Browser Extension pairing. |
 | `/urls` | DM only | `Посилання на онлайн-заняття` | ✅ Implemented | Interactive menu to manage custom lesson conference URLs (Zoom, Meet, etc.) with prompt-and-delete chat flow (see §3.4). |
 | `/today` | DM & Groups | DM: `Показати розклад на сьогодні`<br>Group: `Показати персональний розклад на сьогодні` | ✅ Implemented | Shows today's personal classes. In groups, prepends `👤 Розклад: <Користувач>` attributing who last triggered or navigated the schedule (see §3.5). |
@@ -104,15 +105,29 @@ the same information with far less noise.
 Two screens inside a single message, edited in place:
 
 ```text
-👋 Вітаю! …
-Спочатку встанови браузерне розширення — інструкція буде тут пізніше.   ← placeholder
-✅ Твій розклад уже синхронізовано …                                     ← only if synced
-[ 🔗 Прив'язати акаунт ]
+👋 Вітаю! Я покажу твій персональний розклад КПІ. …
+Щоб підключити розклад:
+1️⃣ Встанови розширення в браузер (Chrome, Edge, Brave, Opera).
+2️⃣ Натисни «Прив'язати акаунт» та отримай 6-значний код.
+3️⃣ Увійди на my.kpi.ua і синхронізуй розклад в один клік!
+[ 📥 Як встановити розширення ]  [ 🔗 Прив'язати акаунт ]
 [ 📅 Розклад на сьогодні ]                                               ← only if fresh
 
-        ↓ (same message, edited)
+        ↓ Tapping [ 📥 Як встановити розширення ] (or /install)
+
+📥 Встановлення розширення (Chrome / Edge / Brave / Opera) …
+1️⃣ Завантаж архів (.zip)
+2️⃣ Відкрий chrome://extensions
+3️⃣ Увімкни «Режим розробника»
+4️⃣ Натисни «Завантажити розпаковане» та вибери папку
+[ 📥 Завантажити .zip ] (direct download URL)
+[ 🔑 Отримати код прив'язки ]
+[ ◀️ Назад ]
+
+        ↓ Tapping [ 🔗 Прив'язати акаунт ] (or /link)
 
 🔑 Код прив'язки: 123-456 …
+[ 📥 Як встановити розширення ]
 [ ◀️ Назад ]  [ 🗓 Показати розклад ]
 ```
 
@@ -121,8 +136,8 @@ view. The schedule screens (§3.1, §3.2) deliberately have **no route back** to
 it is a one-way path.
 
 The start screen is **state-aware** (`Service.ScheduleFreshness`, no network calls), but only
-additively — the onboarding text and the link button are present in every state, so
-re-pairing is always possible:
+additively — the onboarding text, install button, and the link button are present in every state, so
+re-pairing and re-installation guidance are always accessible:
 
 | State | Extra note | Extra button |
 | :--- | :--- | :--- |

@@ -387,7 +387,10 @@ func weekNavButton(target, displayed int, label string) gotgbot.InlineKeyboardBu
 // been synced and is still current.
 func startKeyboard(state linkState) gotgbot.InlineKeyboardMarkup {
 	rows := [][]gotgbot.InlineKeyboardButton{
-		{{Text: "🔗 Прив'язати акаунт", CallbackData: menuCallbackData("link")}},
+		{
+			{Text: "📥 Як встановити розширення", CallbackData: menuCallbackData("install")},
+			{Text: "🔗 Прив'язати акаунт", CallbackData: menuCallbackData("link")},
+		},
 	}
 	if state == linkStateFresh {
 		rows = append(rows, []gotgbot.InlineKeyboardButton{
@@ -397,9 +400,28 @@ func startKeyboard(state linkState) gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
+func installKeyboard(downloadURL string) gotgbot.InlineKeyboardMarkup {
+	var rows [][]gotgbot.InlineKeyboardButton
+	if downloadURL != "" {
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: "📥 Завантажити .zip", Url: downloadURL},
+		})
+	}
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "🔑 Отримати код прив'язки", CallbackData: menuCallbackData("link")},
+	})
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "◀️ Назад", CallbackData: menuCallbackData("back")},
+	})
+	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
 func linkKeyboard() gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{Text: "📥 Як встановити розширення", CallbackData: menuCallbackData("install")},
+			},
 			{
 				{Text: "◀️ Назад", CallbackData: menuCallbackData("back")},
 				{Text: "🗓 Показати розклад", CallbackData: menuCallbackData("week")},
@@ -408,9 +430,12 @@ func linkKeyboard() gotgbot.InlineKeyboardMarkup {
 	}
 }
 
-const startScreenBase = "👋 Вітаю! Я покажу твій персональний розклад занять КПІ.\n\n" +
-	"Спочатку встанови браузерне розширення — інструкція буде тут пізніше.\n\n" +
-	"Коли розширення встановлено, натисни кнопку нижче, щоб отримати код прив'язки."
+const startScreenBase = "👋 <b>Вітаю! Я покажу твій персональний розклад КПІ.</b>\n\n" +
+	"Я враховую твої вибіркові дисципліни та підгрупи завдяки швидкій синхронізації через браузерне розширення для комп'ютера.\n\n" +
+	"<b>Щоб підключити розклад:</b>\n" +
+	"1️⃣ Встанови розширення в браузер (Chrome, Edge, Brave, Opera).\n" +
+	"2️⃣ Натисни «Прив'язати акаунт» та отримай 6-значний код.\n" +
+	"3️⃣ Увійди на my.kpi.ua і синхронізуй розклад в один клік!"
 
 // formatStartScreen appends a short status note for users who have already
 // synced. The onboarding text itself never changes — the note is additive, so
@@ -418,12 +443,24 @@ const startScreenBase = "👋 Вітаю! Я покажу твій персон�
 func formatStartScreen(state linkState) string {
 	switch state {
 	case linkStateFresh:
-		return startScreenBase + "\n\n✅ Твій розклад уже синхронізовано — можеш одразу відкрити його кнопкою нижче."
+		return startScreenBase + "\n\n✅ <b>Твій розклад уже синхронізовано!</b> Можеш одразу відкрити його кнопкою нижче."
 	case linkStateStale:
-		return startScreenBase + "\n\n⚠️ Розклад уже синхронізовано, але міг застаріти — відкрий розширення і синхронізуй ще раз."
+		return startScreenBase + "\n\n⚠️ <b>Розклад застарів</b> — відкрий розширення в браузері та синхронізуй ще раз."
 	default:
 		return startScreenBase
 	}
+}
+
+func formatInstallScreen() string {
+	return "📥 <b>Встановлення розширення (Chrome / Edge / Brave / Opera)</b>\n\n" +
+		"Розширення працює на десктопних браузерах (Windows, macOS, Linux):\n\n" +
+		"1️⃣ <b>Завантаж архів:</b> натисни кнопку <b>«Завантажити .zip»</b> нижче та розпакуй папку на своєму комп'ютері.\n\n" +
+		"2️⃣ <b>Відкрий керування розширеннями:</b> перейди в браузері за адресою:\n" +
+		"<code>chrome://extensions</code>\n" +
+		"<i>(для Edge: <code>edge://extensions</code>)</i>\n\n" +
+		"3️⃣ <b>Увімкни режим розробника:</b> увімкни перемикач <b>«Режим розробника»</b> (<i>Developer mode</i>) у правому верхньому кутку.\n\n" +
+		"4️⃣ <b>Завантаж розширення:</b> натисни кнопку <b>«Завантажити розпаковане»</b> (<i>Load unpacked</i>) ліворуч угорі та обери розпаковану папку.\n\n" +
+		"Після цього повертайся сюди й тисни <b>«Отримати код прив'язки»</b>!"
 }
 
 func formatLinkText(code string, expiresIn int) string {

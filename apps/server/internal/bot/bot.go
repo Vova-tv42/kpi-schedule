@@ -23,11 +23,22 @@ import (
 // Bot wraps the Telegram bot's lifecycle: construction, update dispatch, and
 // start/stop. See docs/bot/telegram-bot-design.md for the intended UX.
 type Bot struct {
-	gbot       *gotgbot.Bot
-	updater    *ext.Updater
-	dispatcher *ext.Dispatcher
-	svc        *api.Service
-	db         *storage.DB
+	gbot                 *gotgbot.Bot
+	updater              *ext.Updater
+	dispatcher           *ext.Dispatcher
+	svc                  *api.Service
+	db                   *storage.DB
+	extensionDownloadURL string
+}
+
+// SetExtensionDownloadURL overrides the public URL for downloading the extension.
+func (b *Bot) SetExtensionDownloadURL(url string) {
+	b.extensionDownloadURL = url
+}
+
+// ExtensionDownloadURL returns the public URL for downloading the extension.
+func (b *Bot) ExtensionDownloadURL() string {
+	return b.extensionDownloadURL
 }
 
 // New builds a Bot and registers its command/callback handlers. It does not
@@ -53,6 +64,7 @@ func New(token string, svc *api.Service, db *storage.DB, botOpts ...*gotgbot.Bot
 		},
 	})
 	dispatcher.AddHandler(handlers.NewCommand("start", b.cmdStart))
+	dispatcher.AddHandler(handlers.NewCommand("install", b.cmdInstall))
 	dispatcher.AddHandler(handlers.NewCommand("link", b.cmdLink))
 	dispatcher.AddHandler(handlers.NewCommand("today", b.cmdToday))
 	dispatcher.AddHandler(handlers.NewCommand("week", b.cmdWeek))
@@ -82,6 +94,7 @@ func (b *Bot) SetupCommands() error {
 		{Command: "week", Description: "Показати розклад на тиждень"},
 		{Command: "urls", Description: "Посилання на онлайн-заняття"},
 		{Command: "group", Description: "Керування академічними групами"},
+		{Command: "install", Description: "Інструкція та завантаження розширення"},
 		{Command: "link", Description: "Отримати код прив'язки браузерного розширення"},
 		{Command: "start", Description: "Знайомство та головне меню"},
 	}
@@ -130,6 +143,10 @@ func (b *Bot) RegisterWebhook(webhookURL, secretToken string) error {
 	}
 
 	cleanURL := strings.TrimRight(webhookURL, "/")
+	if b.extensionDownloadURL == "" {
+		baseURL := strings.TrimSuffix(cleanURL, WebhookPath)
+		b.extensionDownloadURL = baseURL + "/api/v1/extension/download"
+	}
 	if !strings.HasSuffix(cleanURL, WebhookPath) {
 		cleanURL += WebhookPath
 	}

@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "pack": "bun run scripts/pack.ts",
+    "build:zip": "vite build && bun run scripts/pack.ts",
     "preview": "vite preview"
   },
   "devDependencies": {

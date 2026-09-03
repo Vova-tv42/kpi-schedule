@@ -348,6 +348,25 @@ func (b *Bot) showGroupConfigScreen(bot *gotgbot.Bot, chatID int64, groupID uuid
 	return sendErr
 }
 
+func (b *Bot) cmdInstall(bot *gotgbot.Bot, ctx *ext.Context) error {
+	if isGroupChat(ctx.EffectiveChat) {
+		_, err := bot.SendMessage(ctx.EffectiveChat.Id, "⚠️ Ця команда доступна лише в особистих повідомленнях з ботом.", nil)
+		return err
+	}
+
+	reqCtx := context.Background()
+	if _, err := b.upsertUser(reqCtx, ctx.EffectiveUser.Id); err != nil {
+		return fmt.Errorf("upserting user on /install: %w", err)
+	}
+
+	_, err := bot.SendMessage(ctx.EffectiveChat.Id, formatInstallScreen(), &gotgbot.SendMessageOpts{
+		ParseMode:          "HTML",
+		ReplyMarkup:        installKeyboard(b.ExtensionDownloadURL()),
+		LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
+	})
+	return err
+}
+
 func (b *Bot) cmdLink(bot *gotgbot.Bot, ctx *ext.Context) error {
 	if isGroupChat(ctx.EffectiveChat) {
 		_, err := bot.SendMessage(ctx.EffectiveChat.Id, "⚠️ Ця команда доступна лише в особистих повідомленнях з ботом.", nil)

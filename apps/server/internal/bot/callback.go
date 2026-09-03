@@ -107,6 +107,8 @@ func (b *Bot) onMenu(bot *gotgbot.Bot, ctx *ext.Context) error {
 	cq := ctx.CallbackQuery
 
 	switch strings.TrimPrefix(cq.Data, menuCallbackPrefix) {
+	case "install":
+		return b.editToInstallScreen(bot, cq)
 	case "link":
 		return b.editToLinkScreen(bot, cq)
 	case "back":
@@ -299,6 +301,10 @@ func (b *Bot) editToStartScreen(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery) err
 		state = linkStateNone
 	}
 	return b.applyScreen(bot, cq, formatStartScreen(state), startKeyboard(state), true)
+}
+
+func (b *Bot) editToInstallScreen(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery) error {
+	return b.applyScreen(bot, cq, formatInstallScreen(), installKeyboard(b.ExtensionDownloadURL()), true)
 }
 
 func (b *Bot) editToLinkScreen(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery) error {
