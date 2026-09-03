@@ -1,4 +1,4 @@
-import { getStorageState, setStorageState, clearLinkedAccount } from '../lib/storage';
+import { DEFAULT_BACKEND_URL, getStorageState, setStorageState, clearLinkedAccount } from '../lib/storage';
 import { ApiClient } from '../lib/api-client';
 import { checkLoginAndExtractStudentId, fetchCalendarEvents } from '../lib/fetch-schedule';
 import { parseScheduleEvents } from '../lib/parse-schedule';
@@ -32,7 +32,7 @@ const inputBackendUrl = document.getElementById('input-backend-url') as HTMLInpu
 const btnSaveSettings = document.getElementById('btn-save-settings') as HTMLButtonElement;
 const btnUnlink = document.getElementById('btn-unlink') as HTMLButtonElement;
 
-let apiClient = new ApiClient('http://localhost:8080');
+let apiClient = new ApiClient(DEFAULT_BACKEND_URL);
 
 // Helper: Show Alert Banner
 function showAlert(
@@ -70,8 +70,11 @@ function hideAlert() {
 // Helper: Render View according to current linked state
 async function renderState() {
   const state = await getStorageState();
-  apiClient.setBaseUrl(state.backendUrl || 'http://localhost:8080');
-  inputBackendUrl.value = state.backendUrl || 'http://localhost:8080';
+  const currentUrl = (state.backendUrl && state.backendUrl !== 'http://localhost:8080')
+    ? state.backendUrl
+    : DEFAULT_BACKEND_URL;
+  apiClient.setBaseUrl(currentUrl);
+  inputBackendUrl.value = currentUrl;
 
   if (state.authToken && state.telegramId) {
     // User is linked

@@ -22,7 +22,7 @@ Commands are scoped via Telegram's `setMyCommands` API (`BotCommandScopeAllPriva
 | Command | Scope | Menu Description | Status | Action Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `/start` | DM / Groups | `Знайомство та головне меню` | ✅ Implemented | In DMs: onboarding screen or deep-link router (`bind_<chatID>`, `cfg_<groupID>`). In groups: introduces the bot and explains available commands. |
-| `/install` | DM only | `Інструкція та завантаження розширення` | ✅ Implemented | Shows step-by-step developer mode installation guide and direct download button for `kpi-schedule-sync.zip`. |
+| `/install` | DM only | `Інструкція та встановлення розширення` | ✅ Implemented | Shows step-by-step developer mode installation guide and button linking to external extension package or marketplace (`EXTENSION_INSTALL_URL`). |
 | `/link` | DM only | `Отримати код прив'язки браузерного розширення` | ✅ Implemented | Generates a 6-digit one-time code for Browser Extension pairing. |
 | `/urls` | DM only | `Посилання на онлайн-заняття` | ✅ Implemented | Interactive menu to manage custom lesson conference URLs (Zoom, Meet, etc.) with prompt-and-delete chat flow (see §3.4). |
 | `/today` | DM & Groups | DM: `Показати розклад на сьогодні`<br>Group: `Показати персональний розклад на сьогодні` | ✅ Implemented | Shows today's personal classes. In groups, prepends `👤 Розклад: <Користувач>` attributing who last triggered or navigated the schedule (see §3.5). |
@@ -120,7 +120,7 @@ Two screens inside a single message, edited in place:
 2️⃣ Відкрий chrome://extensions
 3️⃣ Увімкни «Режим розробника»
 4️⃣ Натисни «Завантажити розпаковане» та вибери папку
-[ 📥 Завантажити .zip ] (direct download URL)
+[ 📥 Встановити розширення ] (external install URL)
 [ 🔑 Отримати код прив'язки ]
 [ ◀️ Назад ]
 

@@ -169,4 +169,8 @@ func TestBotExtensionDownloadURL(t *testing.T) {
 	if b.ExtensionDownloadURL() != "https://cdn.example.com/ext.zip" {
 		t.Errorf("expected set download URL, got %s", b.ExtensionDownloadURL())
 	}
+	b.SetExtensionInstallURL("https://drive.google.com/test-install")
+	if b.ExtensionInstallURL() != "https://drive.google.com/test-install" {
+		t.Errorf("expected set install URL, got %s", b.ExtensionInstallURL())
+	}
 }

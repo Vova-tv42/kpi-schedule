@@ -23,6 +23,8 @@
   "host_permissions": [
     "https://my.kpi.ua/*",
     "https://api.campus.kpi.ua/*",
+    "https://kpi-schedule.fly.dev/*",
+    "https://*.fly.dev/*",
     "http://localhost:8080/*",
     "http://127.0.0.1:8080/*"
   ],

@@ -49,8 +49,8 @@ func main() {
 		if err != nil {
 			log.Fatalf("bot: %v", err)
 		}
-		if cfg.ExtensionDownloadURL != "" {
-			tgBot.SetExtensionDownloadURL(cfg.ExtensionDownloadURL)
+		if cfg.ExtensionInstallURL != "" {
+			tgBot.SetExtensionInstallURL(cfg.ExtensionInstallURL)
 		}
 		if err := tgBot.RegisterWebhook(cfg.TelegramWebhookURL, cfg.TelegramWebhookSecret); err != nil {
 			log.Fatalf("bot webhook: %v", err)
@@ -71,7 +71,6 @@ func main() {
 
 	router := api.NewRouterWithOpts(svc, cfg.InternalAPIToken, api.RouterOpts{
 		TelegramWebhookHandler: webhookHandler,
-		ExtensionZipPath:       cfg.ExtensionZipPath,
 	})
 
 	srv := &http.Server{

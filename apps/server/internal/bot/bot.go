@@ -25,22 +25,32 @@ import (
 // Bot wraps the Telegram bot's lifecycle: construction, update dispatch, and
 // start/stop. See docs/bot/telegram-bot-design.md for the intended UX.
 type Bot struct {
-	gbot                 *gotgbot.Bot
-	updater              *ext.Updater
-	dispatcher           *ext.Dispatcher
-	svc                  *api.Service
-	db                   *storage.DB
-	extensionDownloadURL string
+	gbot                *gotgbot.Bot
+	updater             *ext.Updater
+	dispatcher          *ext.Dispatcher
+	svc                 *api.Service
+	db                  *storage.DB
+	extensionInstallURL string
 }
 
-// SetExtensionDownloadURL overrides the public URL for downloading the extension.
+// SetExtensionInstallURL overrides the external URL for installing the extension.
+func (b *Bot) SetExtensionInstallURL(url string) {
+	b.extensionInstallURL = url
+}
+
+// ExtensionInstallURL returns the external URL for installing the extension.
+func (b *Bot) ExtensionInstallURL() string {
+	return b.extensionInstallURL
+}
+
+// SetExtensionDownloadURL is an alias for SetExtensionInstallURL for backward compatibility.
 func (b *Bot) SetExtensionDownloadURL(url string) {
-	b.extensionDownloadURL = url
+	b.SetExtensionInstallURL(url)
 }
 
-// ExtensionDownloadURL returns the public URL for downloading the extension.
+// ExtensionDownloadURL is an alias for ExtensionInstallURL for backward compatibility.
 func (b *Bot) ExtensionDownloadURL() string {
-	return b.extensionDownloadURL
+	return b.ExtensionInstallURL()
 }
 
 // New builds a Bot and registers its command/callback handlers. It does not
@@ -141,10 +151,6 @@ func (b *Bot) AddWebhook(secretToken string) error {
 // whether the webhook is already registered before issuing Telegram API calls.
 func (b *Bot) RegisterWebhook(webhookURL, secretToken string) error {
 	cleanURL := strings.TrimRight(webhookURL, "/")
-	if b.extensionDownloadURL == "" {
-		baseURL := strings.TrimSuffix(cleanURL, WebhookPath)
-		b.extensionDownloadURL = baseURL + "/api/v1/extension/download"
-	}
 	if !strings.HasSuffix(cleanURL, WebhookPath) {
 		cleanURL += WebhookPath
 	}

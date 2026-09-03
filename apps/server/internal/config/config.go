@@ -18,8 +18,7 @@ type Config struct {
 	TelegramBotToken      string
 	TelegramWebhookURL    string
 	TelegramWebhookSecret string
-	ExtensionZipPath      string
-	ExtensionDownloadURL  string
+	ExtensionInstallURL   string
 }
 
 func Load() (Config, error) {
@@ -34,8 +33,10 @@ func Load() (Config, error) {
 		TelegramBotToken:      os.Getenv("TELEGRAM_BOT_TOKEN"),
 		TelegramWebhookURL:    os.Getenv("TELEGRAM_WEBHOOK_URL"),
 		TelegramWebhookSecret: os.Getenv("TELEGRAM_WEBHOOK_SECRET"),
-		ExtensionZipPath:      os.Getenv("EXTENSION_ZIP_PATH"),
-		ExtensionDownloadURL:  os.Getenv("EXTENSION_DOWNLOAD_URL"),
+		ExtensionInstallURL:   os.Getenv("EXTENSION_INSTALL_URL"),
+	}
+	if cfg.ExtensionInstallURL == "" {
+		cfg.ExtensionInstallURL = os.Getenv("EXTENSION_DOWNLOAD_URL")
 	}
 
 	if cfg.DatabasePath == "" {

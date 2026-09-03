@@ -94,3 +94,41 @@ func TestConfigIdleTimeout(t *testing.T) {
 		t.Fatal("expected error for negative IDLE_TIMEOUT")
 	}
 }
+
+func TestConfigExtensionInstallURL(t *testing.T) {
+	t.Setenv("DATABASE_PATH", ":memory:")
+	t.Setenv("INTERNAL_API_TOKEN", "test-token")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+
+	// 1. Unset: empty string
+	t.Setenv("EXTENSION_INSTALL_URL", "")
+	t.Setenv("EXTENSION_DOWNLOAD_URL", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ExtensionInstallURL != "" {
+		t.Errorf("expected empty ExtensionInstallURL, got %q", cfg.ExtensionInstallURL)
+	}
+
+	// 2. EXTENSION_INSTALL_URL set directly
+	t.Setenv("EXTENSION_INSTALL_URL", "https://drive.google.com/test-link")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ExtensionInstallURL != "https://drive.google.com/test-link" {
+		t.Errorf("expected direct url, got %q", cfg.ExtensionInstallURL)
+	}
+
+	// 3. Fallback to legacy EXTENSION_DOWNLOAD_URL
+	t.Setenv("EXTENSION_INSTALL_URL", "")
+	t.Setenv("EXTENSION_DOWNLOAD_URL", "https://legacy.example.com/download")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ExtensionInstallURL != "https://legacy.example.com/download" {
+		t.Errorf("expected fallback url, got %q", cfg.ExtensionInstallURL)
+	}
+}

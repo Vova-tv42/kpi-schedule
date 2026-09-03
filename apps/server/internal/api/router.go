@@ -8,15 +8,13 @@ import (
 )
 
 type handlers struct {
-	svc              *Service
-	internalToken    string
-	extensionZipPath string
+	svc           *Service
+	internalToken string
 }
 
 // RouterOpts holds optional dependencies and configuration for NewRouterWithOpts.
 type RouterOpts struct {
 	TelegramWebhookHandler http.HandlerFunc
-	ExtensionZipPath       string
 }
 
 // NewRouter builds the full /api/v1 route tree. Optional telegramWebhookHandler
@@ -34,9 +32,8 @@ func NewRouter(svc *Service, internalToken string, telegramWebhookHandler ...htt
 // NewRouterWithOpts builds the route tree with explicit options.
 func NewRouterWithOpts(svc *Service, internalToken string, opts RouterOpts) http.Handler {
 	h := &handlers{
-		svc:              svc,
-		internalToken:    internalToken,
-		extensionZipPath: opts.ExtensionZipPath,
+		svc:           svc,
+		internalToken: internalToken,
 	}
 	r := chi.NewRouter()
 
@@ -67,7 +64,6 @@ func NewRouterWithOpts(svc *Service, internalToken string, opts RouterOpts) http
 			r.Use(ipRateLimitMiddleware())
 
 			// Public extension endpoints (authenticated via pair_code or user_token in payload/header)
-			r.Get("/extension/download", h.getExtensionDownload)
 			r.Post("/auth/pair/verify", h.postAuthPairVerify)
 			r.Post("/schedule/sync", h.postScheduleSync)
 

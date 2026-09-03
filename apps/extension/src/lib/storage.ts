@@ -1,6 +1,8 @@
 import { ExtensionStorageState } from '../types';
 
-const DEFAULT_BACKEND_URL = 'http://localhost:8080';
+export const DEFAULT_BACKEND_URL: string =
+  (import.meta.env?.VITE_BACKEND_URL as string | undefined) ||
+  'https://kpi-schedule.fly.dev';
 
 export async function getStorageState(): Promise<ExtensionStorageState> {
   const data = await chrome.storage.local.get([

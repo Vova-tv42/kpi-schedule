@@ -404,7 +404,7 @@ func installKeyboard(downloadURL string) gotgbot.InlineKeyboardMarkup {
 	var rows [][]gotgbot.InlineKeyboardButton
 	if downloadURL != "" {
 		rows = append(rows, []gotgbot.InlineKeyboardButton{
-			{Text: "📥 Завантажити .zip", Url: downloadURL},
+			{Text: "📥 Встановити розширення", Url: downloadURL},
 		})
 	}
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
@@ -454,7 +454,7 @@ func formatStartScreen(state linkState) string {
 func formatInstallScreen() string {
 	return "📥 <b>Встановлення розширення (Chrome / Edge / Brave / Opera)</b>\n\n" +
 		"Розширення працює на десктопних браузерах (Windows, macOS, Linux):\n\n" +
-		"1️⃣ <b>Завантаж архів:</b> натисни кнопку <b>«Завантажити .zip»</b> нижче та розпакуй папку на своєму комп'ютері.\n\n" +
+		"1️⃣ <b>Отримай розширення:</b> натисни кнопку <b>«Встановити розширення»</b> нижче та завантаж архів чи перейди на сторінку розширення.\n\n" +
 		"2️⃣ <b>Відкрий керування розширеннями:</b> перейди в браузері за адресою:\n" +
 		"<code>chrome://extensions</code>\n" +
 		"<i>(для Edge: <code>edge://extensions</code>)</i>\n\n" +

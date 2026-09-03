@@ -134,12 +134,17 @@ The extension bundle is built and zipped via:
 ```bash
 bun run build:zip
 ```
-This runs `vite build` into `dist/` and executes `scripts/pack.ts`, creating a clean `dist/kpi-schedule-sync.zip` without external zip dependencies.
+This compiles Vite into `dist/` with `VITE_BACKEND_URL` (defaulting to `https://kpi-schedule.fly.dev`) and packages `dist/kpi-schedule-sync.zip`.
 
-### 6.2 Distribution Channels
-1. **Server Ingestion / Direct Download**:
-   - The backend server serves the pre-built archive directly at `GET /api/v1/extension/download`.
-   - The Telegram bot provides an inline button linking directly to this download URL (or `EXTENSION_DOWNLOAD_URL` if an external release asset or CDN is configured).
+### 6.2 Backend URL Configuration
+- **Build-Time (`VITE_BACKEND_URL`)**: Configured via `.env` / `import.meta.env.VITE_BACKEND_URL`, defaulting to `https://kpi-schedule.fly.dev`.
+- **Runtime Override**: The extension popup includes a Settings (`⚙️`) panel where developers or users can override the backend URL if hosting custom server instances.
+- **Manifest Permissions**: `host_permissions` permits `https://kpi-schedule.fly.dev/*`, `https://*.fly.dev/*`, and `http://localhost:8080/*` alongside `my.kpi.ua` and `api.campus.kpi.ua`.
+
+### 6.3 Distribution Channels
+1. **External Package Hosting (Google Drive / GitHub Releases / S3)**:
+   - The archive is hosted on external storage.
+   - The Telegram bot provides an inline button linking directly to this external URL via the `EXTENSION_INSTALL_URL` environment variable.
 2. **Developer Mode Sideloading (Chrome / Edge / Brave / Opera)**:
    - Students download and extract `kpi-schedule-sync.zip`.
    - Navigate to `chrome://extensions` (or `edge://extensions`).
