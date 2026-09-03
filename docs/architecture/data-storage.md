@@ -125,7 +125,7 @@ fetched before the VM slept is still warm on wake.
   with the same TTLs the in-memory cache used — `time/current` 1 min, lesson slots 24h, group
   catalog 24h, per-group schedule 6h (keyed by group ID).
 - **What did *not* change**: the per-IP rate limiter (`internal/api/middleware.go`,
-  `github.com/go-chi/httprate`) stays in-memory on purpose. Its window is 1 minute, and any
+  in-memory fixed-window counter) stays in-memory on purpose. Its window is 1 minute, and any
   VM sleep cycle is guaranteed to exceed that — losing the in-memory counter on sleep is a
   non-issue, so persisting it would only add write load for no benefit. See
   [`error-handling-resilience.md`](error-handling-resilience.md) §5.

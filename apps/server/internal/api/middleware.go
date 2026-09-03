@@ -1,11 +1,14 @@
 package api
 
 import (
+	"net"
 	"net/http"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/httprate"
 
 	"kpi-schedule-bot/server/internal/model"
 )
@@ -25,11 +28,7 @@ func internalTokenMiddleware(expected string) func(http.Handler) http.Handler {
 }
 
 // requestsPerMinutePerIP caps how many /api/v1 requests a single client IP
-// may make. This is separate from (and cannot substitute for) the per-user
-// limiter the future Telegram webhook route will need — every one of a
-// webhook bot's end users arrives from Telegram's own shared edge IPs, so an
-// IP-keyed limit there would throttle real users instead of abusers. See
-// docs/architecture/error-handling-resilience.md §5.
+// may make in a 1-minute window.
 const requestsPerMinutePerIP = 20
 
 // corsMiddleware handles preflight OPTIONS requests and sets CORS headers
@@ -49,21 +48,92 @@ func corsMiddleware() func(http.Handler) http.Handler {
 	}
 }
 
-// ipRateLimitMiddleware rate-limits by the client IP resolved via
-// middleware.ClientIPFromRemoteAddr (see router.go) — the raw TCP peer, not
-// a spoofable header, since this server isn't known to sit behind a trusted
-// reverse proxy yet. Responds with the standard APIError JSON envelope
-// rather than httprate's default plain-text body.
+type ipBucket struct {
+	count   int
+	resetAt time.Time
+}
+
+type ipRateLimiter struct {
+	mu          sync.Mutex
+	limit       int
+	window      time.Duration
+	buckets     map[string]*ipBucket
+	lastCleanup time.Time
+}
+
+func newIPRateLimiter(limit int, window time.Duration) *ipRateLimiter {
+	return &ipRateLimiter{
+		limit:       limit,
+		window:      window,
+		buckets:     make(map[string]*ipBucket),
+		lastCleanup: time.Now(),
+	}
+}
+
+func (l *ipRateLimiter) allow(ip string) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+
+	// Purge stale IP entries periodically
+	if now.Sub(l.lastCleanup) > 2*time.Minute {
+		for k, b := range l.buckets {
+			if now.After(b.resetAt) {
+				delete(l.buckets, k)
+			}
+		}
+		l.lastCleanup = now
+	}
+
+	b, ok := l.buckets[ip]
+	if !ok || now.After(b.resetAt) {
+		l.buckets[ip] = &ipBucket{
+			count:   1,
+			resetAt: now.Add(l.window),
+		}
+		return true, 0
+	}
+
+	if b.count >= l.limit {
+		return false, b.resetAt.Sub(now)
+	}
+
+	b.count++
+	return true, 0
+}
+
+func clientIP(r *http.Request) string {
+	ip := middleware.GetClientIP(r.Context())
+	if ip == "" {
+		ip = r.RemoteAddr
+	}
+	if host, _, err := net.SplitHostPort(ip); err == nil {
+		ip = host
+	}
+	return strings.TrimSpace(ip)
+}
+
+// ipRateLimitMiddleware rate-limits requests per client IP. Window begins on the
+// first request and resets after the configured duration.
 func ipRateLimitMiddleware() func(http.Handler) http.Handler {
-	return httprate.LimitBy(requestsPerMinutePerIP, time.Minute,
-		func(r *http.Request) (string, error) {
-			return httprate.CanonicalizeIP(middleware.GetClientIP(r.Context())), nil
-		},
-		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
-			model.WriteError(w, http.StatusTooManyRequests, model.ErrRateLimited,
-				"too many requests, slow down")
-		}),
-	)
+	limiter := newIPRateLimiter(requestsPerMinutePerIP, time.Minute)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := clientIP(r)
+			allowed, retryAfter := limiter.allow(ip)
+			if !allowed {
+				retrySec := int(retryAfter.Seconds())
+				if retrySec < 1 {
+					retrySec = 1
+				}
+				w.Header().Set("Retry-After", strconv.Itoa(retrySec))
+				model.WriteError(w, http.StatusTooManyRequests, model.ErrRateLimited, "too many requests, slow down")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 

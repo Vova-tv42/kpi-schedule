@@ -91,9 +91,11 @@ Standard Error Codes:
 
 Every `/api/v1/*` route (all of them, before the `X-Internal-Token` check runs) is limited
 to **20 requests/minute per client IP** (`apps/server/internal/api/middleware.go`,
-`ipRateLimitMiddleware`, via `github.com/go-chi/httprate`). Exceeding it returns `HTTP 429`
-with `ERR_RATE_LIMITED` in the standard error envelope (§4). `/healthz` is unaffected — it's
-mounted outside the `/api/v1` group.
+`ipRateLimitMiddleware`, using a lightweight in-memory fixed-window counter). The 1-minute
+window starts counting upon the client's first request and resets after 60 seconds. Exceeding
+the threshold returns `HTTP 429` with `ERR_RATE_LIMITED` in the standard error envelope (§4)
+and a `Retry-After` header indicating remaining seconds until reset. `/healthz` is unaffected —
+it's mounted outside the `/api/v1` group.
 
 The client IP is resolved via chi's `middleware.ClientIPFromRemoteAddr` (the raw TCP peer),
 **not** the deprecated `middleware.RealIP`, which blindly trusts `X-Forwarded-For` /
