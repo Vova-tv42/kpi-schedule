@@ -156,9 +156,13 @@ fly secrets set \
   TELEGRAM_WEBHOOK_URL="https://<your-app-name>.fly.dev/api/v1/telegram/webhook" \
   TELEGRAM_WEBHOOK_SECRET="$(openssl rand -hex 32)"
 
-# 3. Deploy the server
+# 3. Deploy the server manually (or via GitHub Actions CI/CD)
 fly deploy
 ```
+
+> [!TIP]
+> For automated continuous deployment on push to `main`, see [CI/CD Deployment via GitHub Actions](ci-cd-deployment.md).
+
 
 ### 2. Verify Scale-to-Zero
 1. Check running status:
