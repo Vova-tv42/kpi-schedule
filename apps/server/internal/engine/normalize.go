@@ -41,11 +41,11 @@ func NormalizeSubject(s string) string {
 func NormalizeTag(typeLabel string) string {
 	t := strings.ToLower(strings.TrimSpace(typeLabel))
 	switch {
-	case strings.HasPrefix(t, "лек"):
+	case strings.HasPrefix(t, "лек") || t == "lec":
 		return "lec"
-	case strings.HasPrefix(t, "прак") || strings.HasPrefix(t, "сем"):
+	case strings.HasPrefix(t, "прак") || strings.HasPrefix(t, "сем") || t == "prac":
 		return "prac"
-	case strings.HasPrefix(t, "лаб"):
+	case strings.HasPrefix(t, "лаб") || t == "lab":
 		return "lab"
 	default:
 		return ""

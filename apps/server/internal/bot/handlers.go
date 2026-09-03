@@ -164,7 +164,11 @@ func (b *Bot) renderWeek(ctx context.Context, telegramID int64, offset int, call
 
 // renderGroupDay renders a group's schedule for a single date.
 func (b *Bot) renderGroupDay(ctx context.Context, group model.BotGroup, date time.Time) (text string, kb gotgbot.InlineKeyboardMarkup, hasKeyboard bool, err error) {
-	view, vErr := b.svc.BuildGroupDay(ctx, group.AcademicGroupID, date)
+	var groupIDPtr *uuid.UUID
+	if group.ID != uuid.Nil {
+		groupIDPtr = &group.ID
+	}
+	view, vErr := b.svc.BuildGroupDay(ctx, groupIDPtr, group.AcademicGroupID, date)
 	if vErr != nil {
 		return "", gotgbot.InlineKeyboardMarkup{}, false, vErr
 	}
@@ -177,6 +181,7 @@ func (b *Bot) renderGroupDay(ctx context.Context, group model.BotGroup, date tim
 			Tag:         l.Tag,
 			TeacherRaw:  l.TeacherRaw,
 			LocationRaw: l.LocationRaw,
+			URL:         l.URL,
 		}
 		if l.Lecturer != nil {
 			line.LecturerName = l.Lecturer.Name
@@ -206,7 +211,11 @@ func (b *Bot) renderGroupWeek(ctx context.Context, group model.BotGroup, offset 
 		return "", gotgbot.InlineKeyboardMarkup{}, false, pErr
 	}
 
-	view, vErr := b.svc.BuildGroupWeek(ctx, group.AcademicGroupID, parity)
+	var groupIDPtr *uuid.UUID
+	if group.ID != uuid.Nil {
+		groupIDPtr = &group.ID
+	}
+	view, vErr := b.svc.BuildGroupWeek(ctx, groupIDPtr, group.AcademicGroupID, parity)
 	if vErr != nil {
 		return "", gotgbot.InlineKeyboardMarkup{}, false, vErr
 	}
@@ -225,6 +234,7 @@ func (b *Bot) renderGroupWeek(ctx context.Context, group model.BotGroup, offset 
 				Tag:         l.Tag,
 				TeacherRaw:  l.TeacherRaw,
 				LocationRaw: l.LocationRaw,
+				URL:         l.URL,
 			}
 			if l.Lecturer != nil {
 				line.LecturerName = l.Lecturer.Name
@@ -579,6 +589,56 @@ func (b *Bot) cmdGroupWeek(bot *gotgbot.Bot, ctx *ext.Context) error {
 
 func (b *Bot) handleGroupInput(bot *gotgbot.Bot, ctx *ext.Context, prompt *model.GroupPrompt, rawInput string) error {
 	reqCtx := context.Background()
+
+	if prompt.Action == "set_url" && prompt.GroupID != nil {
+		hash := lessonHash(prompt.SubjectNorm, prompt.Tag)
+		groupIDStr := prompt.GroupID.String()
+		if !isValidURL(rawInput) {
+			text := formatURLPrompt(prompt.SubjectName, prompt.Tag, "", "Некоректне посилання. Будь ласка, надішли дійсне посилання (наприклад: https://zoom.us/j/...):")
+			kb := groupURLPromptKeyboard(groupIDStr, false, hash)
+			opts := &gotgbot.EditMessageTextOpts{
+				ChatId:             ctx.EffectiveChat.Id,
+				MessageId:          prompt.PromptMessageID,
+				Text:               text,
+				ParseMode:          "HTML",
+				ReplyMarkup:        kb,
+				LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
+			}
+			_, _, _ = bot.EditMessageText(opts)
+			return nil
+		}
+
+		if err := b.db.SetGroupLessonURL(reqCtx, *prompt.GroupID, prompt.SubjectNorm, prompt.Tag, rawInput); err != nil {
+			slog.Error("saving group lesson url", "error", err, "group_id", prompt.GroupID)
+			return nil
+		}
+		_ = b.db.ClearGroupPrompt(reqCtx, ctx.EffectiveUser.Id)
+
+		group, gErr := b.db.GetBotGroupByID(reqCtx, *prompt.GroupID)
+		if gErr != nil {
+			return nil
+		}
+		lessons, lErr := b.svc.GetUniqueGroupLessons(reqCtx, group.ID, group.AcademicGroupID)
+		if lErr != nil {
+			slog.Error("fetching group lessons after url save", "error", lErr)
+			return nil
+		}
+
+		notice := fmt.Sprintf("✅ Посилання для «<b>%s (%s)</b>» збережено!", html.EscapeString(prompt.SubjectName), tagAbbr(prompt.Tag))
+		text := formatGroupLessonsMenu(group.AcademicGroupName, lessons, notice)
+		kb := groupURLsKeyboard(groupIDStr, lessons)
+		opts := &gotgbot.EditMessageTextOpts{
+			ChatId:             ctx.EffectiveChat.Id,
+			MessageId:          prompt.PromptMessageID,
+			Text:               text,
+			ParseMode:          "HTML",
+			ReplyMarkup:        kb,
+			LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
+		}
+		_, _, _ = bot.EditMessageText(opts)
+		return nil
+	}
+
 	groupID, err := b.svc.Campus().ResolveGroupID(reqCtx, rawInput)
 	if err != nil {
 		groups, sErr := b.svc.Campus().SearchGroups(reqCtx, rawInput)

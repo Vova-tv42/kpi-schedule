@@ -622,6 +622,9 @@ func groupConfigKeyboard(g model.BotGroup) gotgbot.InlineKeyboardMarkup {
 	idStr := g.ID.String()
 
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "🔗 Посилання на заняття", CallbackData: groupCallbackPrefix + "urls:" + idStr},
+	})
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
 		{Text: "✏️ Змінити академічну групу", CallbackData: groupCallbackPrefix + "edit_acad:" + idStr},
 	})
 	if g.TelegramChatID != nil {
@@ -729,4 +732,63 @@ func formatUserName(u *gotgbot.User) string {
 		return fmt.Sprintf("%s (@%s)", name, u.Username)
 	}
 	return name
+}
+
+func formatGroupLessonsMenu(groupName string, lessons []model.UniqueLesson, notice string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "🔗 <b>Посилання на онлайн-заняття групи %s</b>\n\n", html.EscapeString(groupName))
+
+	if notice != "" {
+		b.WriteString(notice)
+		b.WriteString("\n\n")
+	}
+
+	if len(lessons) == 0 {
+		b.WriteString("📭 У розкладі групи не знайдено занять для додавання посилань.\n")
+		return b.String()
+	}
+
+	for _, l := range lessons {
+		mode := formatLessonMode(l.Tag, "Онлайн", l.URL)
+		fmt.Fprintf(&b, "• %s <i>%s</i>\n", html.EscapeString(l.Subject), mode)
+	}
+
+	b.WriteString("\nОбери заняття зі списку нижче, щоб додати або змінити посилання:")
+	return b.String()
+}
+
+func groupURLsKeyboard(groupID string, lessons []model.UniqueLesson) gotgbot.InlineKeyboardMarkup {
+	var rows [][]gotgbot.InlineKeyboardButton
+	for _, l := range lessons {
+		prefix := "➕ "
+		if l.URL != "" {
+			prefix = "🔗 "
+		}
+		title := l.Subject
+		runes := []rune(title)
+		if len(runes) > 30 {
+			title = string(runes[:27]) + "..."
+		}
+		btnText := fmt.Sprintf("%s%s (%s)", prefix, title, tagAbbr(l.Tag))
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: btnText, CallbackData: fmt.Sprintf("%surledit:%s:%s", groupCallbackPrefix, groupID, lessonHash(l.SubjectNorm, l.Tag))},
+		})
+	}
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "◀️ Назад до налаштувань", CallbackData: groupCallbackPrefix + "view:" + groupID},
+	})
+	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func groupURLPromptKeyboard(groupID string, hasExistingURL bool, hash string) gotgbot.InlineKeyboardMarkup {
+	var rows [][]gotgbot.InlineKeyboardButton
+	if hasExistingURL {
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: "🗑 Видалити посилання", CallbackData: fmt.Sprintf("%surldel:%s:%s", groupCallbackPrefix, groupID, hash)},
+		})
+	}
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "◀️ Назад до занять", CallbackData: groupCallbackPrefix + "urls:" + groupID},
+	})
+	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }

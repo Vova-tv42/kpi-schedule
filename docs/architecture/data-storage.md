@@ -150,6 +150,32 @@ CREATE TABLE user_url_prompts (
   Because the prompt state is stored in SQLite (rather than volatile in-memory maps), active prompts survive
   server restarts, deployments, and idle VM sleep cycles without dropping user interactions.
 
+### 2.2 Telegram Bot Groups & Group Lesson URLs (`bot_groups`, `bot_group_lesson_urls`, `user_group_prompts`)
+
+To enable the bot to serve schedules inside Telegram group chats, migrations `00003_groups.sql` and `00004_group_lesson_urls.sql` introduce:
+
+#### Table `bot_groups`
+Stores bot group bindings configured by users in private messages:
+- `id TEXT PRIMARY KEY` (UUID)
+- `creator_telegram_id INTEGER NOT NULL`
+- `academic_group_id INTEGER NOT NULL` (Campus API group ID)
+- `academic_group_name TEXT NOT NULL` (e.g. "ІП-21")
+- `faculty TEXT NOT NULL DEFAULT ''`
+- `telegram_chat_id INTEGER UNIQUE` (linked group chat)
+- `telegram_chat_title TEXT NOT NULL DEFAULT ''`
+
+#### Table `bot_group_lesson_urls`
+Allows group administrators to configure online conference links (Zoom, Google Meet, Microsoft Teams) for group lessons from the DM settings menu:
+- `id TEXT PRIMARY KEY` (UUID)
+- `group_id TEXT NOT NULL REFERENCES bot_groups(id) ON DELETE CASCADE`
+- `subject_norm TEXT NOT NULL`
+- `tag TEXT NOT NULL DEFAULT ''`
+- `url TEXT NOT NULL`
+- `UNIQUE (group_id, subject_norm, tag)`
+
+#### Table `user_group_prompts`
+Tracks multi-step input prompts for creating groups, editing academic group names, or setting group lesson URLs (`action`: `"create"`, `"edit_academic"`, `"set_url"`).
+- Records `telegram_id`, `prompt_message_id`, `action`, `group_id`, `subject_norm`, `tag`, `subject_name`, `bind_chat_id`, and `bind_chat_title`.
 
 ## 3. No Credential Storage, No Encryption
 

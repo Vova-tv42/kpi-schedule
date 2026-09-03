@@ -157,13 +157,27 @@ type BotGroup struct {
 	UpdatedAt         time.Time
 }
 
-// GroupPrompt tracks an in-flight prompt for creating or configuring a group.
+// GroupPrompt tracks an in-flight prompt for creating or configuring a group or group lesson URL.
 type GroupPrompt struct {
 	TelegramID      int64
 	PromptMessageID int64
-	Action          string // "create", "edit_academic"
+	Action          string // "create", "edit_academic", "set_url"
 	GroupID         *uuid.UUID
 	BindChatID      *int64
 	BindChatTitle   string
+	SubjectNorm     string
+	Tag             string
+	SubjectName     string
 	UpdatedAt       time.Time
+}
+
+// GroupLessonURL stores a custom conference URL for a lesson in a bot group's schedule.
+type GroupLessonURL struct {
+	ID          uuid.UUID
+	GroupID     uuid.UUID
+	SubjectNorm string
+	Tag         string
+	URL         string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }

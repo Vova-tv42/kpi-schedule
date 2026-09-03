@@ -6,6 +6,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/google/uuid"
+
 	"kpi-schedule-bot/server/internal/campus"
 	"kpi-schedule-bot/server/internal/engine"
 	"kpi-schedule-bot/server/internal/model"
@@ -168,8 +170,8 @@ func (s *Service) ResolveWeekParity(ctx context.Context, target time.Time) (int,
 }
 
 // BuildGroupDay fetches and formats a group's schedule for a single calendar date
-// directly from the secondary Campus API.
-func (s *Service) BuildGroupDay(ctx context.Context, groupID int, targetDate time.Time) (dayView, error) {
+// directly from the secondary Campus API, attaching any group custom URLs.
+func (s *Service) BuildGroupDay(ctx context.Context, botGroupID *uuid.UUID, groupID int, targetDate time.Time) (dayView, error) {
 	parity, err := s.ResolveWeekParity(ctx, targetDate)
 	if err != nil {
 		return dayView{}, fmt.Errorf("resolving week parity: %w", err)
@@ -178,6 +180,11 @@ func (s *Service) BuildGroupDay(ctx context.Context, groupID int, targetDate tim
 	sched, err := s.campus.GroupSchedule(ctx, groupID)
 	if err != nil {
 		return dayView{}, fmt.Errorf("fetching group schedule: %w", err)
+	}
+
+	var groupURLs map[string]string
+	if botGroupID != nil {
+		groupURLs, _ = s.db.GetGroupLessonURLs(ctx, *botGroupID)
 	}
 
 	var weekSchedule []campus.DaySchedule
@@ -231,6 +238,14 @@ func (s *Service) BuildGroupDay(ctx context.Context, groupID int, targetDate tim
 			if p.Location != nil {
 				locRaw = p.Location.Title
 			}
+
+			norm := engine.NormalizeSubject(p.Name)
+			tag := engine.NormalizeTag(p.Tag)
+			url := ""
+			if groupURLs != nil {
+				url = groupURLs[norm+"|"+tag]
+			}
+
 			views = append(views, lessonView{
 				Date:        targetDateStr,
 				Time:        p.Time,
@@ -241,6 +256,7 @@ func (s *Service) BuildGroupDay(ctx context.Context, groupID int, targetDate tim
 				Lecturer:    lView,
 				Location:    locView,
 				Enriched:    true,
+				URL:         url,
 			})
 		}
 	}
@@ -260,8 +276,8 @@ func (s *Service) BuildGroupDay(ctx context.Context, groupID int, targetDate tim
 }
 
 // BuildGroupWeek fetches and formats a group's schedule for a full academic week
-// directly from the secondary Campus API.
-func (s *Service) BuildGroupWeek(ctx context.Context, groupID int, weekFilter int) (weekView, error) {
+// directly from the secondary Campus API, attaching any group custom URLs.
+func (s *Service) BuildGroupWeek(ctx context.Context, botGroupID *uuid.UUID, groupID int, weekFilter int) (weekView, error) {
 	currentTime, err := s.campus.CurrentTime(ctx)
 	if err != nil {
 		return weekView{}, fmt.Errorf("resolving current academic week: %w", err)
@@ -270,6 +286,11 @@ func (s *Service) BuildGroupWeek(ctx context.Context, groupID int, weekFilter in
 	sched, err := s.campus.GroupSchedule(ctx, groupID)
 	if err != nil {
 		return weekView{}, fmt.Errorf("fetching group schedule: %w", err)
+	}
+
+	var groupURLs map[string]string
+	if botGroupID != nil {
+		groupURLs, _ = s.db.GetGroupLessonURLs(ctx, *botGroupID)
 	}
 
 	weeksToBuild := []int{1, 2}
@@ -322,6 +343,14 @@ func (s *Service) BuildGroupWeek(ctx context.Context, groupID int, weekFilter in
 				if p.Location != nil {
 					locRaw = p.Location.Title
 				}
+
+				norm := engine.NormalizeSubject(p.Name)
+				tag := engine.NormalizeTag(p.Tag)
+				url := ""
+				if groupURLs != nil {
+					url = groupURLs[norm+"|"+tag]
+				}
+
 				views = append(views, lessonView{
 					Time:        p.Time,
 					Name:        p.Name,
@@ -331,6 +360,7 @@ func (s *Service) BuildGroupWeek(ctx context.Context, groupID int, weekFilter in
 					Lecturer:    lView,
 					Location:    locView,
 					Enriched:    true,
+					URL:         url,
 				})
 			}
 			sort.Slice(views, func(i, j int) bool { return views[i].Time < views[j].Time })
@@ -349,4 +379,89 @@ func (s *Service) BuildGroupWeek(ctx context.Context, groupID int, weekFilter in
 	}
 
 	return out, nil
+}
+
+// GetUniqueGroupLessons returns deduplicated lessons from the group's Campus API schedule,
+// populated with existing custom URLs from bot_group_lesson_urls.
+func (s *Service) GetUniqueGroupLessons(ctx context.Context, botGroupID uuid.UUID, academicGroupID int) ([]model.UniqueLesson, error) {
+	sched, err := s.campus.GroupSchedule(ctx, academicGroupID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching group schedule: %w", err)
+	}
+
+	urls, err := s.db.GetGroupLessonURLs(ctx, botGroupID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching group lesson urls: %w", err)
+	}
+
+	type groupData struct {
+		subject     string
+		subjectNorm string
+		tag         string
+		hasOnline   bool
+	}
+	groups := make(map[string]*groupData)
+	var groupKeys []string
+
+	scanPairs := func(days []campus.DaySchedule) {
+		for _, d := range days {
+			for _, p := range d.Pairs {
+				tag := engine.NormalizeTag(p.Tag)
+				norm := engine.NormalizeSubject(p.Name)
+				key := norm + "|" + tag
+
+				loc := ""
+				if p.Location != nil {
+					loc = p.Location.Title
+				}
+				isOnline := model.IsOnline(loc)
+
+				g, exists := groups[key]
+				if !exists {
+					g = &groupData{
+						subject:     p.Name,
+						subjectNorm: norm,
+						tag:         tag,
+						hasOnline:   isOnline,
+					}
+					groups[key] = g
+					groupKeys = append(groupKeys, key)
+				} else {
+					if isOnline {
+						g.hasOnline = true
+					}
+					if g.subject == "" && p.Name != "" {
+						g.subject = p.Name
+					}
+				}
+			}
+		}
+	}
+
+	scanPairs(sched.ScheduleFirstWeek)
+	scanPairs(sched.ScheduleSecondWeek)
+
+	var unique []model.UniqueLesson
+	for _, key := range groupKeys {
+		g := groups[key]
+		if !g.hasOnline {
+			continue
+		}
+		unique = append(unique, model.UniqueLesson{
+			Subject:     g.subject,
+			SubjectNorm: g.subjectNorm,
+			Tag:         g.tag,
+			IsOnline:    true,
+			URL:         urls[key],
+		})
+	}
+
+	sort.Slice(unique, func(i, j int) bool {
+		if unique[i].Subject != unique[j].Subject {
+			return unique[i].Subject < unique[j].Subject
+		}
+		return unique[i].Tag < unique[j].Tag
+	})
+
+	return unique, nil
 }

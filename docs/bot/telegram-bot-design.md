@@ -182,6 +182,9 @@ online lessons.
 [ ◀️ Назад ]
 ```
 
+> [!NOTE]
+> **Link Previews Suppressed**: All bot messages and in-place screen updates set `LinkPreviewOptions.IsDisabled: true` so that embedded Zoom/Meet links or website URLs do not render vertical webpage preview cards into the chat.
+
 ### 3.5 Group Support, Administration & Caller Attribution
 
 The bot supports Telegram group and supergroup chats with strict privacy, zero chat pollution, and contextual command menus:
@@ -198,7 +201,7 @@ To prevent chat flooding and unauthorized modifications:
 - All configuration occurs in the private chat:
   - **Group Management Menu**: lists existing group configurations + `[ ➕ Нова група ]`.
   - **Interactive Creation**: prompts for the KPI academic group name (e.g. `ІП-21`). User inputs are validated in real time against `api.campus.kpi.ua` and auto-deleted immediately upon arrival.
-  - **Group Settings Screen**: displays academic group, faculty, Campus ID, and bound chat; offers buttons to edit academic group, unbind from chat, or delete the group with confirmation.
+  - **Group Settings Screen**: displays academic group, faculty, Campus ID, and bound chat; offers buttons to edit academic group, configure lesson URLs, unbind from chat, or delete the group with confirmation.
 
 #### 3. Caller Attribution on `/today` and `/week` in Groups
 - When `/today` or `/week` is invoked in a group chat, it fetches the personalized schedule of the invoking user and prefixes the message with:
@@ -211,6 +214,13 @@ To prevent chat flooding and unauthorized modifications:
 - Fetched directly from `api.campus.kpi.ua` for the academic group bound to that Telegram chat.
 - Provides the official, non-personalized group timetable.
 - Inline navigation buttons (`gnav:` and `gweek:`) navigate dates and weeks for the entire group.
+
+#### 5. Group Lesson URLs
+- Configured exclusively from the DM group settings (`/group` in DM → Select group → `[ 🔗 Посилання на заняття ]`).
+- No separate top-level command is created.
+- The bot retrieves the group's timetable from Campus API, lists distinct disciplines, and allows adding, editing, or deleting conference URLs (Zoom, Meet, Teams, etc.).
+- Active URL prompts are persisted in `user_group_prompts` with auto-deletion of student text messages.
+- Once configured, group schedule messages (`/group_today` and `/group_week`) render clickable `[Онлайн]` links pointing to the configured meetings.
 
 ---
 

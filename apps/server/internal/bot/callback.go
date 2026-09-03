@@ -497,6 +497,122 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		}
 		return b.applyScreen(bot, cq, formatGroupConfig(g, ""), groupConfigKeyboard(g), true)
 
+	case strings.HasPrefix(action, "urls:"):
+		idStr := strings.TrimPrefix(action, "urls:")
+		gid, err := uuid.Parse(idStr)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		_ = b.db.ClearGroupPrompt(reqCtx, cq.From.Id)
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		lessons, err := b.svc.GetUniqueGroupLessons(reqCtx, g.ID, g.AcademicGroupID)
+		if err != nil {
+			slog.Error("fetching unique group lessons for urls menu", "error", err, "group_id", gid)
+			return answerWithError(bot, cq)
+		}
+		return b.applyScreen(bot, cq, formatGroupLessonsMenu(g.AcademicGroupName, lessons, ""), groupURLsKeyboard(idStr, lessons), true)
+
+	case strings.HasPrefix(action, "urledit:"):
+		rest := strings.TrimPrefix(action, "urledit:")
+		parts := strings.Split(rest, ":")
+		if len(parts) != 2 {
+			return answerSilently(bot, cq)
+		}
+		gid, err := uuid.Parse(parts[0])
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		hash := parts[1]
+
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		lessons, err := b.svc.GetUniqueGroupLessons(reqCtx, g.ID, g.AcademicGroupID)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		var target *model.UniqueLesson
+		for _, l := range lessons {
+			if lessonHash(l.SubjectNorm, l.Tag) == hash {
+				lCopy := l
+				target = &lCopy
+				break
+			}
+		}
+		if target == nil {
+			return answerWithError(bot, cq)
+		}
+
+		msgID := cq.Message.GetMessageId()
+		err = b.db.SetGroupPrompt(reqCtx, model.GroupPrompt{
+			TelegramID:      cq.From.Id,
+			PromptMessageID: msgID,
+			Action:          "set_url",
+			GroupID:         &gid,
+			SubjectNorm:     target.SubjectNorm,
+			Tag:             target.Tag,
+			SubjectName:     target.Subject,
+		})
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+
+		promptNotice := ""
+		if target.URL != "" {
+			promptNotice = "Поточне посилання: " + target.URL + "\n\nНадішли нове посилання або видали поточне:"
+		} else {
+			promptNotice = "Надішли посилання (Zoom, Meet тощо) у відповідь на це повідомлення:"
+		}
+		text := formatURLPrompt(target.Subject, target.Tag, target.URL, promptNotice)
+		kb := groupURLPromptKeyboard(parts[0], target.URL != "", hash)
+		return b.applyScreen(bot, cq, text, kb, true)
+
+	case strings.HasPrefix(action, "urldel:"):
+		rest := strings.TrimPrefix(action, "urldel:")
+		parts := strings.Split(rest, ":")
+		if len(parts) != 2 {
+			return answerSilently(bot, cq)
+		}
+		gid, err := uuid.Parse(parts[0])
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		hash := parts[1]
+
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		lessons, err := b.svc.GetUniqueGroupLessons(reqCtx, g.ID, g.AcademicGroupID)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		var target *model.UniqueLesson
+		for _, l := range lessons {
+			if lessonHash(l.SubjectNorm, l.Tag) == hash {
+				lCopy := l
+				target = &lCopy
+				break
+			}
+		}
+		if target == nil {
+			return answerWithError(bot, cq)
+		}
+
+		_ = b.db.ClearGroupPrompt(reqCtx, cq.From.Id)
+		if err := b.db.DeleteGroupLessonURL(reqCtx, gid, target.SubjectNorm, target.Tag); err != nil {
+			slog.Error("deleting group lesson url", "error", err)
+			return answerWithError(bot, cq)
+		}
+
+		lessons, _ = b.svc.GetUniqueGroupLessons(reqCtx, g.ID, g.AcademicGroupID)
+		notice := fmt.Sprintf("🗑 Посилання для «<b>%s (%s)</b>» видалено.", html.EscapeString(target.Subject), tagAbbr(target.Tag))
+		return b.applyScreen(bot, cq, formatGroupLessonsMenu(g.AcademicGroupName, lessons, notice), groupURLsKeyboard(parts[0], lessons), true)
+
 	case strings.HasPrefix(action, "edit_acad:"):
 		idStr := strings.TrimPrefix(action, "edit_acad:")
 		gid, err := uuid.Parse(idStr)

@@ -131,6 +131,28 @@ func TestGroupPrompts(t *testing.T) {
 		t.Fatalf("unexpected bind chat: %+v", prompt)
 	}
 
+	// Set prompt with URL action
+	err = db.SetGroupPrompt(ctx, model.GroupPrompt{
+		TelegramID:      telegramID,
+		PromptMessageID: 556,
+		Action:          "set_url",
+		GroupID:         &testGID,
+		SubjectNorm:     "math",
+		Tag:             "lec",
+		SubjectName:     "Higher Math",
+	})
+	if err != nil {
+		t.Fatalf("SetGroupPrompt set_url: %v", err)
+	}
+
+	prompt, err = db.GetGroupPrompt(ctx, telegramID)
+	if err != nil {
+		t.Fatalf("GetGroupPrompt after set_url: %v", err)
+	}
+	if prompt == nil || prompt.Action != "set_url" || prompt.SubjectNorm != "math" || prompt.Tag != "lec" || prompt.SubjectName != "Higher Math" {
+		t.Fatalf("unexpected url prompt: %+v", prompt)
+	}
+
 	// Clear prompt
 	if err := db.ClearGroupPrompt(ctx, telegramID); err != nil {
 		t.Fatalf("ClearGroupPrompt: %v", err)
@@ -141,5 +163,92 @@ func TestGroupPrompts(t *testing.T) {
 	}
 	if prompt != nil {
 		t.Fatalf("expected nil prompt after clear, got: %+v", prompt)
+	}
+}
+
+func TestGroupLessonURLsCRUD(t *testing.T) {
+	ctx := context.Background()
+	db, _, telegramID := setupTestDB(t)
+
+	// Create a bot group
+	g, err := db.CreateBotGroup(ctx, telegramID, 4402, "ІП-21", "ФІОТ", nil, "")
+	if err != nil {
+		t.Fatalf("CreateBotGroup: %v", err)
+	}
+
+	// Initially empty
+	urls, err := db.GetGroupLessonURLs(ctx, g.ID)
+	if err != nil {
+		t.Fatalf("GetGroupLessonURLs: %v", err)
+	}
+	if len(urls) != 0 {
+		t.Fatalf("expected 0 urls initially, got: %d", len(urls))
+	}
+
+	// Add a URL
+	err = db.SetGroupLessonURL(ctx, g.ID, "programming", "lec", "https://zoom.us/j/123456")
+	if err != nil {
+		t.Fatalf("SetGroupLessonURL: %v", err)
+	}
+
+	// Add another URL
+	err = db.SetGroupLessonURL(ctx, g.ID, "databases", "prac", "https://meet.google.com/abc-defg-hij")
+	if err != nil {
+		t.Fatalf("SetGroupLessonURL 2: %v", err)
+	}
+
+	urls, err = db.GetGroupLessonURLs(ctx, g.ID)
+	if err != nil {
+		t.Fatalf("GetGroupLessonURLs after set: %v", err)
+	}
+	if len(urls) != 2 {
+		t.Fatalf("expected 2 urls, got: %d", len(urls))
+	}
+	if urls["programming|lec"] != "https://zoom.us/j/123456" {
+		t.Errorf("unexpected url for programming|lec: %s", urls["programming|lec"])
+	}
+	if urls["databases|prac"] != "https://meet.google.com/abc-defg-hij" {
+		t.Errorf("unexpected url for databases|prac: %s", urls["databases|prac"])
+	}
+
+	// Update URL
+	err = db.SetGroupLessonURL(ctx, g.ID, "programming", "lec", "https://zoom.us/j/999999")
+	if err != nil {
+		t.Fatalf("SetGroupLessonURL update: %v", err)
+	}
+	urls, err = db.GetGroupLessonURLs(ctx, g.ID)
+	if err != nil {
+		t.Fatalf("GetGroupLessonURLs after update: %v", err)
+	}
+	if urls["programming|lec"] != "https://zoom.us/j/999999" {
+		t.Errorf("expected updated url, got: %s", urls["programming|lec"])
+	}
+
+	// Delete URL
+	err = db.DeleteGroupLessonURL(ctx, g.ID, "programming", "lec")
+	if err != nil {
+		t.Fatalf("DeleteGroupLessonURL: %v", err)
+	}
+	urls, err = db.GetGroupLessonURLs(ctx, g.ID)
+	if err != nil {
+		t.Fatalf("GetGroupLessonURLs after delete: %v", err)
+	}
+	if len(urls) != 1 {
+		t.Fatalf("expected 1 url after delete, got: %d", len(urls))
+	}
+	if _, ok := urls["programming|lec"]; ok {
+		t.Errorf("programming|lec should be deleted")
+	}
+
+	// Cascade delete when group is deleted
+	if err := db.DeleteBotGroup(ctx, g.ID); err != nil {
+		t.Fatalf("DeleteBotGroup: %v", err)
+	}
+	urls, err = db.GetGroupLessonURLs(ctx, g.ID)
+	if err != nil {
+		t.Fatalf("GetGroupLessonURLs after group delete: %v", err)
+	}
+	if len(urls) != 0 {
+		t.Fatalf("expected 0 urls after cascade delete, got: %d", len(urls))
 	}
 }

@@ -186,16 +186,19 @@ func (db *DB) SetGroupPrompt(ctx context.Context, p model.GroupPrompt) error {
 	now := time.Now().UTC()
 
 	_, err := db.SQL.ExecContext(ctx, `
-		INSERT INTO user_group_prompts (telegram_id, prompt_message_id, action, group_id, bind_chat_id, bind_chat_title, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO user_group_prompts (telegram_id, prompt_message_id, action, group_id, bind_chat_id, bind_chat_title, subject_norm, tag, subject_name, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (telegram_id) DO UPDATE
 		SET prompt_message_id = excluded.prompt_message_id,
 		    action = excluded.action,
 		    group_id = excluded.group_id,
 		    bind_chat_id = excluded.bind_chat_id,
 		    bind_chat_title = excluded.bind_chat_title,
+		    subject_norm = excluded.subject_norm,
+		    tag = excluded.tag,
+		    subject_name = excluded.subject_name,
 		    updated_at = excluded.updated_at
-	`, p.TelegramID, p.PromptMessageID, p.Action, groupIDStr, p.BindChatID, p.BindChatTitle, now)
+	`, p.TelegramID, p.PromptMessageID, p.Action, groupIDStr, p.BindChatID, p.BindChatTitle, p.SubjectNorm, p.Tag, p.SubjectName, now)
 	if err != nil {
 		return fmt.Errorf("saving group prompt: %w", err)
 	}
@@ -205,7 +208,7 @@ func (db *DB) SetGroupPrompt(ctx context.Context, p model.GroupPrompt) error {
 // GetGroupPrompt retrieves an active group input prompt for a user.
 func (db *DB) GetGroupPrompt(ctx context.Context, telegramID int64) (*model.GroupPrompt, error) {
 	row := db.SQL.QueryRowContext(ctx, `
-		SELECT telegram_id, prompt_message_id, action, group_id, bind_chat_id, bind_chat_title, updated_at
+		SELECT telegram_id, prompt_message_id, action, group_id, bind_chat_id, bind_chat_title, subject_norm, tag, subject_name, updated_at
 		FROM user_group_prompts WHERE telegram_id = ?
 	`, telegramID)
 
@@ -213,7 +216,7 @@ func (db *DB) GetGroupPrompt(ctx context.Context, telegramID int64) (*model.Grou
 	var groupIDStr sql.NullString
 	var bindChatID sql.NullInt64
 
-	if err := row.Scan(&p.TelegramID, &p.PromptMessageID, &p.Action, &groupIDStr, &bindChatID, &p.BindChatTitle, &p.UpdatedAt); err != nil {
+	if err := row.Scan(&p.TelegramID, &p.PromptMessageID, &p.Action, &groupIDStr, &bindChatID, &p.BindChatTitle, &p.SubjectNorm, &p.Tag, &p.SubjectName, &p.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -238,6 +241,62 @@ func (db *DB) ClearGroupPrompt(ctx context.Context, telegramID int64) error {
 	_, err := db.SQL.ExecContext(ctx, `DELETE FROM user_group_prompts WHERE telegram_id = ?`, telegramID)
 	if err != nil {
 		return fmt.Errorf("clearing group prompt: %w", err)
+	}
+	return nil
+}
+
+// SetGroupLessonURL upserts a custom URL for a group's lesson.
+func (db *DB) SetGroupLessonURL(ctx context.Context, groupID uuid.UUID, subjectNorm, tag, rawURL string) error {
+	id := uuid.New().String()
+	now := time.Now().UTC()
+
+	_, err := db.SQL.ExecContext(ctx, `
+		INSERT INTO bot_group_lesson_urls (id, group_id, subject_norm, tag, url, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (group_id, subject_norm, tag) DO UPDATE
+		SET url = excluded.url,
+		    updated_at = excluded.updated_at
+	`, id, groupID.String(), subjectNorm, tag, rawURL, now, now)
+	if err != nil {
+		return fmt.Errorf("upserting group lesson url: %w", err)
+	}
+	return nil
+}
+
+// GetGroupLessonURLs retrieves all custom URLs for a bot group, returned as a map of "subjectNorm:tag" -> url.
+func (db *DB) GetGroupLessonURLs(ctx context.Context, groupID uuid.UUID) (map[string]string, error) {
+	rows, err := db.SQL.QueryContext(ctx, `
+		SELECT subject_norm, tag, url
+		FROM bot_group_lesson_urls
+		WHERE group_id = ?
+	`, groupID.String())
+	if err != nil {
+		return nil, fmt.Errorf("querying group lesson urls: %w", err)
+	}
+	defer rows.Close()
+
+	urls := make(map[string]string)
+	for rows.Next() {
+		var norm, tag, u string
+		if err := rows.Scan(&norm, &tag, &u); err != nil {
+			return nil, fmt.Errorf("scanning group lesson url: %w", err)
+		}
+		urls[norm+"|"+tag] = u
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating group lesson urls: %w", err)
+	}
+	return urls, nil
+}
+
+// DeleteGroupLessonURL removes a custom URL for a group's lesson.
+func (db *DB) DeleteGroupLessonURL(ctx context.Context, groupID uuid.UUID, subjectNorm, tag string) error {
+	_, err := db.SQL.ExecContext(ctx, `
+		DELETE FROM bot_group_lesson_urls
+		WHERE group_id = ? AND subject_norm = ? AND tag = ?
+	`, groupID.String(), subjectNorm, tag)
+	if err != nil {
+		return fmt.Errorf("deleting group lesson url: %w", err)
 	}
 	return nil
 }
