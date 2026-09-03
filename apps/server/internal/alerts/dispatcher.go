@@ -48,54 +48,6 @@ func NewDispatcher(db *storage.DB, campus *campus.Client, sender TelegramSender)
 	}
 }
 
-// DispatchTest forces sending a test notification with current time (hh:mm) to all users and groups with notifications enabled.
-func (d *Dispatcher) DispatchTest(ctx context.Context, now time.Time) (DispatchResult, error) {
-	var result DispatchResult
-	if d.sender == nil {
-		return result, nil
-	}
-
-	nowKyiv := now.In(d.loc)
-	timeStr := nowKyiv.Format("15:04")
-	msg := fmt.Sprintf("<blockquote>🔔 Тестове сповіщення від крону</blockquote>\n\nПоточний час: <code>%s</code>", timeStr)
-
-	opts := &gotgbot.SendMessageOpts{
-		ParseMode:          "HTML",
-		LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
-	}
-
-	// 1. Send to all personal users with notifications enabled
-	users, err := d.db.GetUsersWithNotifications(ctx)
-	if err == nil {
-		for _, u := range users {
-			_, sendErr := d.sender.SendMessage(u.TelegramID, msg, opts)
-			if sendErr != nil {
-				slog.Warn("sending test personal alert", "error", sendErr, "telegram_id", u.TelegramID)
-			} else {
-				result.PersonalAlertsSent++
-			}
-		}
-	}
-
-	// 2. Send to all active groups with notifications enabled
-	groups, gErr := d.db.GetActiveBotGroupsWithNotifications(ctx)
-	if gErr == nil {
-		for _, g := range groups {
-			if g.TelegramChatID == nil {
-				continue
-			}
-			_, sendErr := d.sender.SendMessage(*g.TelegramChatID, msg, opts)
-			if sendErr != nil {
-				slog.Warn("sending test group alert", "error", sendErr, "chat_id", *g.TelegramChatID)
-			} else {
-				result.GroupAlertsSent++
-			}
-		}
-	}
-
-	return result, nil
-}
-
 // Dispatch evaluates pending lesson alerts for personal users and group chats at time `now`.
 func (d *Dispatcher) Dispatch(ctx context.Context, now time.Time) (DispatchResult, error) {
 	var result DispatchResult
