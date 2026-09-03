@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -11,6 +12,7 @@ type Config struct {
 	DatabasePath     string
 	InternalAPIToken string
 	HTTPAddr         string
+	IdleTimeout      time.Duration
 	// TelegramBotToken is optional: if empty, the bot is not started and the
 	// server runs API-only, as it did before the bot existed.
 	TelegramBotToken      string
@@ -45,6 +47,17 @@ func Load() (Config, error) {
 	if cfg.HTTPAddr == "" {
 		cfg.HTTPAddr = ":8080"
 	}
+	if rawIdle := os.Getenv("IDLE_TIMEOUT"); rawIdle != "" {
+		d, err := time.ParseDuration(rawIdle)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid IDLE_TIMEOUT %q: %w", rawIdle, err)
+		}
+		if d < 0 {
+			return Config{}, fmt.Errorf("IDLE_TIMEOUT cannot be negative: %v", d)
+		}
+		cfg.IdleTimeout = d
+	}
+
 	if cfg.TelegramBotToken != "" {
 		if cfg.TelegramWebhookURL == "" {
 			return Config{}, fmt.Errorf("TELEGRAM_WEBHOOK_URL is required when TELEGRAM_BOT_TOKEN is set")

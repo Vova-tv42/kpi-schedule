@@ -14,6 +14,7 @@ import (
 	"kpi-schedule-bot/server/internal/bot"
 	"kpi-schedule-bot/server/internal/campus"
 	"kpi-schedule-bot/server/internal/config"
+	"kpi-schedule-bot/server/internal/idle"
 	"kpi-schedule-bot/server/internal/storage"
 )
 
@@ -60,6 +61,14 @@ func main() {
 		slog.Info("TELEGRAM_BOT_TOKEN not set — telegram bot disabled")
 	}
 
+	idleWatcher := idle.New(cfg.IdleTimeout, "/healthz")
+	defer idleWatcher.Stop()
+	if cfg.IdleTimeout > 0 {
+		slog.Info("idle shutdown enabled", "timeout", cfg.IdleTimeout)
+	} else {
+		slog.Info("idle shutdown disabled")
+	}
+
 	router := api.NewRouterWithOpts(svc, cfg.InternalAPIToken, api.RouterOpts{
 		TelegramWebhookHandler: webhookHandler,
 		ExtensionZipPath:       cfg.ExtensionZipPath,
@@ -67,7 +76,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           router,
+		Handler:           idleWatcher.Middleware(router),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -80,9 +89,14 @@ func main() {
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
 
-	slog.Info("shutting down")
+	select {
+	case sig := <-stop:
+		slog.Info("shutting down due to signal", "signal", sig)
+	case <-idleWatcher.Done():
+		slog.Info("shutting down due to idle timeout", "timeout", cfg.IdleTimeout)
+	}
+
 	if tgBot != nil {
 		tgBot.Stop()
 	}

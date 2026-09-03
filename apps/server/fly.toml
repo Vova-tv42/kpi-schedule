@@ -1,0 +1,49 @@
+# fly.toml app configuration file for kpi-schedule-bot
+# See https://fly.io/docs/reference/configuration/ for details.
+#
+# Architecture:
+# - Scale-to-zero: Machines automatically sleep when idle for > 15 minutes.
+# - Wake-on-request: Fly Proxy automatically starts the Machine upon receiving
+#   incoming HTTP requests (API calls or Telegram webhook updates).
+# - SQLite persistence: Stored on a persistent Fly Volume mounted at /data.
+
+app = "kpi-schedule-bot"
+primary_region = "waw"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  DATABASE_PATH = "/data/kpi.db"
+  IDLE_TIMEOUT = "15m"
+  HTTP_ADDR = ":8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_start_machines = true
+  # Fly Proxy auto_stop is turned off so that the in-app 15-minute idle timer
+  # manages shutdown cleanly instead of Fly Proxy's aggressive ~3-5m timer.
+  auto_stop_machines = "off"
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 100
+    hard_limit = 150
+
+# Fly Volume for SQLite database persistence across scale-to-zero stop/start cycles.
+# Create via: fly volumes create kpi_data --size 1 --region waw
+[mounts]
+  source = "kpi_data"
+  destination = "/data"
+  initial_size = "1gb"
+
+# When the server process exits with code 0 after 15m idle, "on-failure"
+# keeps the machine in the "stopped" state until Fly Proxy wakes it on request.
+[[restart]]
+  policy = "on-failure"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

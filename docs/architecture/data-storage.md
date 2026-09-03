@@ -231,5 +231,6 @@ fetched before the VM slept is still warm on wake.
   non-issue, so persisting it would only add write load for no benefit. See
   [`error-handling-resilience.md`](error-handling-resilience.md) §5.
 - **Deployment**: the SQLite file lives at `DATABASE_PATH` (default `/data/kpi.db` in the
-  container), which must be a mounted volume backed by the host's persistent disk — see the
-  `Dockerfile`'s `VOLUME ["/data"]` and `docs/project-repository.md` §4.2.
+  container), which is mounted on a Fly Volume backed by NVMe storage — see the
+  `Dockerfile`'s `VOLUME ["/data"]`, `fly.toml`'s `[mounts]`, and
+  [`fly-scale-to-zero.md`](fly-scale-to-zero.md) for the complete 15-minute idle scale-to-zero architecture.

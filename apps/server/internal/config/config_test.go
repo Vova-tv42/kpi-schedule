@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 )
 
 func TestConfigValidation(t *testing.T) {
@@ -51,5 +52,45 @@ func TestConfigValidation(t *testing.T) {
 	}
 	if cfg.TelegramWebhookSecret != "super-secret" {
 		t.Errorf("unexpected TelegramWebhookSecret: %s", cfg.TelegramWebhookSecret)
+	}
+}
+
+func TestConfigIdleTimeout(t *testing.T) {
+	t.Setenv("DATABASE_PATH", ":memory:")
+	t.Setenv("INTERNAL_API_TOKEN", "test-token")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+
+	// 1. Unset: defaults to 0
+	t.Setenv("IDLE_TIMEOUT", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected success with unset IDLE_TIMEOUT, got: %v", err)
+	}
+	if cfg.IdleTimeout != 0 {
+		t.Errorf("expected 0 for unset IDLE_TIMEOUT, got %v", cfg.IdleTimeout)
+	}
+
+	// 2. Valid duration: 15m
+	t.Setenv("IDLE_TIMEOUT", "15m")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("expected success with valid IDLE_TIMEOUT, got: %v", err)
+	}
+	if cfg.IdleTimeout != 15*time.Minute {
+		t.Errorf("expected 15m for IDLE_TIMEOUT, got %v", cfg.IdleTimeout)
+	}
+
+	// 3. Invalid format: returns error
+	t.Setenv("IDLE_TIMEOUT", "invalid-duration")
+	_, err = Load()
+	if err == nil {
+		t.Fatal("expected error for invalid IDLE_TIMEOUT")
+	}
+
+	// 4. Negative duration: returns error
+	t.Setenv("IDLE_TIMEOUT", "-5m")
+	_, err = Load()
+	if err == nil {
+		t.Fatal("expected error for negative IDLE_TIMEOUT")
 	}
 }

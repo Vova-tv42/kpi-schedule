@@ -112,18 +112,15 @@ A Telegram bot is nothing more than an HTTPS client of `api.telegram.org` — th
 
 **Tradeoff accepted**: message formatting is somewhat more verbose in Go than in TypeScript. This is outweighed by eliminating an entire deployment target.
 
-### 4.2 Host-agnostic backend
+### 4.2 Production hosting target: Fly.io Fly Machines (Scale-to-Zero)
 
-The hosting platform is **deliberately undecided**. To keep it open, the server must:
+The production deployment target is **Fly.io Fly Machines** with scale-to-zero enabled:
 
-1. Ship as a plain `Dockerfile` with no platform-specific configuration.
-2. Read all configuration from environment variables.
-3. Persist to a SQLite file inside a mounted volume (`VOLUME ["/data"]`, `DATABASE_PATH`) — the one platform requirement this now implies is a host that can mount a persistent volume/disk at that path, which the current hosting target provides. See `docs/architecture/data-storage.md` §5 for why local disk state was chosen over a network-attached database.
-4. Run its own in-process scheduler (once the reminder worker is built) rather than relying on platform cron.
-
-Note that "no platform-level cron dependency" in point 4 is about the future reminder
-worker only — there is no schedule-*refresh* cron at all any more, since the server never
-self-triggers a `my.kpi.ua` fetch (see §3.1 above and `docs/architecture/data-storage.md` §4).
+1. Ships as a plain `Dockerfile` and deploys via `fly.toml`.
+2. Reads all configuration from environment variables (`.env` locally, `fly secrets` / `fly.toml [env]` in production).
+3. Persists SQLite to a mounted persistent volume (`fly volumes create kpi_data --size 1 --region waw`, mounted at `/data` via `VOLUME ["/data"]` and `fly.toml [mounts]`).
+4. Sleeps after 15 minutes of inactivity (`IDLE_TIMEOUT=15m`) via in-app `internal/idle.Watcher` and exits with code 0 (`[[restart]] policy = "on-failure"` keeps the machine stopped).
+5. Wakes up automatically when any request arrives at Fly Proxy (`auto_start_machines = true`). See [`docs/architecture/fly-scale-to-zero.md`](architecture/fly-scale-to-zero.md) for full architectural details.
 
 ### 4.3 Telegram update delivery
  

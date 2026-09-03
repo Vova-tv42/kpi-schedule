@@ -5,10 +5,12 @@
 package bot
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
@@ -134,14 +136,10 @@ func (b *Bot) AddWebhook(secretToken string) error {
 }
 
 // RegisterWebhook prepares the updater to receive updates on WebhookPath and
-// registers the public webhookURL with Telegram's Bot API.
+// registers the public webhookURL with Telegram's Bot API. To prevent cold-start
+// latency and avoid dropping pending updates when waking up on Fly.io, it checks
+// whether the webhook is already registered before issuing Telegram API calls.
 func (b *Bot) RegisterWebhook(webhookURL, secretToken string) error {
-	_ = b.SetupCommands()
-
-	if err := b.AddWebhook(secretToken); err != nil {
-		return err
-	}
-
 	cleanURL := strings.TrimRight(webhookURL, "/")
 	if b.extensionDownloadURL == "" {
 		baseURL := strings.TrimSuffix(cleanURL, WebhookPath)
@@ -151,13 +149,49 @@ func (b *Bot) RegisterWebhook(webhookURL, secretToken string) error {
 		cleanURL += WebhookPath
 	}
 
-	_, err := b.gbot.SetWebhook(cleanURL, &gotgbot.SetWebhookOpts{
+	if err := b.AddWebhook(secretToken); err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// 1. Check local persistent disk cache (fastest: < 1ms on wake)
+	if b.db != nil {
+		var cachedURL string
+		if ok, _ := b.db.CacheGet(ctx, "telegram_webhook_registration", 30*24*time.Hour, &cachedURL); ok && cachedURL == cleanURL {
+			slog.Info("telegram webhook already registered (cached)", "url", cleanURL)
+			return nil
+		}
+	}
+
+	// 2. Check Telegram API if cache was missing or stale
+	info, err := b.gbot.GetWebhookInfo(&gotgbot.GetWebhookInfoOpts{
+		RequestOpts: &gotgbot.RequestOpts{Timeout: 3 * time.Second},
+	})
+	if err == nil && info != nil && info.Url == cleanURL {
+		slog.Info("telegram webhook verified with telegram", "url", cleanURL)
+		if b.db != nil {
+			_ = b.db.CacheSet(ctx, "telegram_webhook_registration", cleanURL)
+		}
+		return nil
+	}
+
+	// 3. Setup commands and register webhook if URL changed or unset
+	_ = b.SetupCommands()
+
+	_, err = b.gbot.SetWebhook(cleanURL, &gotgbot.SetWebhookOpts{
 		SecretToken:        secretToken,
 		AllowedUpdates:     []string{"message", "callback_query"},
-		DropPendingUpdates: true,
+		DropPendingUpdates: false,
+		RequestOpts:        &gotgbot.RequestOpts{Timeout: 5 * time.Second},
 	})
 	if err != nil {
 		return fmt.Errorf("setting telegram webhook: %w", err)
+	}
+
+	if b.db != nil {
+		_ = b.db.CacheSet(ctx, "telegram_webhook_registration", cleanURL)
 	}
 
 	return nil
