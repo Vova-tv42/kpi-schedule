@@ -211,3 +211,102 @@ type GroupAdmin struct {
 	UpdatedAt  time.Time
 }
 
+// IssueType classifies what a user is reporting through the bot's /issues flow.
+type IssueType string
+
+const (
+	IssueTypeFeature IssueType = "feature"
+	IssueTypeBug     IssueType = "bug"
+	IssueTypeOther   IssueType = "other"
+)
+
+// IssueStatus is the triage lifecycle an issue moves through. Only admins
+// change it, from the dashboard; users only ever read it.
+type IssueStatus string
+
+const (
+	IssueOnReview      IssueStatus = "on_review"
+	IssueReady         IssueStatus = "ready"
+	IssueInDevelopment IssueStatus = "in_development"
+	IssueImplemented   IssueStatus = "implemented"
+	IssueCancelled     IssueStatus = "cancelled"
+)
+
+// IssueCommentRole marks which side of a discussion thread wrote a comment.
+type IssueCommentRole string
+
+const (
+	IssueCommentUser  IssueCommentRole = "user"
+	IssueCommentAdmin IssueCommentRole = "admin"
+)
+
+// Issue is a bug report or feature request filed by a user through /issues.
+// Number is the public, human-facing "#12" identifier: a single global
+// sequence, assigned at creation, never reused.
+type Issue struct {
+	ID               uuid.UUID
+	Number           int
+	AuthorTelegramID int64
+	AuthorUsername   string
+	AuthorFirstName  string
+	Type             IssueType
+	Title            string
+	Body             string
+	Status           IssueStatus
+	StatusBy         string
+	ThreadOpen       bool
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// IssueComment is one message in an issue's discussion thread. Threads are
+// admin-initiated: ThreadOpen only flips true once an admin has commented.
+type IssueComment struct {
+	ID          uuid.UUID
+	IssueID     uuid.UUID
+	AuthorRole  IssueCommentRole
+	AuthorLabel string
+	Body        string
+	CreatedAt   time.Time
+}
+
+// IssueDraft tracks an in-flight /issues wizard: which step the user is on and
+// which bot message is being edited in place. Persisted rather than held in
+// memory so a draft survives the Fly.io scale-to-zero idle shutdown, and so the
+// bot's own message can still be cleaned up after a restart.
+type IssueDraft struct {
+	TelegramID      int64
+	ChatID          int64
+	PromptMessageID int64
+	Step            string
+	IssueType       IssueType
+	Title           string
+	IssueID         *uuid.UUID
+	ExpiresAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// Draft steps: which input the bot is currently waiting for.
+const (
+	IssueStepTitle = "title"
+	IssueStepBody  = "body"
+	IssueStepReply = "reply"
+)
+
+// ValidIssueStatus reports whether s is one of the five triage statuses.
+func ValidIssueStatus(s string) bool {
+	switch IssueStatus(s) {
+	case IssueOnReview, IssueReady, IssueInDevelopment, IssueImplemented, IssueCancelled:
+		return true
+	}
+	return false
+}
+
+// ValidIssueType reports whether s is one of the three issue types.
+func ValidIssueType(s string) bool {
+	switch IssueType(s) {
+	case IssueTypeFeature, IssueTypeBug, IssueTypeOther:
+		return true
+	}
+	return false
+}

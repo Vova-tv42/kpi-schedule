@@ -70,6 +70,9 @@ func main() {
 
 	cronHandler := api.NewCronHandler(alertDispatcher, cfg.CronSecret)
 	cronHandler.SetTelemetry(telemetryClient)
+	if tgBot != nil {
+		cronHandler.SetDraftSweeper(tgBot.SweepExpiredIssueDrafts)
+	}
 
 	idleWatcher := idle.New(cfg.IdleTimeout, "/healthz")
 	defer idleWatcher.Stop()
@@ -91,6 +94,9 @@ func main() {
 				select {
 				case <-ticker.C:
 					_, _ = alertDispatcher.Dispatch(appCtx, time.Now())
+					if tgBot != nil {
+						_ = tgBot.SweepExpiredIssueDrafts(appCtx, time.Now())
+					}
 				case <-appCtx.Done():
 					return
 				}

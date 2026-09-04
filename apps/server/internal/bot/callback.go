@@ -30,6 +30,7 @@ const (
 	groupCallbackPrefix     = "grp:"   // group admin screens: list / new / view / edit / unbind / delete / bind
 	groupNavCallbackPrefix  = "gnav:"  // group schedule day screen: prev / today / next
 	groupWeekCallbackPrefix = "gweek:" // group schedule week screen: slots / today
+	issuesCallbackPrefix    = "iss:"   // issues screens: menu / new / type / list / view / thread
 )
 
 // navCallbackData encodes an action ("prev"/"next"/"today") plus the

@@ -899,7 +899,39 @@ func (b *Bot) onTextMessage(bot *gotgbot.Bot, ctx *ext.Context) error {
 		}
 	}
 
-	// 1. Check active group input prompt
+	// 1. Check active /issues wizard draft. Checked first because it is the
+	// most recently opened prompt whenever one is active — starting a wizard
+	// clears the others, and vice versa.
+	draft, draftErr := b.db.GetIssueDraft(reqCtx, ctx.EffectiveUser.Id)
+	if errors.Is(draftErr, storage.ErrIssueDraftExpired) {
+		if _, delErr := bot.DeleteMessage(ctx.EffectiveChat.Id, msg.MessageId, nil); delErr != nil {
+			slog.Warn("could not delete user issue message", "error", delErr)
+		}
+		// Take the stale wizard message with it — the sweeper will never see
+		// this draft again now that reading it consumed the row.
+		if draft != nil {
+			if _, delErr := bot.DeleteMessage(draft.ChatID, draft.PromptMessageID, nil); delErr != nil {
+				slog.Warn("could not delete expired issue wizard message", "error", delErr)
+			}
+		}
+		return sendScreen(bot, ctx.EffectiveChat.Id, formatIssuesMenu(issuesInterruptedText), issuesMenuKeyboard(), true)
+	}
+	if draftErr != nil {
+		slog.Error("checking issue draft", "error", draftErr, "telegram_id", ctx.EffectiveUser.Id)
+		return nil
+	}
+	if draft != nil {
+		if _, delErr := bot.DeleteMessage(ctx.EffectiveChat.Id, msg.MessageId, nil); delErr != nil {
+			slog.Warn("could not delete user issue message", "error", delErr)
+		}
+		if strings.HasPrefix(msg.Text, "/") {
+			_ = b.db.ClearIssueDraft(reqCtx, ctx.EffectiveUser.Id)
+			return nil
+		}
+		return b.handleIssueInput(bot, ctx, draft, strings.TrimSpace(msg.Text))
+	}
+
+	// 2. Check active group input prompt
 	grpPrompt, err := b.db.GetGroupPrompt(reqCtx, ctx.EffectiveUser.Id)
 	if err != nil {
 		slog.Error("checking group prompt", "error", err, "telegram_id", ctx.EffectiveUser.Id)
@@ -916,7 +948,7 @@ func (b *Bot) onTextMessage(bot *gotgbot.Bot, ctx *ext.Context) error {
 		return b.handleGroupInput(bot, ctx, grpPrompt, strings.TrimSpace(msg.Text))
 	}
 
-	// 2. Check active URL input prompt
+	// 3. Check active URL input prompt
 	prompt, err := b.db.GetURLPrompt(reqCtx, ctx.EffectiveUser.Id)
 	if err != nil {
 		slog.Error("checking url prompt", "error", err, "telegram_id", ctx.EffectiveUser.Id)

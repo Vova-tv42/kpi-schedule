@@ -41,3 +41,4 @@ Welcome to the technical documentation for the **KPI Personalized Schedule Platf
 ### 📁 Client Applications
 - [Browser Extension (Manifest V3)](file:///home/volodymyr/apps/kpi-schedule-bot/docs/extension/browser-extension-design.md): Extension design, permissions, and security.
 - [Telegram Bot](file:///home/volodymyr/apps/kpi-schedule-bot/docs/bot/telegram-bot-design.md): Bot commands, UI formatters, inline keyboards, and reminders.
+- [Issues (`/issues`)](file:///home/volodymyr/apps/kpi-schedule-bot/docs/bot/issues.md): User-filed bug reports and feature requests — wizard flow, statuses, 10-minute draft TTL, and admin↔user discussion threads.

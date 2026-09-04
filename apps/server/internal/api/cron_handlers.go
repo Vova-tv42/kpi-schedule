@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -11,10 +13,16 @@ import (
 	"kpi-schedule-bot/server/internal/telemetry"
 )
 
+// DraftSweeper discards /issues wizard drafts whose 10-minute TTL has elapsed
+// and deletes the bot messages they left behind. Satisfied by
+// (*bot.Bot).SweepExpiredIssueDrafts; nil when the Telegram bot is disabled.
+type DraftSweeper func(ctx context.Context, now time.Time) error
+
 type CronHandler struct {
-	dispatcher *alerts.Dispatcher
-	cronSecret string
-	telemetry  *telemetry.Client
+	dispatcher   *alerts.Dispatcher
+	cronSecret   string
+	telemetry    *telemetry.Client
+	draftSweeper DraftSweeper
 }
 
 func NewCronHandler(dispatcher *alerts.Dispatcher, cronSecret string) *CronHandler {
@@ -22,6 +30,14 @@ func NewCronHandler(dispatcher *alerts.Dispatcher, cronSecret string) *CronHandl
 		dispatcher: dispatcher,
 		cronSecret: cronSecret,
 	}
+}
+
+// SetDraftSweeper attaches the expired-/issues-draft cleanup. It rides on this
+// cron tick because it is the only per-minute heartbeat that survives the
+// Fly.io scale-to-zero shutdown — an in-process ticker stops when the machine
+// sleeps, which is exactly when drafts are most likely to go stale.
+func (h *CronHandler) SetDraftSweeper(s DraftSweeper) {
+	h.draftSweeper = s
 }
 
 // SetTelemetry attaches a telemetry client to report cron alert runs.
@@ -52,6 +68,13 @@ func (h *CronHandler) HandleLessonAlerts(w http.ResponseWriter, r *http.Request)
 	if h.cronSecret == "" || subtle.ConstantTimeCompare([]byte(providedSecret), []byte(h.cronSecret)) != 1 {
 		model.WriteError(w, http.StatusUnauthorized, model.ErrUnauthorized, "Invalid or missing cron authorization")
 		return
+	}
+
+	if h.draftSweeper != nil {
+		if err := h.draftSweeper(r.Context(), time.Now()); err != nil {
+			// Never fail the alerts run over draft cleanup.
+			slog.Error("sweeping expired issue drafts", "error", err)
+		}
 	}
 
 	start := time.Now()
