@@ -12,62 +12,78 @@
 		onProceed: () => void;
 		onCancel: () => void;
 	} = $props();
+
+	function handleKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape' && open) {
+			onCancel();
+		}
+	}
 </script>
 
-{#if open}
-	<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in duration-150">
-		<div class="w-full max-w-lg border border-amber-500/40 bg-[#0f141d] p-6 shadow-2xl relative">
-			<!-- Tactical Corner Accents -->
-			<div class="absolute -top-[1px] -left-[1px] w-3 h-3 border-t-2 border-l-2 border-amber-500"></div>
-			<div class="absolute -top-[1px] -right-[1px] w-3 h-3 border-t-2 border-r-2 border-amber-500"></div>
-			<div class="absolute -bottom-[1px] -left-[1px] w-3 h-3 border-b-2 border-l-2 border-amber-500"></div>
-			<div class="absolute -bottom-[1px] -right-[1px] w-3 h-3 border-b-2 border-r-2 border-amber-500"></div>
+<svelte:window onkeydown={handleKeydown} />
 
-			<!-- Dialog Header -->
-			<div class="flex items-start justify-between border-b border-[#1e293b] pb-4 mb-4">
-				<div class="flex items-center gap-3">
-					<div class="p-2 border border-amber-500/30 bg-amber-500/10 text-amber-400">
-						<AlertTriangle class="w-5 h-5" />
+{#if open}
+	<div 
+		role="button"
+		tabindex="0"
+		class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in duration-150"
+		onclick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+		onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') onCancel(); }}
+	>
+		<div class="w-full max-w-lg bg-[#12151d] border border-amber-500/40 shadow-2xl rounded-xs overflow-hidden flex flex-col">
+			<!-- Header -->
+			<div class="px-5 py-4 border-b border-[#252b3b] flex items-center justify-between bg-[#151922]">
+				<div class="flex items-center gap-2.5">
+					<div class="p-1.5 rounded-xs bg-amber-500/10 border border-amber-500/30 text-amber-400">
+						<AlertTriangle size={16} />
 					</div>
 					<div>
-						<div class="text-xs font-mono uppercase tracking-widest text-amber-500">[Scale-to-Zero Interlock]</div>
-						<h2 class="text-xl font-bold uppercase text-white font-sans">Confirm Server Wake-up</h2>
+						<h3 class="font-display font-semibold text-[#f1f5f9] text-base tracking-wide flex items-center gap-2">
+							Confirm Server Wake-Up
+						</h3>
+						<span class="text-[11px] text-amber-400/90 font-mono uppercase tracking-widest">
+							Scale-to-Zero Interlock Guard
+						</span>
 					</div>
 				</div>
-				<button onclick={onCancel} class="text-slate-500 hover:text-white p-1">
-					<X class="w-4 h-4" />
+				<button 
+					onclick={onCancel} 
+					class="p-1 text-[#94a3b8] hover:text-[#f1f5f9] hover:bg-[#252b3b]/50 rounded transition-colors cursor-pointer"
+					title="Close (Esc)"
+				>
+					<X size={16} />
 				</button>
 			</div>
 
-			<!-- Dialog Body -->
-			<div class="space-y-4 text-sm font-mono text-slate-300 mb-6">
-				<div class="p-3 border border-[#1e293b] bg-[#0a0e14]">
-					<div class="text-slate-400">Target Action:</div>
-					<div class="text-white font-bold text-base truncate mt-0.5">{actionTitle}</div>
+			<!-- Body -->
+			<div class="p-5 font-mono text-sm space-y-4">
+				<div class="p-3 border border-[#252b3b] bg-[#0a0b0e] rounded-xs">
+					<div class="text-xs uppercase tracking-wider text-[#64748b]">Target Operation:</div>
+					<div class="text-[#f1f5f9] font-bold text-sm truncate mt-0.5">{actionTitle}</div>
 				</div>
 
-				<p class="leading-relaxed">
-					The main server is currently in <span class="text-amber-400 font-semibold">Scale-to-Zero Standby</span> on Fly.io to save compute billing.
+				<p class="leading-relaxed text-[#94a3b8] text-xs sm:text-sm">
+					The Go server microVM is currently in <span class="text-amber-400 font-semibold">Scale-to-Zero Standby</span> on Fly.io to eliminate idle compute costs.
 				</p>
-				<p class="leading-relaxed text-slate-400">
-					Sending this request will wake up the Firecracker microVM (~500ms cold boot) and reset the in-app 15-minute idle countdown.
+				<p class="leading-relaxed text-[#64748b] text-xs">
+					Dispatching this request will initiate a Firecracker VM cold boot (~500ms) and reset the in-app 15-minute idle countdown timer.
 				</p>
 			</div>
 
-			<!-- Dialog Actions -->
-			<div class="flex items-center justify-end gap-3 pt-2">
+			<!-- Footer -->
+			<div class="px-5 py-3 border-t border-[#252b3b] bg-[#0e1117] flex items-center justify-end gap-2.5">
 				<button
 					onclick={onCancel}
-					class="px-4 py-2 border border-[#1e293b] bg-[#141c28] hover:bg-[#1a2536] text-slate-300 hover:text-white font-mono text-sm uppercase tracking-wider transition-colors"
+					class="px-3.5 py-2 border border-[#252b3b] hover:border-[#64748b] bg-[#181c26] hover:bg-[#252b3b] text-[#94a3b8] hover:text-[#f1f5f9] font-mono text-xs uppercase tracking-wider rounded-xs transition-colors cursor-pointer"
 				>
 					Cancel (Keep Sleeping)
 				</button>
 				<button
 					onclick={onProceed}
-					class="flex items-center gap-2 px-4 py-2 border border-amber-500/60 bg-amber-500 hover:bg-amber-400 text-black font-mono text-sm font-bold uppercase tracking-wider transition-colors"
+					class="flex items-center gap-1.5 px-4 py-2 border border-[#d4ff32]/50 bg-[#d4ff32] hover:bg-[#e2f952] text-black font-mono text-xs font-bold uppercase tracking-wider rounded-xs transition-colors shadow-[0_0_15px_rgba(212,255,50,0.2)] cursor-pointer"
 				>
-					<Zap class="w-4 h-4 fill-current" />
-					Proceed (Wake Server)
+					<Zap size={13} class="fill-current" />
+					<span>Proceed (Wake Server)</span>
 				</button>
 			</div>
 		</div>

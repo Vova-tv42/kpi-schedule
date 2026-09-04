@@ -38,7 +38,6 @@
 	}
 
 	function attemptLoad() {
-		// If server is explicitly sleeping and user hasn't confirmed wake yet, show interlock dialog!
 		if (serverStatus.data.status === 'sleeping' && !hasAwakened) {
 			showInterlock = true;
 			return;
@@ -58,7 +57,6 @@
 	}
 
 	onMount(() => {
-		// Wait for status check if loading
 		if (serverStatus.data.status === 'loading') {
 			serverStatus.checkStatus().then(() => {
 				attemptLoad();
@@ -70,57 +68,63 @@
 </script>
 
 <svelte:head>
-	<title>KPI Console | Database Tables</title>
+	<title>KPI Schedule // Database Tables</title>
 </svelte:head>
 
 <div class="space-y-6">
 	<!-- Top Bar -->
-	<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#1e293b] pb-4">
+	<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#252b3b] pb-4">
 		<div>
-			<div class="text-xs font-mono uppercase tracking-widest text-cyan-400">[Fly.io SQLite Persistent Storage]</div>
-			<h1 class="text-2xl font-bold uppercase text-white font-sans mt-0.5">Database Tables</h1>
-			<p class="text-sm font-mono text-slate-400 mt-1">Mounted on persistent NVMe volume at <code class="text-slate-300">/data/kpi.db</code></p>
+			<div class="flex items-center gap-2 mb-1">
+				<Database size={22} class="text-[#d4ff32]" />
+				<h1 class="font-display font-extrabold text-2xl sm:text-3xl text-[#f1f5f9] tracking-tight">
+					DATABASE TABLES
+				</h1>
+			</div>
+			<p class="font-mono text-xs sm:text-sm text-[#94a3b8]">
+				Mounted on persistent NVMe volume at <code class="text-[#f1f5f9] bg-[#12151d] px-1.5 py-0.5 rounded-xs border border-[#252b3b]">/data/kpi.db</code>
+			</p>
 		</div>
 
 		<button
 			onclick={attemptLoad}
 			disabled={isLoading}
-			class="flex items-center gap-2 px-4 py-2 border border-[#1e293b] hover:border-slate-600 bg-[#141c28] hover:bg-[#1a2536] text-sm font-mono text-slate-200 transition-colors"
+			class="flex items-center gap-2 px-3.5 py-2 border border-[#252b3b] hover:border-[#64748b] bg-[#181c26] hover:bg-[#252b3b] text-xs sm:text-sm font-mono text-[#f1f5f9] rounded-xs transition-colors cursor-pointer"
 		>
-			<RefreshCw class="w-4 h-4 {isLoading ? 'animate-spin text-cyan-400' : ''}" />
+			<RefreshCw size={13} class={isLoading ? 'animate-spin text-[#d4ff32]' : ''} />
 			<span>Refresh Schema</span>
 		</button>
 	</div>
 
 	<!-- Server Sleeping Standby Interlock Banner -->
 	{#if serverStatus.data.status === 'sleeping' && tables.length === 0 && !isLoading}
-		<div class="border border-amber-500/40 bg-amber-950/20 p-6 space-y-4">
+		<div class="border border-amber-500/40 bg-[#12151d] p-6 rounded-xs space-y-4">
 			<div class="flex items-center gap-3">
-				<div class="p-2 border border-amber-500/30 bg-amber-500/10 text-amber-400">
-					<ShieldAlert class="w-6 h-6" />
+				<div class="p-2 border border-amber-500/30 bg-amber-500/10 text-amber-400 rounded-xs">
+					<ShieldAlert size={20} />
 				</div>
 				<div>
-					<div class="text-xs font-mono uppercase tracking-widest text-amber-500 font-bold">[Scale-to-Zero Guard]</div>
-					<h3 class="text-lg font-bold uppercase text-white font-sans">Main Server is Currently Sleeping</h3>
+					<div class="text-[11px] font-mono uppercase tracking-widest text-amber-400 font-bold">Scale-to-Zero Guard</div>
+					<h3 class="text-base sm:text-lg font-bold text-[#f1f5f9] font-display">Main Server is Currently Sleeping</h3>
 				</div>
 			</div>
 
-			<p class="text-sm font-mono text-slate-300 leading-relaxed max-w-2xl">
+			<p class="text-xs sm:text-sm font-mono text-[#94a3b8] leading-relaxed max-w-2xl">
 				The Go server process has shut down after 15 minutes of idle time to conserve compute credits.
 				Loading the live SQLite database requires sending an HTTP request through Fly Proxy to start the Firecracker VM (~500ms).
 			</p>
 
-			<div class="flex items-center gap-3 pt-2">
+			<div class="flex flex-wrap items-center gap-3 pt-2">
 				<button
 					onclick={handleProceedWake}
-					class="flex items-center gap-2 px-4 py-2 border border-amber-500 bg-amber-500 hover:bg-amber-400 text-black text-sm font-mono font-bold uppercase tracking-wider transition-colors"
+					class="flex items-center gap-2 px-4 py-2 border border-[#d4ff32]/50 bg-[#d4ff32] hover:bg-[#e2f952] text-black text-xs sm:text-sm font-mono font-bold uppercase tracking-wider rounded-xs transition-all shadow-[0_0_15px_rgba(212,255,50,0.2)] cursor-pointer"
 				>
-					<Zap class="w-4 h-4 fill-current" />
-					Wake Server & Load Tables
+					<Zap size={14} class="fill-current" />
+					<span>Wake Server & Load Tables</span>
 				</button>
 				<button
 					onclick={handleCancelWake}
-					class="px-4 py-2 border border-[#1e293b] bg-[#141c28] hover:bg-[#1a2536] text-slate-300 font-mono text-sm uppercase transition-colors"
+					class="px-3.5 py-2 border border-[#252b3b] bg-[#181c26] hover:bg-[#252b3b] text-[#94a3b8] font-mono text-xs sm:text-sm uppercase tracking-wider rounded-xs transition-colors cursor-pointer"
 				>
 					Stay in Standby (Return to Actions)
 				</button>
@@ -130,49 +134,62 @@
 
 	<!-- Error Message -->
 	{#if error}
-		<div class="p-4 border border-red-500/40 bg-red-950/20 text-red-200 text-sm font-mono">
-			<div class="font-bold text-red-400 uppercase">[Database Request Error]</div>
-			<div class="mt-1">{error}</div>
+		<div class="p-3.5 border border-[#ef4444]/40 bg-[#ef4444]/10 text-[#fca5a5] text-xs font-mono rounded-xs">
+			<div class="font-bold text-[#ef4444] uppercase mb-0.5">[Database Request Error]</div>
+			<div>{error}</div>
 		</div>
 	{/if}
 
 	<!-- Loading Spinner -->
 	{#if isLoading}
-		<div class="border border-[#1e293b] bg-[#0f141d] p-12 text-center text-slate-400 font-mono text-sm">
-			<RefreshCw class="w-6 h-6 animate-spin mx-auto mb-3 text-cyan-400" />
-			Connecting to Go server & inspecting SQLite master...
+		<div class="border border-[#252b3b] bg-[#12151d] p-12 text-center text-[#94a3b8] font-mono text-sm rounded-xs">
+			<RefreshCw size={20} class="animate-spin mx-auto mb-3 text-[#d4ff32]" />
+			Connecting to Go server & inspecting SQLite master schema...
 		</div>
 	{:else if tables.length > 0}
 		<!-- Tables Grid -->
 		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 			{#each tables as table (table.name)}
-				<div class="border border-[#1e293b] bg-[#0f141d] hover:border-slate-600 transition-all p-5 flex flex-col justify-between group">
+				<div class="border border-[#252b3b] bg-[#12151d] hover:border-[#d4ff32]/40 transition-all p-5 rounded-xs flex flex-col justify-between group">
 					<div>
-						<div class="flex items-center justify-between">
+						<div class="flex items-center justify-between mb-3">
 							<div class="flex items-center gap-2">
-								<Database class="w-4 h-4 text-cyan-400" />
-								<span class="font-mono text-base font-bold text-white group-hover:text-cyan-300 transition-colors">
+								<Database size={16} class="text-[#d4ff32]" />
+								<span class="font-mono text-base font-bold text-[#f1f5f9] group-hover:text-[#d4ff32] transition-colors">
 									{table.name}
 								</span>
 							</div>
-							<span class="text-xs font-mono px-2 py-0.5 border border-slate-700/60 bg-[#141c28] text-slate-400">
+							<span class="text-[10px] font-mono px-1.5 py-0.5 border border-[#252b3b] bg-[#0a0b0e] text-[#94a3b8] rounded-xs">
 								TABLE
 							</span>
 						</div>
 
-						<div class="mt-4 flex items-baseline gap-2">
-							<span class="text-3xl font-bold font-mono text-white tabular-nums">{table.row_count}</span>
-							<span class="text-sm font-mono text-slate-400">rows</span>
+						<div class="flex items-center gap-2 text-xs font-mono text-[#94a3b8] py-2 border-t border-[#252b3b]/60">
+							<Layers size={13} class="text-[#64748b]" />
+							<span>
+								{#if table.row_count < 0}
+									Row count unavailable
+								{:else}
+									<strong class="text-[#f1f5f9] font-medium">{table.row_count.toLocaleString()}</strong> rows indexed
+								{/if}
+							</span>
 						</div>
 					</div>
 
-					<div class="mt-6 pt-4 border-t border-[#1e293b] flex items-center justify-end">
+					<div class="pt-4 mt-2 border-t border-[#252b3b]/60 flex items-center justify-between">
 						<a
-							href="/database/{table.name}"
-							class="flex items-center gap-1 text-sm font-mono text-cyan-400 hover:text-cyan-300 font-medium group-hover:translate-x-0.5 transition-all"
+							href={`/database/${table.name}`}
+							class="text-xs font-mono text-[#d4ff32] hover:underline flex items-center gap-1.5"
 						>
 							<span>Browse Rows</span>
-							<ArrowRight class="w-4 h-4" />
+							<ArrowRight size={13} />
+						</a>
+
+						<a
+							href={`/database/query`}
+							class="text-xs font-mono text-[#64748b] hover:text-[#f1f5f9] transition-colors"
+						>
+							Query
 						</a>
 					</div>
 				</div>
@@ -181,10 +198,9 @@
 	{/if}
 </div>
 
-<!-- Interlock Warning Modal -->
 <ServerInterlockModal
 	open={showInterlock}
-	actionTitle="Load Database Tables from Main Server"
+	actionTitle="Load SQLite Tables & Schema"
 	onProceed={handleProceedWake}
 	onCancel={handleCancelWake}
 />

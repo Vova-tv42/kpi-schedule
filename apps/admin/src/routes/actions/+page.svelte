@@ -1,6 +1,20 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { Activity, RefreshCw, Search, Filter, Clock, CheckCircle, AlertCircle, Info, ChevronLeft, ChevronRight, Zap } from 'lucide-svelte';
+	import { onMount, onDestroy } from 'svelte';
+	import Modal from '$lib/components/Modal.svelte';
+	import { 
+		Activity, 
+		RefreshCw, 
+		Search, 
+		Filter, 
+		Clock, 
+		ShieldCheck, 
+		Zap, 
+		AlertCircle, 
+		CheckCircle, 
+		Info, 
+		ChevronLeft, 
+		ChevronRight 
+	} from 'lucide-svelte';
 
 	interface ActionItem {
 		id: string;
@@ -87,12 +101,26 @@
 		loadActions();
 	});
 
+	onDestroy(() => {
+		if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+	});
+
 	// Derived metrics
 	const successCount = $derived(actions.filter((a) => a.status_code >= 200 && a.status_code < 300).length);
 	const successRate = $derived(actions.length > 0 ? Math.round((successCount / actions.length) * 100) : 100);
 	const avgDuration = $derived(
 		actions.length > 0 ? Math.round(actions.reduce((acc, a) => acc + (Number(a.duration_ms) || 0), 0) / actions.length) : 0
 	);
+	const errorCount = $derived(actions.filter((a) => a.status_code >= 400).length);
+
+	function formatTime(iso: string) {
+		try {
+			const d = new Date(iso);
+			return d.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+		} catch {
+			return iso;
+		}
+	}
 
 	function formatRelativeTime(dateStr: string) {
 		try {
@@ -108,248 +136,268 @@
 </script>
 
 <svelte:head>
-	<title>KPI Console | Recent Actions</title>
+	<title>KPI Schedule // Action Telemetry Stream</title>
 </svelte:head>
 
 <div class="space-y-6">
-	<!-- Top Metric Instrumentation Cards -->
-	<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-		<div class="border border-[#1e293b] bg-[#0f141d] p-4 relative">
-			<div class="text-xs font-mono uppercase tracking-widest text-slate-400">Total Telemetry Events</div>
-			<div class="text-3xl font-bold font-mono text-white mt-1 tabular-nums">{total}</div>
-			<div class="text-xs font-mono text-slate-400 mt-1">NeonDB Retention Store</div>
-			<div class="absolute top-2 right-2 text-slate-700">
-				<Activity class="w-4 h-4" />
+	<!-- Page Header -->
+	<div class="flex flex-wrap items-center justify-between gap-4 border-b border-[#252b3b] pb-4">
+		<div>
+			<div class="flex items-center gap-2 mb-1">
+				<Activity size={22} class="text-[#06b6d4]" />
+				<h1 class="font-display font-extrabold text-2xl sm:text-3xl text-[#f1f5f9] tracking-tight">
+					ANONYMOUS ACTION TELEMETRY
+				</h1>
 			</div>
+			<p class="font-mono text-xs sm:text-sm text-[#94a3b8]">
+				Real-time telemetry event stream. User identities, Telegram IDs, and IPs are strictly unrecorded.
+			</p>
 		</div>
 
-		<div class="border border-[#1e293b] bg-[#0f141d] p-4 relative">
-			<div class="text-xs font-mono uppercase tracking-widest text-slate-400">Success Rate</div>
-			<div class="text-3xl font-bold font-mono {successRate >= 95 ? 'text-emerald-400' : 'text-amber-400'} mt-1 tabular-nums">
-				{successRate}%
-			</div>
-			<div class="text-xs font-mono text-slate-400 mt-1">{successCount} of {actions.length} recent OK</div>
-			<div class="absolute top-2 right-2 text-slate-700">
-				<CheckCircle class="w-4 h-4" />
-			</div>
-		</div>
+		<!-- Stream Mode & Reconnect Controls -->
+		<div class="flex items-center gap-3">
+			{#if autoRefresh}
+				<span class="flex items-center gap-1.5 px-3 py-1.5 rounded-xs bg-[#10b981]/15 text-[#10b981] text-xs font-mono font-medium border border-[#10b981]/30">
+					<span class="w-2 h-2 rounded-full bg-[#10b981] animate-pulse"></span>
+					<span>8s LIVE SYNC</span>
+				</span>
+			{:else}
+				<span class="flex items-center gap-1.5 px-3 py-1.5 rounded-xs bg-[#252b3b] text-[#94a3b8] text-xs font-mono font-medium">
+					<span class="w-2 h-2 rounded-full bg-[#64748b]"></span>
+					<span>PAUSED</span>
+				</span>
+			{/if}
 
-		<div class="border border-[#1e293b] bg-[#0f141d] p-4 relative">
-			<div class="text-xs font-mono uppercase tracking-widest text-slate-400">Avg Execution Latency</div>
-			<div class="text-3xl font-bold font-mono text-cyan-400 mt-1 tabular-nums">{avgDuration} ms</div>
-			<div class="text-xs font-mono text-slate-400 mt-1">Serverless telemetry</div>
-			<div class="absolute top-2 right-2 text-slate-700">
-				<Zap class="w-4 h-4" />
-			</div>
-		</div>
-
-		<div class="border border-[#1e293b] bg-[#0f141d] p-4 relative">
-			<div class="text-xs font-mono uppercase tracking-widest text-slate-400">Telemetry Stream</div>
-			<div class="flex items-center gap-2 mt-2">
-				<label class="relative inline-flex items-center cursor-pointer">
-					<input
-						type="checkbox"
-						bind:checked={autoRefresh}
-						class="sr-only peer"
-					/>
-					<div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-none peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600"></div>
-					<span class="ml-2 text-sm font-mono text-slate-300">{autoRefresh ? '8s Live Sync' : 'Paused'}</span>
-				</label>
-			</div>
-			<div class="text-xs font-mono text-slate-400 mt-1">Reads NeonDB (Zero main server impact)</div>
+			<button 
+				onclick={loadActions}
+				disabled={isLoading}
+				class="p-2 bg-[#181c26] hover:bg-[#252b3b] text-[#f1f5f9] border border-[#252b3b] rounded-xs text-xs sm:text-sm font-mono flex items-center gap-1.5 transition-colors cursor-pointer"
+				title="Re-sync telemetry stream"
+			>
+				<RefreshCw size={13} class={isLoading ? 'animate-spin text-[#d4ff32]' : ''} />
+				<span>Re-sync</span>
+			</button>
 		</div>
 	</div>
 
-	<!-- Controls & Filters Bar -->
-	<div class="border border-[#1e293b] bg-[#0f141d] p-4 space-y-3">
+	<!-- Telemetry Diagnostics Cards -->
+	<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+		<div class="bg-[#12151d] border border-[#252b3b] p-4 rounded-xs">
+			<span class="text-xs font-mono tracking-wider uppercase text-[#64748b] block mb-1">Total Telemetry Events</span>
+			<div class="font-display font-bold text-3xl text-[#f1f5f9]">{total.toLocaleString()}</div>
+			<span class="text-[11px] font-mono text-[#64748b]">NeonDB Retention Store</span>
+		</div>
+
+		<div class="bg-[#12151d] border border-[#252b3b] p-4 rounded-xs">
+			<span class="text-xs font-mono tracking-wider uppercase text-[#64748b] block mb-1">Mean Response Latency</span>
+			<div class="font-display font-bold text-3xl text-[#10b981]">{avgDuration}ms</div>
+			<span class="text-[11px] font-mono text-[#64748b]">Across all endpoints</span>
+		</div>
+
+		<div class="bg-[#12151d] border border-[#252b3b] p-4 rounded-xs">
+			<span class="text-xs font-mono tracking-wider uppercase text-[#64748b] block mb-1">Success Rate</span>
+			<div class="font-display font-bold text-3xl {successRate >= 95 ? 'text-[#10b981]' : 'text-amber-400'}">{successRate}%</div>
+			<span class="text-[11px] font-mono text-[#64748b]">{successCount} OK • {errorCount} Errors</span>
+		</div>
+
+		<div class="bg-[#12151d] border border-[#252b3b] p-4 rounded-xs">
+			<span class="text-xs font-mono tracking-wider uppercase text-[#64748b] block mb-1">PII Masking</span>
+			<div class="font-display font-bold text-2xl text-[#d4ff32] flex items-center gap-1.5 mt-0.5">
+				<ShieldCheck size={20} />
+				<span>100% Zero PII</span>
+			</div>
+			<span class="text-[11px] font-mono text-[#64748b]">Zero user tracking</span>
+		</div>
+	</div>
+
+	<!-- Filter Strip -->
+	<div class="bg-[#12151d] border border-[#252b3b] p-3.5 rounded-xs space-y-3 font-mono text-xs sm:text-sm">
 		<div class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
 			<!-- Action Type Filter Pills -->
 			<div class="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
 				<button
 					onclick={() => setFilterType('')}
-					class="px-3 py-1.5 text-sm font-mono tracking-wide border transition-colors {filterType === ''
-						? 'border-cyan-500 bg-cyan-950/30 text-cyan-300 font-bold'
-						: 'border-[#1e293b] bg-[#141c28] text-slate-400 hover:text-white'}"
+					class="px-2.5 py-1 text-xs font-mono tracking-wider uppercase rounded-xs border transition-colors cursor-pointer {filterType === ''
+						? 'bg-[#d4ff32]/10 text-[#d4ff32] font-semibold border-[#d4ff32]/30'
+						: 'border-[#252b3b] bg-[#0a0b0e] text-[#94a3b8] hover:text-[#f1f5f9]'}"
 				>
 					ALL
 				</button>
 				<button
 					onclick={() => setFilterType('telegram_command')}
-					class="px-3 py-1.5 text-sm font-mono tracking-wide border transition-colors {filterType === 'telegram_command'
-						? 'border-cyan-500 bg-cyan-950/30 text-cyan-300 font-bold'
-						: 'border-[#1e293b] bg-[#141c28] text-slate-400 hover:text-white'}"
+					class="px-2.5 py-1 text-xs font-mono tracking-wider uppercase rounded-xs border transition-colors cursor-pointer whitespace-nowrap {filterType === 'telegram_command'
+						? 'bg-[#d4ff32]/10 text-[#d4ff32] font-semibold border-[#d4ff32]/30'
+						: 'border-[#252b3b] bg-[#0a0b0e] text-[#94a3b8] hover:text-[#f1f5f9]'}"
 				>
-					TELEGRAM COMMANDS
+					COMMANDS
 				</button>
 				<button
 					onclick={() => setFilterType('telegram_callback')}
-					class="px-3 py-1.5 text-sm font-mono tracking-wide border transition-colors {filterType === 'telegram_callback'
-						? 'border-cyan-500 bg-cyan-950/30 text-cyan-300 font-bold'
-						: 'border-[#1e293b] bg-[#141c28] text-slate-400 hover:text-white'}"
+					class="px-2.5 py-1 text-xs font-mono tracking-wider uppercase rounded-xs border transition-colors cursor-pointer whitespace-nowrap {filterType === 'telegram_callback'
+						? 'bg-[#d4ff32]/10 text-[#d4ff32] font-semibold border-[#d4ff32]/30'
+						: 'border-[#252b3b] bg-[#0a0b0e] text-[#94a3b8] hover:text-[#f1f5f9]'}"
 				>
 					CALLBACKS
 				</button>
 				<button
 					onclick={() => setFilterType('extension_sync')}
-					class="px-3 py-1.5 text-sm font-mono tracking-wide border transition-colors {filterType === 'extension_sync'
-						? 'border-cyan-500 bg-cyan-950/30 text-cyan-300 font-bold'
-						: 'border-[#1e293b] bg-[#141c28] text-slate-400 hover:text-white'}"
+					class="px-2.5 py-1 text-xs font-mono tracking-wider uppercase rounded-xs border transition-colors cursor-pointer whitespace-nowrap {filterType === 'extension_sync'
+						? 'bg-[#d4ff32]/10 text-[#d4ff32] font-semibold border-[#d4ff32]/30'
+						: 'border-[#252b3b] bg-[#0a0b0e] text-[#94a3b8] hover:text-[#f1f5f9]'}"
 				>
-					EXTENSION SYNCS
+					SYNCS
 				</button>
 				<button
 					onclick={() => setFilterType('cron_alert')}
-					class="px-3 py-1.5 text-sm font-mono tracking-wide border transition-colors {filterType === 'cron_alert'
-						? 'border-cyan-500 bg-cyan-950/30 text-cyan-300 font-bold'
-						: 'border-[#1e293b] bg-[#141c28] text-slate-400 hover:text-white'}"
+					class="px-2.5 py-1 text-xs font-mono tracking-wider uppercase rounded-xs border transition-colors cursor-pointer whitespace-nowrap {filterType === 'cron_alert'
+						? 'bg-[#d4ff32]/10 text-[#d4ff32] font-semibold border-[#d4ff32]/30'
+						: 'border-[#252b3b] bg-[#0a0b0e] text-[#94a3b8] hover:text-[#f1f5f9]'}"
 				>
-					CRON ALERTS
+					ALERTS
 				</button>
 				<button
 					onclick={() => setFilterType('admin_action')}
-					class="px-3 py-1.5 text-sm font-mono tracking-wide border transition-colors {filterType === 'admin_action'
-						? 'border-cyan-500 bg-cyan-950/30 text-cyan-300 font-bold'
-						: 'border-[#1e293b] bg-[#141c28] text-slate-400 hover:text-white'}"
+					class="px-2.5 py-1 text-xs font-mono tracking-wider uppercase rounded-xs border transition-colors cursor-pointer whitespace-nowrap {filterType === 'admin_action'
+						? 'bg-[#d4ff32]/10 text-[#d4ff32] font-semibold border-[#d4ff32]/30'
+						: 'border-[#252b3b] bg-[#0a0b0e] text-[#94a3b8] hover:text-[#f1f5f9]'}"
 				>
-					ADMIN ACTIONS
+					ADMIN
 				</button>
 			</div>
 
-			<!-- Status Filter Pills -->
-			<div class="flex items-center gap-1.5">
-				<button
-					onclick={() => setFilterStatus('')}
-					class="px-2.5 py-1 text-xs font-mono border {filterStatus === '' ? 'border-white text-white' : 'border-[#1e293b] text-slate-400'}"
-				>
-					ALL STATUS
-				</button>
-				<button
-					onclick={() => setFilterStatus('200')}
-					class="px-2.5 py-1 text-xs font-mono border {filterStatus === '200' ? 'border-emerald-500 text-emerald-400' : 'border-[#1e293b] text-slate-400'}"
-				>
-					200 OK
-				</button>
-				<button
-					onclick={() => setFilterStatus('500')}
-					class="px-2.5 py-1 text-xs font-mono border {filterStatus === '500' ? 'border-red-500 text-red-400' : 'border-[#1e293b] text-slate-400'}"
-				>
-					500 ERR
-				</button>
+			<!-- Status Filter Pills & Live Sync Toggle -->
+			<div class="flex items-center gap-3">
+				<div class="flex items-center gap-1.5">
+					<button
+						onclick={() => setFilterStatus('')}
+						class="px-2 py-0.5 text-xs font-mono rounded-xs border transition-colors cursor-pointer {filterStatus === '' ? 'border-[#f1f5f9] text-[#f1f5f9] bg-[#181c26]' : 'border-[#252b3b] text-[#64748b]'}"
+					>
+						ALL
+					</button>
+					<button
+						onclick={() => setFilterStatus('200')}
+						class="px-2 py-0.5 text-xs font-mono rounded-xs border transition-colors cursor-pointer {filterStatus === '200' ? 'border-[#10b981]/50 bg-[#10b981]/15 text-[#10b981]' : 'border-[#252b3b] text-[#64748b]'}"
+					>
+						200 OK
+					</button>
+					<button
+						onclick={() => setFilterStatus('500')}
+						class="px-2 py-0.5 text-xs font-mono rounded-xs border transition-colors cursor-pointer {filterStatus === '500' ? 'border-[#ef4444]/50 bg-[#ef4444]/15 text-[#ef4444]' : 'border-[#252b3b] text-[#64748b]'}"
+					>
+						500 ERR
+					</button>
+				</div>
+
+				<span class="text-[#252b3b]">|</span>
+
+				<label class="flex items-center gap-2 cursor-pointer select-none text-xs text-[#94a3b8]">
+					<input type="checkbox" bind:checked={autoRefresh} class="accent-[#d4ff32]" />
+					<span>Auto Sync</span>
+				</label>
 			</div>
 		</div>
 
-		<!-- Search & Manual Refresh -->
-		<div class="flex items-center gap-2 pt-2 border-t border-[#1e293b]">
+		<!-- Search Bar -->
+		<div class="flex items-center gap-2 pt-2 border-t border-[#252b3b]/60">
 			<div class="relative flex-1">
-				<Search class="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+				<Search size={14} class="absolute left-2.5 top-2.5 text-[#64748b]" />
 				<input
 					type="text"
 					bind:value={searchQuery}
 					onkeydown={(e) => e.key === 'Enter' && handleSearch()}
 					placeholder="Search action name (e.g. /today, sync, lesson_alerts)..."
-					class="w-full pl-9 pr-4 py-2 bg-[#080b10] border border-[#1e293b] focus:border-cyan-500 text-sm font-mono text-white placeholder-slate-600 focus:outline-none"
+					class="w-full pl-8 pr-3 py-1.5 bg-[#0a0b0e] text-[#f1f5f9] border border-[#252b3b] rounded-xs text-xs sm:text-sm focus:outline-none focus:border-[#d4ff32]"
 				/>
 			</div>
 			<button
 				onclick={handleSearch}
-				class="px-4 py-2 border border-[#1e293b] bg-[#141c28] hover:bg-[#1a2536] text-slate-300 font-mono text-sm uppercase"
+				class="px-3.5 py-1.5 border border-[#252b3b] bg-[#181c26] hover:bg-[#252b3b] text-[#f1f5f9] font-mono text-xs uppercase tracking-wider rounded-xs transition-colors cursor-pointer"
 			>
 				Filter
-			</button>
-			<button
-				onclick={loadActions}
-				disabled={isLoading}
-				class="p-2 border border-[#1e293b] bg-[#141c28] hover:bg-[#1a2536] text-slate-300 transition-colors"
-				title="Reload telemetry"
-			>
-				<RefreshCw class="w-3.5 h-3.5 {isLoading ? 'animate-spin text-cyan-400' : ''}" />
 			</button>
 		</div>
 	</div>
 
-	<!-- Actions Table -->
-	<div class="border border-[#1e293b] bg-[#0f141d] overflow-hidden">
+	<!-- Action Event Stream List -->
+	<div class="bg-[#12151d] border border-[#252b3b] rounded-xs overflow-hidden flex flex-col font-mono text-xs sm:text-sm">
 		<div class="overflow-x-auto">
-			<table class="w-full text-left text-sm font-mono">
-				<thead class="bg-[#0a0e14] border-b border-[#1e293b] text-xs uppercase text-slate-400 tracking-wider">
-					<tr>
+			<table class="w-full text-left border-collapse">
+				<thead>
+					<tr class="bg-[#151922] border-b border-[#252b3b] text-[#94a3b8]">
 						<th class="py-2.5 px-4 font-medium">Timestamp</th>
 						<th class="py-2.5 px-4 font-medium">Category</th>
 						<th class="py-2.5 px-4 font-medium">Action Name</th>
 						<th class="py-2.5 px-4 font-medium">Status</th>
 						<th class="py-2.5 px-4 font-medium">Duration</th>
-						<th class="py-2.5 px-4 font-medium text-right">Details</th>
+						<th class="py-2.5 px-4 text-right font-medium">Details</th>
 					</tr>
 				</thead>
-				<tbody class="divide-y divide-[#1e293b]">
+
+				<tbody class="divide-y divide-[#252b3b]/60">
 					{#if isLoading && actions.length === 0}
 						<tr>
-							<td colspan="6" class="py-8 text-center text-slate-500 font-mono">
-								<RefreshCw class="w-5 h-5 animate-spin mx-auto mb-2 text-cyan-500" />
+							<td colspan="6" class="py-10 text-center text-[#64748b]">
+								<RefreshCw size={18} class="animate-spin text-[#d4ff32] mx-auto mb-2" />
 								Querying NeonDB telemetry stream...
 							</td>
 						</tr>
 					{:else if actions.length === 0}
 						<tr>
-							<td colspan="6" class="py-8 text-center text-slate-500 font-mono">
-								No action events recorded matching current filter parameters.
+							<td colspan="6" class="py-10 text-center text-[#64748b]">
+								No action events recorded matching current filter parameters
 							</td>
 						</tr>
 					{:else}
-						{#each actions as action (action.id)}
-							<tr class="hover:bg-[#141c28] transition-colors">
-								<td class="py-3 px-4 text-slate-400 whitespace-nowrap">
-									<div class="text-white font-medium">{formatRelativeTime(action.created_at)}</div>
-									<div class="text-xs text-slate-500">{new Date(action.created_at).toLocaleTimeString()}</div>
+						{#each actions as act (act.id)}
+							<tr class="hover:bg-[#181c26]/60 transition-colors">
+								<td class="py-2.5 px-4 text-[#64748b] whitespace-nowrap">
+									<div class="text-[#f1f5f9] font-medium">{formatRelativeTime(act.created_at)}</div>
+									<div class="text-[11px] text-[#64748b]">{formatTime(act.created_at)}</div>
 								</td>
 
-								<td class="py-3 px-4 whitespace-nowrap">
-									<span
-										class="px-2.5 py-0.5 text-xs border {action.action_type === 'telegram_command'
-											? 'border-blue-500/40 bg-blue-950/20 text-blue-400'
-											: action.action_type === 'extension_sync'
-												? 'border-emerald-500/40 bg-emerald-950/20 text-emerald-400'
-												: action.action_type === 'cron_alert'
-													? 'border-purple-500/40 bg-purple-950/20 text-purple-400'
-													: action.action_type === 'admin_action'
-														? 'border-amber-500/40 bg-amber-950/20 text-amber-400'
-														: 'border-slate-700 bg-slate-800 text-slate-400'}"
-									>
-										{action.action_type}
+								<td class="py-2.5 px-4 whitespace-nowrap">
+									<span class="px-2 py-0.5 text-xs rounded-xs font-semibold {act.action_type === 'telegram_command'
+										? 'bg-[#06b6d4]/15 text-[#06b6d4] border border-[#06b6d4]/30'
+										: act.action_type === 'extension_sync'
+											? 'bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/30'
+											: act.action_type === 'cron_alert'
+												? 'bg-purple-500/15 text-purple-400 border border-purple-500/30'
+												: act.action_type === 'admin_action'
+													? 'bg-[#d4ff32]/15 text-[#d4ff32] border border-[#d4ff32]/30'
+													: 'bg-[#252b3b] text-[#94a3b8]'}">
+										{act.action_type}
 									</span>
 								</td>
 
-								<td class="py-3 px-4 font-semibold text-white">
-									<code class="text-cyan-300">{action.action_name}</code>
+								<td class="py-2.5 px-4 font-semibold text-[#f1f5f9]">
+									<code class="text-[#d4ff32] font-mono">{act.action_name}</code>
 								</td>
 
-								<td class="py-3 px-4 whitespace-nowrap">
-									<span
-										class="px-2.5 py-0.5 text-xs font-bold border {action.status_code >= 200 && action.status_code < 300
-											? 'border-emerald-500/50 bg-emerald-950/20 text-emerald-400'
-											: action.status_code >= 400 && action.status_code < 500
-												? 'border-yellow-500/50 bg-yellow-950/20 text-yellow-400'
-												: 'border-red-500/50 bg-red-950/20 text-red-400'}"
-									>
-										{action.status_code}
-									</span>
+								<td class="py-2.5 px-4 whitespace-nowrap">
+									{#if act.status_code >= 200 && act.status_code < 300}
+										<span class="text-[#10b981] font-semibold">{act.status_code} OK</span>
+									{:else if act.status_code >= 400 && act.status_code < 500}
+										<span class="text-amber-400 font-semibold">{act.status_code}</span>
+									{:else}
+										<span class="text-[#ef4444] font-semibold">{act.status_code} ERR</span>
+									{/if}
 								</td>
 
-								<td class="py-3 px-4 text-slate-300 tabular-nums whitespace-nowrap">
-									{action.duration_ms} ms
+								<td class="py-2.5 px-4 whitespace-nowrap text-[#94a3b8] tabular-nums">
+									{act.duration_ms}ms
 								</td>
 
-								<td class="py-3 px-4 text-right whitespace-nowrap">
-									{#if action.metadata}
+								<td class="py-2.5 px-4 text-right whitespace-nowrap">
+									{#if act.metadata}
 										<button
-											onclick={() => (selectedMetadata = action.metadata)}
-											class="p-1 border border-[#1e293b] hover:border-cyan-500 bg-[#141c28] text-slate-400 hover:text-cyan-300 transition-colors"
+											onclick={() => (selectedMetadata = act.metadata)}
+											class="p-1 border border-[#252b3b] hover:border-[#d4ff32] bg-[#0a0b0e] text-[#94a3b8] hover:text-[#d4ff32] rounded-xs transition-colors cursor-pointer"
 											title="Inspect Anonymous Payload"
 										>
-											<Info class="w-4 h-4" />
+											<Info size={14} />
 										</button>
 									{:else}
-										<span class="text-slate-600">—</span>
+										<span class="text-[#64748b]">—</span>
 									{/if}
 								</td>
 							</tr>
@@ -360,9 +408,9 @@
 		</div>
 
 		<!-- Pagination Footer -->
-		<div class="border-t border-[#1e293b] bg-[#0a0e14] px-4 py-3 flex items-center justify-between text-sm font-mono text-slate-400">
+		<div class="border-t border-[#252b3b] bg-[#0e1117] px-4 py-3 flex items-center justify-between text-xs font-mono text-[#64748b]">
 			<div>
-				Showing <span class="text-white font-medium">{actions.length}</span> of <span class="text-white font-medium">{total}</span> actions
+				Showing <span class="text-[#f1f5f9] font-medium">{actions.length}</span> of <span class="text-[#f1f5f9] font-medium">{total}</span> actions
 			</div>
 
 			<div class="flex items-center gap-2">
@@ -374,9 +422,9 @@
 						}
 					}}
 					disabled={offset === 0}
-					class="p-1.5 border border-[#1e293b] hover:border-slate-600 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300"
+					class="p-1.5 border border-[#252b3b] hover:border-[#64748b] disabled:opacity-30 disabled:cursor-not-allowed text-[#94a3b8] hover:text-white rounded-xs transition-colors cursor-pointer"
 				>
-					<ChevronLeft class="w-4 h-4" />
+					<ChevronLeft size={14} />
 				</button>
 
 				<span>Offset {offset}</span>
@@ -389,9 +437,9 @@
 						}
 					}}
 					disabled={offset + limit >= total}
-					class="p-1.5 border border-[#1e293b] hover:border-slate-600 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300"
+					class="p-1.5 border border-[#252b3b] hover:border-[#64748b] disabled:opacity-30 disabled:cursor-not-allowed text-[#94a3b8] hover:text-white rounded-xs transition-colors cursor-pointer"
 				>
-					<ChevronRight class="w-4 h-4" />
+					<ChevronRight size={14} />
 				</button>
 			</div>
 		</div>
@@ -399,19 +447,22 @@
 </div>
 
 <!-- Metadata Inspector Modal -->
-{#if selectedMetadata}
-	<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
-		<div class="w-full max-w-md border border-[#1e293b] bg-[#0f141d] p-5 shadow-2xl space-y-4">
-			<div class="flex items-center justify-between border-b border-[#1e293b] pb-3">
-				<div class="text-sm font-mono uppercase tracking-widest text-cyan-400">[Anonymous Metadata]</div>
-				<button onclick={() => (selectedMetadata = null)} class="text-slate-500 hover:text-white">✕</button>
-			</div>
-			<div class="text-sm font-mono bg-[#080b10] border border-[#1e293b] p-3 text-slate-300 overflow-x-auto max-h-60">
-				<pre>{JSON.stringify(selectedMetadata, null, 2)}</pre>
-			</div>
-			<div class="text-xs font-mono text-slate-500">
-				Note: All user identifiers (IDs, names, tokens) are strictly scrubbed to guarantee user anonymity.
-			</div>
-		</div>
+<Modal
+	open={selectedMetadata !== null}
+	title="ANONYMOUS ACTION PAYLOAD"
+	description="All user identifiers (IDs, names, tokens) are scrubbed at source."
+	onClose={() => (selectedMetadata = null)}
+>
+	<div class="bg-[#0a0b0e] border border-[#252b3b] p-3 text-[#e6edf3] rounded-xs overflow-x-auto max-h-72">
+		<pre class="text-xs">{JSON.stringify(selectedMetadata, null, 2)}</pre>
 	</div>
-{/if}
+
+	{#snippet footer()}
+		<button
+			onclick={() => (selectedMetadata = null)}
+			class="px-3.5 py-1.5 border border-[#252b3b] hover:border-[#64748b] bg-[#181c26] text-[#f1f5f9] text-xs font-mono uppercase tracking-wider rounded-xs transition-colors cursor-pointer"
+		>
+			Close
+		</button>
+	{/snippet}
+</Modal>

@@ -120,3 +120,41 @@ The system defines three privilege tiers:
   1. **Opportunistic Pruning**: During normal telemetry ingestion, a small percentage of requests automatically execute a quick `DELETE` of expired rows.
   2. **External Free Cron**: `POST /api/cron/cleanup` can be scheduled via `cron-jobs.com` or `cron-job.org` using `Authorization: Bearer <CRON_SECRET>` on an hourly, 6-hour, or daily basis.
   3. **Manual Trigger**: Administrators can trigger cleanup on demand from the Settings tab.
+
+---
+
+## 5. UI Architecture & Design System
+
+The Admin Dashboard follows a cyber-industrial mission control aesthetic with a persistent left-rail navigation layout and high-density telemetry displays.
+
+### 5.1 Layout & Navigation Hierarchy
+- **Left Sidebar Rail (`Navbar.svelte`)**: Fixed 64-width navigation bar (`#0e1117`, border `#252b3b`) with operational pulse indicator and categorized links:
+  - **Telemetry**: `Overview` (`/`), `Action Stream` (`/actions`).
+  - **Storage Engine**: `Tables & Rows` (`/database`), `SQL Workspace` (`/database/query`).
+  - **Governance**: `Admin Access` (`/admins`, locked for non-superadmins), `Settings` (`/settings`).
+  - **Mobile Support**: Off-canvas sliding drawer with dark backdrop overlay for viewports `< 1024px`.
+- **Top Diagnostics Header (`TelemetryHeader.svelte`)**: Sticky 14-height bar (`#0e1117`, border `#252b3b`):
+  - Safe Fly.io VM status indicator (`awake`, `sleeping`, `transitioning`) with non-waking Machines API refresh button.
+  - Telemetry gateway latency heartbeat ping.
+  - Authenticated user email and role badge (`SUPERADMIN` in lime, `READ & WRITE` in cyan, `READ ONLY` in amber).
+  - Secure disconnect session termination action.
+- **Main Operations Viewport**: High-density workspace rendered inside an overflow scroll container with custom dark hairline scrollbars and technical background grids (`.bg-tech-grid`).
+
+### 5.2 Design Tokens & Component Library
+- **Typography**:
+  - Display Font: `Bricolage Grotesque` (bold uppercase headers and branding).
+  - Body Font: `Geist` (clean modern sans for general text).
+  - Monospace Font: `JetBrains Mono` (SQL editor, JSON payloads, metrics, timestamps, and data tables).
+- **Palette**:
+  - Canvas: `#0a0b0e`
+  - Panels & Cards: `#12151d`
+  - Inset Surfaces: `#181c26`
+  - Table & Dialog Headers: `#151922`
+  - Structural Borders: `#252b3b`
+  - Primary Accent: Neon Volt/Lime `#d4ff32` (selection bg, active nav markers, primary CTA buttons)
+  - Secondary Accents: Emerald `#10b981` (online), Cyan `#06b6d4` (telemetry), Amber `#f59e0b` (standby/sleep), Crimson `#ef4444` (critical errors)
+- **Reusable Primitives**:
+  - `Badge.svelte`: Semantic status badges supporting `lime`, `amber`, `emerald`, `crimson`, `slate`, and `cyan`.
+  - `Modal.svelte`: Accessible dialog overlay with Esc key handling, dark backdrop blur, and technical header with volt accent dot.
+  - `ServerInterlockModal.svelte`: Specialized Scale-to-Zero warning dialog preventing unintentional cold boots of the Fly.io microVM.
+

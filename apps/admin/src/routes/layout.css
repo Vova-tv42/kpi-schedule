@@ -1,27 +1,62 @@
 @import 'tailwindcss';
 
 @theme {
-  --font-sans: 'Cabinet Grotesk', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: 'Geist', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Bricolage Grotesque', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-
-  --color-base: #080b10;
-  --color-surface: #0f141d;
-  --color-surface-hover: #161e2b;
-  --color-border: #1e293b;
-  --color-border-subtle: #141c28;
 }
 
-:root {
-  color-scheme: dark;
+@layer base {
+	:root {
+		color-scheme: dark;
+		--font-display: 'Bricolage Grotesque', sans-serif;
+		--font-mono: 'JetBrains Mono', monospace;
+		--font-sans: 'Geist', sans-serif;
+		--color-bg-base: #0a0b0e;
+		--color-bg-panel: #12151d;
+		--color-bg-surface: #181c26;
+		--color-border: #252b3b;
+		--color-accent: #d4ff32;
+	}
+
+	body {
+		background-color: var(--color-bg-base);
+		color: #e6edf3;
+		font-family: var(--font-sans);
+	}
 }
 
-body {
-  background-color: #080b10;
-  color: #f8fafc;
-  font-family: 'Cabinet Grotesk', system-ui, -apple-system, sans-serif;
-  font-size: 1rem;
+.font-display {
+	font-family: 'Bricolage Grotesque', sans-serif;
 }
 
-code, pre, .font-mono {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+.font-mono {
+	font-family: 'JetBrains Mono', monospace;
+}
+
+/* Technical grid background pattern */
+.bg-tech-grid {
+	background-size: 32px 32px;
+	background-image: 
+		linear-gradient(to right, rgba(37, 43, 59, 0.35) 1px, transparent 1px),
+		linear-gradient(to bottom, rgba(37, 43, 59, 0.35) 1px, transparent 1px);
+}
+
+/* Custom technical hairline scrollbar */
+::-webkit-scrollbar {
+	width: 6px;
+	height: 6px;
+}
+
+::-webkit-scrollbar-track {
+	background: #0a0b0e;
+}
+
+::-webkit-scrollbar-thumb {
+	background: #252b3b;
+	border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: #374151;
 }

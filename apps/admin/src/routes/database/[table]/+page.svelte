@@ -1,7 +1,18 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { ArrowLeft, RefreshCw, Edit2, ChevronLeft, ChevronRight, Save, X, Key, AlertCircle } from 'lucide-svelte';
+	import Modal from '$lib/components/Modal.svelte';
+	import { 
+		ArrowLeft, 
+		RefreshCw, 
+		Edit2, 
+		ChevronLeft, 
+		ChevronRight, 
+		Save, 
+		Key, 
+		Database, 
+		AlertCircle 
+	} from 'lucide-svelte';
 
 	interface ColumnInfo {
 		name: string;
@@ -139,34 +150,37 @@
 </script>
 
 <svelte:head>
-	<title>KPI Console | Table: {tableName}</title>
+	<title>KPI Schedule // Table: {tableName}</title>
 </svelte:head>
 
 <div class="space-y-5">
 	<!-- Navigation & Actions Bar -->
-	<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#1e293b] pb-4">
+	<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#252b3b] pb-4">
 		<div class="flex items-center gap-3">
 			<a
 				href="/database"
-				class="p-2 border border-[#1e293b] hover:border-slate-600 bg-[#0f141d] hover:bg-[#141c28] text-slate-400 hover:text-white transition-colors"
+				class="p-2 border border-[#252b3b] hover:border-[#64748b] bg-[#181c26] hover:bg-[#252b3b] text-[#94a3b8] hover:text-[#f1f5f9] rounded-xs transition-colors"
 				title="Back to tables list"
 			>
-				<ArrowLeft class="w-4 h-4" />
+				<ArrowLeft size={16} />
 			</a>
 			<div>
-				<div class="text-xs font-mono uppercase tracking-widest text-cyan-400">[Table Inspector]</div>
-				<h1 class="text-2xl font-bold font-mono text-white tracking-tight">{tableName}</h1>
+				<div class="text-[11px] font-mono uppercase tracking-widest text-[#d4ff32]">Table Inspector</div>
+				<h1 class="font-display font-extrabold text-2xl text-[#f1f5f9] tracking-tight flex items-center gap-2">
+					<Database size={20} class="text-[#d4ff32]" />
+					<span>{tableName}</span>
+				</h1>
 			</div>
 		</div>
 
-		<div class="flex items-center gap-2">
+		<div class="flex items-center gap-2 font-mono text-xs sm:text-sm">
 			<select
 				bind:value={limit}
 				onchange={() => {
 					offset = 0;
 					loadTable();
 				}}
-				class="bg-[#0f141d] border border-[#1e293b] text-sm font-mono text-slate-300 px-3 py-1.5 focus:border-cyan-500 focus:outline-none"
+				class="bg-[#12151d] border border-[#252b3b] text-[#f1f5f9] px-3 py-1.5 rounded-xs focus:border-[#d4ff32] focus:outline-none"
 			>
 				<option value={25}>25 rows</option>
 				<option value={50}>50 rows</option>
@@ -177,83 +191,83 @@
 			<button
 				onclick={loadTable}
 				disabled={isLoading}
-				class="p-2 border border-[#1e293b] hover:border-slate-600 bg-[#0f141d] hover:bg-[#141c28] text-slate-400 hover:text-white transition-colors"
+				class="p-2 border border-[#252b3b] hover:border-[#64748b] bg-[#181c26] hover:bg-[#252b3b] text-[#94a3b8] hover:text-[#f1f5f9] rounded-xs transition-colors cursor-pointer"
 				title="Reload table data"
 			>
-				<RefreshCw class="w-4 h-4 {isLoading ? 'animate-spin text-cyan-400' : ''}" />
+				<RefreshCw size={14} class={isLoading ? 'animate-spin text-[#d4ff32]' : ''} />
 			</button>
 		</div>
 	</div>
 
 	<!-- Error Alert -->
 	{#if error}
-		<div class="p-4 border border-red-500/40 bg-red-950/20 text-red-200 text-sm font-mono">
-			<div class="font-bold text-red-400 uppercase">[Table Query Error]</div>
-			<div class="mt-1">{error}</div>
+		<div class="p-3.5 border border-[#ef4444]/40 bg-[#ef4444]/10 text-[#fca5a5] text-xs font-mono rounded-xs">
+			<div class="font-bold text-[#ef4444] uppercase mb-0.5">[Table Query Error]</div>
+			<div>{error}</div>
 		</div>
 	{/if}
 
 	<!-- Data Viewport -->
-	<div class="border border-[#1e293b] bg-[#0f141d] overflow-hidden">
+	<div class="border border-[#252b3b] bg-[#12151d] rounded-xs overflow-hidden">
 		{#if isLoading && !data}
-			<div class="p-12 text-center text-slate-400 font-mono text-sm">
-				<RefreshCw class="w-5 h-5 animate-spin mx-auto mb-2 text-cyan-400" />
-				Loading live rows from SQLite...
+			<div class="p-12 text-center text-[#94a3b8] font-mono text-sm">
+				<RefreshCw size={20} class="animate-spin text-[#d4ff32] mx-auto mb-2" />
+				Loading live rows from SQLite persistent store...
 			</div>
 		{:else if data}
 			<div class="overflow-x-auto">
-				<table class="w-full text-left text-sm font-mono">
-					<thead class="bg-[#0a0e14] border-b border-[#1e293b] text-xs uppercase text-slate-400 tracking-wider">
+				<table class="w-full text-left text-xs sm:text-sm font-mono border-collapse">
+					<thead class="bg-[#151922] border-b border-[#252b3b] text-xs uppercase text-[#94a3b8] tracking-wider">
 						<tr>
 							<th class="py-2.5 px-3 font-medium w-16 text-center">Edit</th>
 							{#each data.columns as col (col.name)}
 								<th
-									class="py-2.5 px-4 font-medium cursor-pointer hover:text-cyan-300 transition-colors whitespace-nowrap"
+									class="py-2.5 px-4 font-medium cursor-pointer hover:text-[#d4ff32] transition-colors whitespace-nowrap"
 									onclick={() => handleSort(col.name)}
 								>
 									<div class="flex items-center gap-1.5">
 										{#if col.primary_key}
-											<Key class="w-3.5 h-3.5 text-amber-400" />
+											<Key size={13} class="text-amber-400" />
 										{/if}
 										<span>{col.name}</span>
 										{#if sortBy === col.name}
-											<span class="text-cyan-400 font-bold">{sortOrder === 'asc' ? '▲' : '▼'}</span>
+											<span class="text-[#d4ff32] font-bold">{sortOrder === 'asc' ? '▲' : '▼'}</span>
 										{/if}
-										<span class="text-xs text-slate-600 font-normal">({col.type})</span>
+										<span class="text-[10px] text-[#64748b] font-normal">({col.type})</span>
 									</div>
 								</th>
 							{/each}
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-[#1e293b]">
+					<tbody class="divide-y divide-[#252b3b]/60">
 						{#if data.rows.length === 0}
 							<tr>
-								<td colspan={data.columns.length + 1} class="py-8 text-center text-slate-500 font-mono">
+								<td colspan={data.columns.length + 1} class="py-10 text-center text-[#64748b] font-mono">
 									Table contains no rows.
 								</td>
 							</tr>
 						{:else}
 							{#each data.rows as row, idx (idx)}
-								<tr class="hover:bg-[#141c28] transition-colors">
+								<tr class="hover:bg-[#181c26]/60 transition-colors">
 									<td class="py-2.5 px-3 text-center whitespace-nowrap">
 										{#if user?.role !== 'read-only'}
 											<button
 												onclick={() => startEdit(row)}
-												class="p-1 border border-[#1e293b] hover:border-cyan-500 bg-[#121822] text-slate-400 hover:text-cyan-300 transition-colors"
+												class="p-1 border border-[#252b3b] hover:border-[#d4ff32] bg-[#0a0b0e] text-[#94a3b8] hover:text-[#d4ff32] rounded-xs transition-colors cursor-pointer"
 												title="Edit Row"
 											>
-												<Edit2 class="w-4 h-4" />
+												<Edit2 size={13} />
 											</button>
 										{:else}
-											<span class="text-xs text-slate-600" title="Read-only role">LOCK</span>
+											<span class="text-[10px] text-[#64748b]" title="Read-only role">LOCK</span>
 										{/if}
 									</td>
 									{#each data.columns as col (col.name)}
-										<td class="py-2.5 px-4 max-w-xs truncate text-slate-300 tabular-nums">
+										<td class="py-2.5 px-4 max-w-xs truncate text-[#e6edf3] tabular-nums">
 											{#if row[col.name] === null || row[col.name] === undefined}
-												<span class="text-slate-600 italic">NULL</span>
+												<span class="text-[#64748b] italic">NULL</span>
 											{:else if typeof row[col.name] === 'boolean'}
-												<span class="{row[col.name] ? 'text-emerald-400' : 'text-slate-500'} font-bold">
+												<span class="{row[col.name] ? 'text-[#10b981]' : 'text-[#64748b]'} font-bold">
 													{row[col.name] ? 'TRUE' : 'FALSE'}
 												</span>
 											{:else}
@@ -269,11 +283,11 @@
 			</div>
 
 			<!-- Pagination Footer -->
-			<div class="border-t border-[#1e293b] bg-[#0a0e14] px-4 py-3 flex items-center justify-between text-sm font-mono text-slate-400">
+			<div class="border-t border-[#252b3b] bg-[#0e1117] px-4 py-3 flex items-center justify-between text-xs font-mono text-[#64748b]">
 				<div>
-					Showing rows <span class="text-white font-medium">{offset + 1}</span>–<span class="text-white font-medium">
+					Showing rows <span class="text-[#f1f5f9] font-medium">{offset + 1}</span>–<span class="text-[#f1f5f9] font-medium">
 						{Math.min(offset + limit, data.total)}
-					</span> of <span class="text-white font-medium">{data.total}</span>
+					</span> of <span class="text-[#f1f5f9] font-medium">{data.total}</span>
 				</div>
 
 				<div class="flex items-center gap-2">
@@ -285,9 +299,9 @@
 							}
 						}}
 						disabled={offset === 0}
-						class="p-1.5 border border-[#1e293b] hover:border-slate-600 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300"
+						class="p-1.5 border border-[#252b3b] hover:border-[#64748b] disabled:opacity-30 disabled:cursor-not-allowed text-[#94a3b8] hover:text-white rounded-xs transition-colors cursor-pointer"
 					>
-						<ChevronLeft class="w-4 h-4" />
+						<ChevronLeft size={14} />
 					</button>
 
 					<span>Offset {offset}</span>
@@ -300,9 +314,9 @@
 							}
 						}}
 						disabled={offset + limit >= data.total}
-						class="p-1.5 border border-[#1e293b] hover:border-slate-600 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300"
+						class="p-1.5 border border-[#252b3b] hover:border-[#64748b] disabled:opacity-30 disabled:cursor-not-allowed text-[#94a3b8] hover:text-white rounded-xs transition-colors cursor-pointer"
 					>
-						<ChevronRight class="w-4 h-4" />
+						<ChevronRight size={14} />
 					</button>
 				</div>
 			</div>
@@ -312,78 +326,69 @@
 
 <!-- Row Editor Modal -->
 {#if editingRow && data}
-	<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
-		<div class="w-full max-w-xl border border-[#1e293b] bg-[#0f141d] p-6 shadow-2xl space-y-5 max-h-[90vh] flex flex-col">
-			<!-- Header -->
-			<div class="flex items-center justify-between border-b border-[#1e293b] pb-3">
-				<div>
-					<div class="text-xs font-mono uppercase tracking-widest text-cyan-400">[Row Editor]</div>
-					<h2 class="text-lg font-bold font-mono text-white uppercase">Table: {tableName}</h2>
-				</div>
-				<button onclick={cancelEdit} class="text-slate-500 hover:text-white">
-					<X class="w-4 h-4" />
-				</button>
+	<Modal
+		open={true}
+		title={`EDIT ROW: ${tableName}`}
+		description="Modify SQLite row values. Primary key values are immutable."
+		onClose={cancelEdit}
+	>
+		{#if saveError}
+			<div class="mb-4 p-3 border border-[#ef4444]/40 bg-[#ef4444]/10 text-[#fca5a5] text-xs font-mono rounded-xs">
+				{saveError}
 			</div>
+		{/if}
 
-			<!-- Error in editor -->
-			{#if saveError}
-				<div class="p-3 border border-red-500/40 bg-red-950/20 text-red-300 text-sm font-mono">
-					{saveError}
-				</div>
-			{/if}
-
-			<!-- Fields Form -->
-			<div class="space-y-3 overflow-y-auto flex-1 pr-1 font-mono text-sm">
-				{#each data.columns as col (col.name)}
-					<div class="space-y-1">
-						<div class="flex items-center justify-between text-slate-400 text-xs">
-							<span class="flex items-center gap-1 font-medium">
-								{#if col.primary_key}
-									<Key class="w-3.5 h-3.5 text-amber-400" />
-									<span class="text-amber-300">{col.name} (Primary Key)</span>
-								{:else}
-									<span class="text-slate-200">{col.name}</span>
-								{/if}
-							</span>
-							<span class="text-slate-600 text-xs">{col.type}</span>
-						</div>
-
-						{#if col.primary_key}
-							<input
-								type="text"
-								value={editingRow[col.name]}
-								disabled
-								class="w-full px-3 py-2 bg-[#080b10] border border-slate-800 text-slate-500 cursor-not-allowed text-sm"
-							/>
-						{:else}
-							<input
-								type="text"
-								bind:value={editUpdates[col.name]}
-								class="w-full px-3 py-2 bg-[#0a0e14] border border-[#1e293b] focus:border-cyan-500 text-white text-sm focus:outline-none"
-							/>
-						{/if}
+		<div class="space-y-3 font-mono text-xs sm:text-sm">
+			{#each data.columns as col (col.name)}
+				<div class="space-y-1">
+					<div class="flex items-center justify-between text-[#94a3b8] text-xs">
+						<span class="flex items-center gap-1 font-medium">
+							{#if col.primary_key}
+								<Key size={12} class="text-amber-400" />
+								<span class="text-amber-300">{col.name} (Primary Key)</span>
+							{:else}
+								<span class="text-[#f1f5f9]">{col.name}</span>
+							{/if}
+						</span>
+						<span class="text-[#64748b] text-[10px] uppercase">({col.type})</span>
 					</div>
-				{/each}
-			</div>
 
-			<!-- Actions -->
-			<div class="flex items-center justify-end gap-3 pt-3 border-t border-[#1e293b]">
+					{#if col.primary_key}
+						<input
+							type="text"
+							value={editingRow[col.name]}
+							disabled
+							class="w-full px-3 py-1.5 bg-[#0a0b0e] border border-[#252b3b] text-[#64748b] cursor-not-allowed text-xs rounded-xs"
+						/>
+					{:else}
+						<input
+							type="text"
+							bind:value={editUpdates[col.name]}
+							class="w-full px-3 py-1.5 bg-[#0a0b0e] border border-[#252b3b] focus:border-[#d4ff32] text-[#f1f5f9] text-xs rounded-xs focus:outline-none"
+						/>
+					{/if}
+				</div>
+			{/each}
+		</div>
+
+		{#snippet footer()}
+			<div class="flex items-center gap-2">
 				<button
 					onclick={cancelEdit}
 					disabled={isSaving}
-					class="px-4 py-2 border border-[#1e293b] bg-[#141c28] hover:bg-[#1a2536] text-slate-300 text-sm font-mono uppercase"
+					class="px-3.5 py-1.5 border border-[#252b3b] bg-[#181c26] hover:bg-[#252b3b] text-[#94a3b8] text-xs font-mono uppercase tracking-wider rounded-xs transition-colors cursor-pointer"
 				>
 					Cancel
 				</button>
 				<button
 					onclick={saveEdit}
 					disabled={isSaving}
-					class="flex items-center gap-2 px-4 py-2 border border-cyan-500 bg-cyan-600 hover:bg-cyan-500 text-black text-sm font-mono font-bold uppercase transition-colors"
+					class="flex items-center gap-1.5 px-4 py-1.5 border border-[#d4ff32]/50 bg-[#d4ff32] hover:bg-[#e2f952] text-black text-xs font-mono font-bold uppercase tracking-wider rounded-xs transition-all shadow-[0_0_15px_rgba(212,255,50,0.2)] cursor-pointer"
 				>
-					<Save class="w-4 h-4" />
+					<Save size={13} />
 					<span>{isSaving ? 'Saving...' : 'Save Updates'}</span>
 				</button>
 			</div>
-		</div>
-	</div>
+		{/snippet}
+	</Modal>
 {/if}

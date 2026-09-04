@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { serverStatus } from '$lib/server-status-store.svelte';
-	import { RefreshCw, Server, Moon, Zap, AlertTriangle, HelpCircle } from 'lucide-svelte';
+	import { RefreshCw, Moon, Zap, AlertTriangle, HelpCircle } from 'lucide-svelte';
 
 	onMount(() => {
 		serverStatus.startPolling(20000);
@@ -12,59 +12,53 @@
 	});
 
 	const status = $derived(serverStatus.data.status);
-	const state = $derived(serverStatus.data.state);
 	const region = $derived(serverStatus.data.region);
 	const machineId = $derived(serverStatus.data.machine_id);
 </script>
 
 <div class="flex items-center gap-2">
 	<div
-		class="flex items-center gap-2 px-3 py-1.5 border text-sm font-mono tracking-wide rounded-none transition-all duration-200 {status ===
+		class="flex items-center gap-2 px-2.5 py-1 border text-xs font-mono tracking-wider uppercase rounded-xs transition-all duration-200 {status ===
 		'awake'
-			? 'border-emerald-500/40 bg-emerald-950/20 text-emerald-400'
+			? 'border-[#10b981]/40 bg-[#10b981]/10 text-[#10b981]'
 			: status === 'sleeping'
-				? 'border-amber-500/40 bg-amber-950/20 text-amber-400'
+				? 'border-amber-500/40 bg-amber-500/10 text-amber-400'
 				: status === 'transitioning'
-					? 'border-yellow-500/40 bg-yellow-950/20 text-yellow-400'
+					? 'border-yellow-500/40 bg-yellow-500/10 text-yellow-400'
 					: status === 'unconfigured'
-						? 'border-slate-700 bg-slate-900/50 text-slate-400'
-						: 'border-red-500/40 bg-red-950/20 text-red-400'}"
+						? 'border-[#252b3b] bg-[#12151d] text-[#94a3b8]'
+						: 'border-[#ef4444]/40 bg-[#ef4444]/10 text-[#ef4444]'}"
 	>
 		<!-- Status Icon & Indicator -->
 		<div class="flex items-center gap-1.5">
 			{#if status === 'awake'}
-				<span class="relative flex h-2 w-2">
-					<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-					<span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-				</span>
-				<Zap class="w-4 h-4" />
-				<span class="font-bold uppercase">Awake</span>
+				<span class="w-1.5 h-1.5 rounded-full bg-[#10b981] animate-ping"></span>
+				<Zap size={12} />
+				<span class="font-bold">Awake</span>
 			{:else if status === 'sleeping'}
-				<span class="inline-block h-2 w-2 rounded-full bg-amber-500"></span>
-				<Moon class="w-4 h-4" />
-				<span class="font-bold uppercase">Standby (15m Idle)</span>
+				<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+				<Moon size={12} />
+				<span class="font-bold">Standby (0/15m)</span>
 			{:else if status === 'transitioning'}
-				<span class="inline-block h-2 w-2 rounded-full bg-yellow-500 animate-pulse"></span>
-				<RefreshCw class="w-4 h-4 animate-spin" />
-				<span class="font-bold uppercase">Transitioning</span>
+				<RefreshCw size={12} class="animate-spin" />
+				<span class="font-bold">Transitioning</span>
 			{:else if status === 'unconfigured'}
-				<HelpCircle class="w-4 h-4 text-slate-400" />
-				<span class="uppercase text-slate-400">Status: Setup Token</span>
+				<HelpCircle size={12} class="text-[#64748b]" />
+				<span>Unconfigured</span>
 			{:else}
-				<span class="inline-block h-2 w-2 rounded-full bg-red-500"></span>
-				<AlertTriangle class="w-4 h-4" />
-				<span class="font-bold uppercase">Offline</span>
+				<AlertTriangle size={12} />
+				<span class="font-bold">Offline</span>
 			{/if}
 		</div>
 
 		{#if region}
-			<span class="text-xs text-slate-400 border-l border-slate-700/60 pl-2">
+			<span class="text-[10px] text-[#64748b] border-l border-[#252b3b] pl-1.5 ml-0.5">
 				{region.toUpperCase()}
 			</span>
 		{/if}
 
 		{#if machineId}
-			<span class="text-xs text-slate-500 hidden sm:inline">
+			<span class="text-[10px] text-[#64748b] hidden sm:inline">
 				#{machineId.slice(0, 8)}
 			</span>
 		{/if}
@@ -75,8 +69,8 @@
 		onclick={() => serverStatus.checkStatus()}
 		disabled={serverStatus.isChecking}
 		title="Check VM state via Fly Machines API (Does not wake server)"
-		class="p-1.5 border border-[#1e293b] hover:border-slate-600 bg-[#0f141d] hover:bg-[#161e2b] text-slate-400 hover:text-white transition-colors"
+		class="p-1 border border-[#252b3b] hover:border-[#64748b] bg-[#12151d] hover:bg-[#181c26] text-[#94a3b8] hover:text-white rounded-xs transition-colors cursor-pointer"
 	>
-		<RefreshCw class="w-3.5 h-3.5 {serverStatus.isChecking ? 'animate-spin text-cyan-400' : ''}" />
+		<RefreshCw size={12} class={serverStatus.isChecking ? 'animate-spin text-[#d4ff32]' : ''} />
 	</button>
 </div>
