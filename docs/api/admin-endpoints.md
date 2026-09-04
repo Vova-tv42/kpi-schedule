@@ -110,3 +110,16 @@ If `X-Admin-Secret` is missing or invalid, the server responds with:
 }
 ```
 For non-SELECT queries (`UPDATE`, `INSERT`, `DELETE`), `columns` and `rows` are omitted and `rows_affected` indicates the number of affected rows.
+
+---
+
+## 3. Environment Variables (Main Server)
+
+Configure the following variables in `apps/server/.env` (local) or via `fly secrets set` (production):
+
+| Variable | Required | Description | Example / Default |
+| :--- | :---: | :--- | :--- |
+| `ADMIN_API_SECRET` | No | Secret required in `X-Admin-Secret` header for `/api/v1/admin/*` routes. | Falls back to `INTERNAL_API_TOKEN` |
+| `ADMIN_INGEST_URL` | No | Target URL of the Admin Dashboard's telemetry ingest endpoint. If unset, telemetry reporting is disabled. | `https://<admin-app>.vercel.app/api/ingest/action` |
+| `ADMIN_INGEST_KEY` | No | Secret key sent in `X-Ingest-Key` to authenticate telemetry payloads. | High-entropy random string matching `ADMIN_INGEST_KEY` in `apps/admin` |
+
