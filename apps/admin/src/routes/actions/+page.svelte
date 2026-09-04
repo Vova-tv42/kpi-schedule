@@ -205,6 +205,14 @@
 				>
 					CRON ALERTS
 				</button>
+				<button
+					onclick={() => setFilterType('admin_action')}
+					class="px-3 py-1.5 text-sm font-mono tracking-wide border transition-colors {filterType === 'admin_action'
+						? 'border-cyan-500 bg-cyan-950/30 text-cyan-300 font-bold'
+						: 'border-[#1e293b] bg-[#141c28] text-slate-400 hover:text-white'}"
+				>
+					ADMIN ACTIONS
+				</button>
 			</div>
 
 			<!-- Status Filter Pills -->
@@ -303,7 +311,9 @@
 												? 'border-emerald-500/40 bg-emerald-950/20 text-emerald-400'
 												: action.action_type === 'cron_alert'
 													? 'border-purple-500/40 bg-purple-950/20 text-purple-400'
-													: 'border-slate-700 bg-slate-800 text-slate-400'}"
+													: action.action_type === 'admin_action'
+														? 'border-amber-500/40 bg-amber-950/20 text-amber-400'
+														: 'border-slate-700 bg-slate-800 text-slate-400'}"
 									>
 										{action.action_type}
 									</span>

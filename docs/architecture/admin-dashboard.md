@@ -102,10 +102,16 @@ The system defines three privilege tiers:
 ## 4. Anonymous Action Telemetry & Retention Lifecycle
 
 ### 4.1 Non-Blocking Event Reporting
-- Whenever the Go main server processes a Telegram command, callback, browser extension schedule sync, or scheduled lesson alert, it is already awake.
+- Whenever the Go main server processes a Telegram command, callback, browser extension schedule sync, scheduled lesson alert, or mutating admin operation (table row updates, custom queries executed via the dashboard), it is already awake.
 - An asynchronous background goroutine dispatches an anonymous event payload to `POST /api/ingest/action` on the admin dashboard with header `X-Ingest-Key`.
+- **Supported Event Types**:
+  - `telegram_command`: Bot command invocations (e.g. `/today`, `/week`, `/settings`).
+  - `telegram_callback`: Inline button interactions.
+  - `extension_sync`: Schedule pushes from the browser extension.
+  - `cron_alert`: Periodic lesson reminder dispatches.
+  - `admin_action`: Dashboard-initiated SQLite mutations (`update_row:<table_name>`) and console executions (`custom_query`).
 - **Anonymity Guarantee**: All user-identifying attributes (Telegram IDs, user IDs, chat IDs, names, phone numbers, tokens) are strictly scrubbed before persistence.
-- **Resilience**: The telemetry call has a 1.5s timeout and executes in a detached goroutine (`go func() { ... }()`). If the ingestion endpoint is unreachable, the main server silently drops the event and continues normal operations without delay.
+- **Resilience**: The telemetry call has a 2s timeout and executes in a detached goroutine (`go func() { ... }()`). If the ingestion endpoint is unreachable, the main server silently drops the event and continues normal operations without delay.
 
 ### 4.2 Retention Window & Free Tier Cleanup
 - Telemetry events are stored in NeonDB's `recent_actions` table.

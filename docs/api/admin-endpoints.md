@@ -83,6 +83,7 @@ If `X-Admin-Secret` is missing or invalid, the server responds with:
   }
 }
 ```
+- **Telemetry**: Reports an anonymous `admin_action` event (`update_row:{table}`) with table metadata to the admin dashboard ingest endpoint.
 - **Response**: `200 OK`
 ```json
 {
@@ -94,6 +95,7 @@ If `X-Admin-Secret` is missing or invalid, the server responds with:
 - **Method**: `POST`
 - **Path**: `/api/v1/admin/query`
 - **Access**: `read-write`, `superadmin` (`read-only` receives `403 Forbidden`)
+- **Telemetry**: Reports an anonymous `admin_action` event (`custom_query`) with query snippet and rows metadata to the admin dashboard ingest endpoint.
 - **Body**:
 ```json
 {

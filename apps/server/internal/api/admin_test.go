@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"kpi-schedule-bot/server/internal/campus"
 	"kpi-schedule-bot/server/internal/storage"
+	"kpi-schedule-bot/server/internal/telemetry"
 )
 
 func setupTestRouter(t *testing.T, adminSecret string) (http.Handler, *storage.DB) {
@@ -164,5 +166,93 @@ func TestAdminRolePermissions(t *testing.T) {
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200 for read-write query, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminTelemetry(t *testing.T) {
+	var mu sync.Mutex
+	var reportedActions []telemetry.IngestPayload
+	received := make(chan struct{}, 10)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		var p telemetry.IngestPayload
+		_ = json.NewDecoder(r.Body).Decode(&p)
+		reportedActions = append(reportedActions, p)
+		w.WriteHeader(http.StatusOK)
+		received <- struct{}{}
+	}))
+	defer ts.Close()
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "admin_telemetry_test.db")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	db, err := storage.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("opening db: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.Exec(`
+		CREATE TABLE items (id TEXT PRIMARY KEY, val TEXT);
+		INSERT INTO items (id, val) VALUES ('1', 'old');
+	`)
+	if err != nil {
+		t.Fatalf("seeding db: %v", err)
+	}
+
+	campusClient := campus.NewClient(db)
+	svc := NewService(db, campusClient)
+	telemetryClient := telemetry.NewClient(ts.URL, "test-key")
+	router := NewRouterWithOpts(svc, "token", RouterOpts{
+		AdminSecret: "admin-sec",
+		Telemetry:   telemetryClient,
+	})
+
+	// 1. Trigger putAdminTableRow
+	updatePayload := []byte(`{"primary_key_column":"id","primary_key_value":"1","updates":{"val":"new"}}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/tables/items/row", bytes.NewReader(updatePayload))
+	req.Header.Set("X-Admin-Secret", "admin-sec")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for row update telemetry")
+	}
+
+	// 2. Trigger postAdminQuery
+	queryPayload := []byte(`{"query":"SELECT * FROM items"}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/query", bytes.NewReader(queryPayload))
+	req.Header.Set("X-Admin-Secret", "admin-sec")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for query telemetry")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(reportedActions) != 2 {
+		t.Fatalf("expected 2 telemetry reports, got %d", len(reportedActions))
+	}
+	if reportedActions[0].ActionType != "admin_action" || reportedActions[0].ActionName != "update_row:items" {
+		t.Errorf("unexpected action 0: %+v", reportedActions[0])
+	}
+	if reportedActions[1].ActionType != "admin_action" || reportedActions[1].ActionName != "custom_query" {
+		t.Errorf("unexpected action 1: %+v", reportedActions[1])
 	}
 }
