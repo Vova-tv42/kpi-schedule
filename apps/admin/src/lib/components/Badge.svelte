@@ -2,7 +2,7 @@
 	import type { Snippet } from 'svelte';
 
 	interface Props {
-		variant?: 'lime' | 'amber' | 'emerald' | 'crimson' | 'slate' | 'cyan';
+		variant?: 'lime' | 'amber' | 'emerald' | 'crimson' | 'slate' | 'cyan' | 'violet';
 		size?: 'sm' | 'md';
 		class?: string;
 		children?: Snippet;
@@ -16,7 +16,8 @@
 		emerald: 'bg-emerald-100 text-emerald-900 border-emerald-300 dark:bg-[#10b981]/10 dark:text-[#10b981] dark:border-[#10b981]/30',
 		crimson: 'bg-red-100 text-red-900 border-red-300 dark:bg-[#ef4444]/10 dark:text-[#ef4444] dark:border-[#ef4444]/30',
 		slate: 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-[#252b3b]/40 dark:text-[#94a3b8] dark:border-[#252b3b]',
-		cyan: 'bg-cyan-100 text-cyan-900 border-cyan-300 dark:bg-[#06b6d4]/10 dark:text-[#06b6d4] dark:border-[#06b6d4]/30'
+		cyan: 'bg-cyan-100 text-cyan-900 border-cyan-300 dark:bg-[#06b6d4]/10 dark:text-[#06b6d4] dark:border-[#06b6d4]/30',
+		violet: 'bg-violet-100 text-violet-900 border-violet-300 dark:bg-[#a78bfa]/10 dark:text-[#a78bfa] dark:border-[#a78bfa]/30'
 	};
 
 	const sizeStyles = {

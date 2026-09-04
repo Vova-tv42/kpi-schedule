@@ -24,9 +24,13 @@ Only admins change status, from the dashboard. Users read it.
 | `ready` | 📌 Ready for development | Accepted, queued for a future release. |
 | `in_development` | 🔨 In development | Being worked on now. |
 | `implemented` | ✅ Implemented | Shipped. |
+| `duplicate` | 🔁 Duplicate | Already filed by someone else. |
+| `rejected` | ⛔ Rejected | Considered and declined. |
 | `cancelled` | 🚫 Cancelled | Won't be done. |
 
 Types are fixed at creation and never change: `feature` (💡 Feature request), `bug` (🐞 Bug fix), `other` (📝 Other).
+
+A status change can carry an **optional note** from the admin — a single message explaining the decision, typically alongside `rejected` or `duplicate`. It arrives with the status DM and stays on the issue screen under *Note from the team*, so it can be re-read later. A note does **not** open a discussion; it is one-way. Writing a change with no note clears the previous one, so a stale explanation never outlives the status it explained.
 
 ## 3. Screen Flow
 
@@ -34,7 +38,8 @@ The whole wizard lives in **one bot message**, edited in place. Every answer the
 
 ```
 /issues  ─►  📮 Issues
-             ├─ 📋 My issues ──► list (5 per page) ──► issue view ──► 💬 Discussion
+             ├─ 📋 My issues ──► list (5 per page) ──► issue view ──┬─ 💬 Discussion
+             │                                                      └─ 🗑 Delete ──► confirm
              └─ ➕ New issue ──► type ──► title ──► description ──► ✅ created
 ```
 
@@ -68,6 +73,12 @@ You can track its status any time with /issues.
 
 Title ≤ 120 characters, description ≤ 3000 — both counted in **runes**, so Cyrillic input is not penalised. A rejected answer re-renders the same prompt with an `❌` error line above it rather than posting a new message, mirroring `formatURLPrompt`.
 
+### Deleting an issue
+
+The issue screen carries a `🗑 Delete` button. It never deletes on the first tap: it opens a confirmation screen (`🗑 Yes, delete it` / `◀️ Keep it`) that spells out that the issue and its whole discussion go permanently, for the reporter and the team alike. Confirming returns the user to their list.
+
+Deletion is scoped by authorship the same way viewing is — `authoredIssue` re-checks `author_telegram_id` before both the confirmation and the delete itself, so a guessed callback cannot destroy someone else's issue. Admins can delete from the dashboard too; see [admin-endpoints.md §2.10](../api/admin-endpoints.md).
+
 ## 4. Draft State & the 10-Minute TTL
 
 An in-flight wizard is a row in `user_issue_drafts`, keyed by `telegram_id` — one draft per user, so starting a new flow replaces the old one. Starting a wizard also clears any pending `/urls` or `/group` prompt, since free text now belongs to the wizard.
@@ -96,17 +107,32 @@ All buttons share the `iss:` prefix and one dispatcher handler (`onIssues`), fol
 | `iss:view:<page>:<uuid>` | One issue; the page rides along so `◀️ Back` returns where the user came from |
 | `iss:thr:<uuid>` | Discussion thread (see §6) |
 | `iss:reply:<uuid>` | Prompt for a thread reply (see §6) |
+| `iss:del:<page>:<uuid>` | Delete confirmation for one of the caller's own issues |
+| `iss:delok:<page>:<uuid>` | Confirmed delete, then back to the list page |
 
 Payloads stay well inside Telegram's 64-byte `callback_data` limit (`iss:view:0:` + a 36-character UUID = 47 bytes).
 
 ## 6. Discussion Threads
 
-Threads are **admin-initiated**, per the feature's spec. `issues.thread_open` starts false and flips true the first time an admin comments from the dashboard; only then does the user see a `💬 Discussion (N)` button on the issue view. A user cannot open a thread unilaterally — `iss:thr:` silently no-ops while `thread_open` is false, so a guessed callback cannot conjure one either.
+Threads are **admin-initiated**, per the feature's spec. `issues.thread_state` starts at `none` and moves to `open` the first time an admin comments from the dashboard; only then does the user see a `💬 Discussion (N)` button on the issue view. A user cannot open a thread unilaterally — `iss:thr:` silently no-ops while the state is `none`, so a guessed callback cannot conjure one either.
+
+An admin can also **close** a thread, and reopen it later:
+
+| `thread_state` | The reporter sees | Can reply? |
+| :--- | :--- | :---: |
+| `none` | No discussion button at all | — |
+| `open` | `💬 Discussion (N)` | ✅ |
+| `closed` | `🔒 Discussion (N)`, transcript prefaced with why writing stopped | ❌ |
+
+Closing is deliberately not deletion: the history stays fully readable, only the ability to add to it goes away.
 
 | Screen | Buttons |
 | :--- | :--- |
-| Thread (`iss:thr:<uuid>`) | `✍️ Reply`, `🔄 Refresh`, `◀️ Back` (→ issue view) |
+| Thread, open (`iss:thr:<uuid>`) | `✍️ Reply`, `🔄 Refresh`, `◀️ Back` (→ issue view) |
+| Thread, closed (`iss:thr:<uuid>`) | `🔄 Refresh`, `◀️ Back` — **no Reply** |
 | Reply prompt (`iss:reply:<uuid>`) | `◀️ Back` (→ thread), `✖️ Cancel` |
+
+The Reply gate is enforced in three places, not just by hiding the button: `iss:reply:` no-ops unless the state is `open`, and `handleIssueReplyInput` re-checks it before saving — a thread closed between the prompt and the answer drops the reply and shows the closed transcript instead.
 
 The thread renders the full history oldest-first, each message in a `<blockquote>`, attributed `👤 You` or `🛠 Team` — the admin's email is never shown to the user. Replies obey the same 3000-rune limit as issue bodies (`model.IssueCommentMaxLen`).
 
@@ -114,23 +140,26 @@ The thread renders the full history oldest-first, each message in a `<blockquote
 
 ### Notification DMs
 
-Both notifications are sent by [`issues_notify.go`](../../apps/server/internal/bot/issues_notify.go), which implements the `api.IssueNotifier` interface. The interface is declared in `internal/api` and satisfied by `*bot.Bot` because `internal/bot` already imports `internal/api` — wiring it the other way round would be an import cycle. It is injected in `cmd/server/main.go` (`svc.SetIssueNotifier(tgBot)`) and left nil when the bot is disabled, in which case the notify helpers are no-ops.
+All three notifications are sent by [`issues_notify.go`](../../apps/server/internal/bot/issues_notify.go), which implements the `api.IssueNotifier` interface. The interface is declared in `internal/api` and satisfied by `*bot.Bot` because `internal/bot` already imports `internal/api` — wiring it the other way round would be an import cycle. It is injected in `cmd/server/main.go` (`svc.SetIssueNotifier(tgBot)`) and left nil when the bot is disabled, in which case the notify helpers are no-ops.
 
 Delivery is **best-effort**: a Telegram failure is logged and the admin's HTTP request still succeeds, because the comment or status change is already committed. A blocked bot or a deleted chat must not break the dashboard.
 
 | Trigger | DM |
 | :--- | :--- |
 | Admin posts a comment | *💬 New reply on your issue*, the headline, and the quoted message; button `💬 Open discussion` → `iss:thr:<uuid>` |
-| Admin changes the status | *🔄 Issue status changed*, the headline, and `🕓 On review → 🔨 In development`; button `📄 Open issue` → `iss:view:0:<uuid>` |
+| Admin changes the status | *🔄 Issue status changed*, the headline, and `🕓 On review → ⛔ Rejected` — plus the optional note under *Note from the team*; button `📄 Open issue` → `iss:view:0:<uuid>` |
+| Admin closes or reopens the thread | *🔒 Discussion closed* / *💬 Discussion reopened*, the headline, and what it means for replying; button `💬 Open discussion` |
 
-Re-applying a status an issue already has sends nothing — the endpoint short-circuits before notifying (see [admin-endpoints.md §2.7](../api/admin-endpoints.md)).
+Re-applying a status, or a thread state, an issue already has sends nothing — the endpoints short-circuit before notifying (see [admin-endpoints.md §2.7 and §2.9](../api/admin-endpoints.md)).
+
+Deletion is the exception: it sends **no** DM at all. An issue the reporter can no longer open is not something a message usefully explains, and admin-side deletion is normally spam cleanup.
 
 Both sides see the same transcript: the user in the bot, admins on the dashboard's issue page. See [admin-endpoints.md](../api/admin-endpoints.md) for the endpoints behind it.
 
 ## 7. Storage
 
-Three tables, all added by `00007_issues.sql`; column-level detail lives in [data-storage.md §2.3](../architecture/data-storage.md).
+Three tables, added by `00007_issues.sql` and reshaped by `00008_issue_thread_state.sql`; column-level detail lives in [data-storage.md §2.3](../architecture/data-storage.md).
 
-- `issues` — one row per report. `number` is the public `#N`: a single global sequence assigned inside the insert transaction as `MAX(number) + 1`, safe because the SQLite pool is capped at one connection, with a `UNIQUE` constraint as backstop.
-- `issue_comments` — the discussion transcript, `ON DELETE CASCADE` from `issues`.
+- `issues` — one row per report. `number` is the public `#N`: a single global sequence assigned inside the insert transaction as `MAX(number) + 1`, safe because the SQLite pool is capped at one connection, with a `UNIQUE` constraint as backstop. `00008_issue_thread_state.sql` later widened the `status` CHECK (`duplicate`, `rejected`), replaced `thread_open` with `thread_state`, and added `status_note`.
+- `issue_comments` — the discussion transcript, `ON DELETE CASCADE` from `issues`, so deleting an issue takes its thread with it.
 - `user_issue_drafts` — in-flight wizard state (§4).

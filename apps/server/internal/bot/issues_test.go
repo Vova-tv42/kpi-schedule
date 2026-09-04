@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/google/uuid"
 
 	"kpi-schedule-bot/server/internal/model"
@@ -19,6 +20,7 @@ func sampleIssue(number int, title string) model.Issue {
 		Title:            title,
 		Body:             "Body text",
 		Status:           model.IssueOnReview,
+		ThreadState:      model.IssueThreadNone,
 		CreatedAt:        time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC),
 	}
 }
@@ -174,19 +176,19 @@ func TestFormatIssueListEmptyState(t *testing.T) {
 	}
 }
 
-// The discussion button only exists once an admin has opened a thread.
-func TestIssueViewKeyboardHidesClosedThread(t *testing.T) {
+// The discussion button only exists once an admin has started a thread.
+func TestIssueViewKeyboardHidesUnstartedThread(t *testing.T) {
 	issue := sampleIssue(5, "Week view crashes")
 
 	for _, row := range issueViewKeyboard(issue, 0, 0).InlineKeyboard {
 		for _, btn := range row {
 			if strings.Contains(btn.Text, "Discussion") {
-				t.Error("discussion button should be hidden while the thread is closed")
+				t.Error("discussion button should be hidden until a thread is started")
 			}
 		}
 	}
 
-	issue.ThreadOpen = true
+	issue.ThreadState = model.IssueThreadOpen
 	found := false
 	for _, row := range issueViewKeyboard(issue, 3, 2).InlineKeyboard {
 		for _, btn := range row {
@@ -307,6 +309,150 @@ func TestIssueNotificationsDeepLinkToTheRightScreen(t *testing.T) {
 	for _, data := range []string{commentBtn.CallbackData, statusBtn.CallbackData} {
 		if len(data) > 64 {
 			t.Errorf("callback_data %q exceeds Telegram's 64-byte limit", data)
+		}
+	}
+}
+
+func TestIssueStatusLabelsCoverEveryStatus(t *testing.T) {
+	all := []model.IssueStatus{
+		model.IssueOnReview, model.IssueReady, model.IssueInDevelopment,
+		model.IssueImplemented, model.IssueDuplicate, model.IssueRejected, model.IssueCancelled,
+	}
+	seen := map[string]bool{}
+	for _, status := range all {
+		label := issueStatusLabel(status)
+		if seen[label] {
+			t.Errorf("status %q reuses the label %q of another status", status, label)
+		}
+		seen[label] = true
+	}
+	if got := issueStatusLabel(model.IssueRejected); !strings.Contains(got, "Rejected") {
+		t.Errorf("rejected label = %q", got)
+	}
+	if got := issueStatusLabel(model.IssueDuplicate); !strings.Contains(got, "Duplicate") {
+		t.Errorf("duplicate label = %q", got)
+	}
+}
+
+func TestIssueViewShowsStatusNote(t *testing.T) {
+	issue := sampleIssue(9, "Add calendar export")
+	issue.Status = model.IssueRejected
+	issue.StatusNote = "Out of scope <for now>"
+
+	text := formatIssueView(issue, 0)
+	if !strings.Contains(text, "Note from the team") {
+		t.Errorf("expected the status note to be shown on the issue:\n%s", text)
+	}
+	if !strings.Contains(text, "Out of scope &lt;for now&gt;") {
+		t.Errorf("expected the note to be HTML-escaped:\n%s", text)
+	}
+
+	// An issue with no note must not grow an empty section.
+	issue.StatusNote = ""
+	if strings.Contains(formatIssueView(issue, 0), "Note from the team") {
+		t.Error("expected no note section when there is no note")
+	}
+}
+
+func TestIssueStatusNotificationCarriesTheNote(t *testing.T) {
+	issue := sampleIssue(9, "Add calendar export")
+	issue.Status = model.IssueRejected
+	issue.StatusNote = "Duplicate of #4"
+
+	text := formatIssueStatusNotification(issue, model.IssueOnReview)
+	if !strings.Contains(text, "Duplicate of #4") {
+		t.Errorf("expected the note in the status DM:\n%s", text)
+	}
+
+	issue.StatusNote = ""
+	if strings.Contains(formatIssueStatusNotification(issue, model.IssueOnReview), "Note from the team") {
+		t.Error("expected no note section in a plain status DM")
+	}
+}
+
+func TestClosedThreadHidesReply(t *testing.T) {
+	issue := sampleIssue(9, "Add calendar export")
+	issue.ThreadState = model.IssueThreadOpen
+
+	hasReply := func(kb gotgbot.InlineKeyboardMarkup) bool {
+		for _, row := range kb.InlineKeyboard {
+			for _, btn := range row {
+				if strings.Contains(btn.Text, "Reply") {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	if !hasReply(issueThreadKeyboard(issue)) {
+		t.Error("an open thread must offer Reply")
+	}
+
+	issue.ThreadState = model.IssueThreadClosed
+	if hasReply(issueThreadKeyboard(issue)) {
+		t.Error("a closed thread must not offer Reply")
+	}
+
+	// The transcript stays reachable, and says why writing stopped.
+	text := formatIssueThread(issue, []model.IssueComment{
+		{AuthorRole: model.IssueCommentAdmin, Body: "Thanks!"},
+	})
+	if !strings.Contains(text, "closed") {
+		t.Errorf("a closed thread should say so:\n%s", text)
+	}
+	if !strings.Contains(text, "Thanks!") {
+		t.Errorf("a closed thread must still show its history:\n%s", text)
+	}
+
+	// The issue screen keeps a padlocked entry point into the closed thread.
+	var found bool
+	for _, row := range issueViewKeyboard(issue, 2, 0).InlineKeyboard {
+		for _, btn := range row {
+			if strings.Contains(btn.Text, "Discussion (2)") {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("a closed discussion should still be reachable from the issue")
+	}
+}
+
+func TestIssueDeleteConfirmation(t *testing.T) {
+	issue := sampleIssue(9, "Add calendar export")
+
+	// The issue screen offers Delete, but only via a confirmation step.
+	var deleteData string
+	for _, row := range issueViewKeyboard(issue, 0, 3).InlineKeyboard {
+		for _, btn := range row {
+			if strings.Contains(btn.Text, "Delete") {
+				deleteData = btn.CallbackData
+			}
+		}
+	}
+	if deleteData != "iss:del:3:"+issue.ID.String() {
+		t.Fatalf("delete callback = %q", deleteData)
+	}
+
+	text := formatIssueDeleteConfirm(issue)
+	if !strings.Contains(text, "cannot be undone") {
+		t.Errorf("the confirmation should warn that deletion is permanent:\n%s", text)
+	}
+
+	kb := issueDeleteConfirmKeyboard(issue, 3)
+	if got := kb.InlineKeyboard[0][0].CallbackData; got != "iss:delok:3:"+issue.ID.String() {
+		t.Errorf("confirm callback = %q", got)
+	}
+	// Backing out returns to the issue on the page it was opened from.
+	if got := kb.InlineKeyboard[1][0].CallbackData; got != "iss:view:3:"+issue.ID.String() {
+		t.Errorf("keep-it callback = %q", got)
+	}
+	for _, row := range kb.InlineKeyboard {
+		for _, btn := range row {
+			if len(btn.CallbackData) > 64 {
+				t.Errorf("callback_data %q exceeds Telegram's 64-byte limit", btn.CallbackData)
+			}
 		}
 	}
 }

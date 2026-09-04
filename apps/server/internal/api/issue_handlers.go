@@ -29,7 +29,8 @@ type issueView struct {
 	Body             string    `json:"body"`
 	Status           string    `json:"status"`
 	StatusBy         string    `json:"status_by"`
-	ThreadOpen       bool      `json:"thread_open"`
+	StatusNote       string    `json:"status_note"`
+	ThreadState      string    `json:"thread_state"`
 	CommentCount     int       `json:"comment_count"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
@@ -55,7 +56,8 @@ func toIssueView(issue model.Issue, commentCount int) issueView {
 		Body:             issue.Body,
 		Status:           string(issue.Status),
 		StatusBy:         issue.StatusBy,
-		ThreadOpen:       issue.ThreadOpen,
+		StatusNote:       issue.StatusNote,
+		ThreadState:      string(issue.ThreadState),
 		CommentCount:     commentCount,
 		CreatedAt:        issue.CreatedAt,
 		UpdatedAt:        issue.UpdatedAt,
@@ -74,6 +76,13 @@ func toIssueCommentView(c model.IssueComment) issueCommentView {
 
 type updateIssueStatusRequest struct {
 	Status string `json:"status"`
+	// Note is the optional explanation delivered to the reporter alongside the
+	// status DM — a way to say "rejected because…" without opening a thread.
+	Note string `json:"note"`
+}
+
+type updateIssueThreadRequest struct {
+	State string `json:"state"`
 }
 
 type createIssueCommentRequest struct {
@@ -212,15 +221,29 @@ func (h *handlers) patchAdminIssueStatus(w http.ResponseWriter, r *http.Request)
 		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "unknown status: "+req.Status)
 		return
 	}
+	note := strings.TrimSpace(req.Note)
+	if len([]rune(note)) > model.IssueCommentMaxLen {
+		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest,
+			"note is too long, keep it under "+strconv.Itoa(model.IssueCommentMaxLen)+" characters")
+		return
+	}
 
 	next := model.IssueStatus(req.Status)
 	if next == issue.Status {
+		// A note only ever travels with a status change. Silently dropping one
+		// the admin typed would be worse than refusing it, so say what to do
+		// instead rather than pretending the request succeeded.
+		if note != "" {
+			model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest,
+				"status is unchanged; use the discussion thread to message the reporter without changing the status")
+			return
+		}
 		// Nothing changed; don't notify the reporter about a no-op.
 		writeJSON(w, http.StatusOK, map[string]any{"issue": toIssueView(issue, 0), "changed": false})
 		return
 	}
 
-	if err := h.svc.DB().UpdateIssueStatus(r.Context(), issue.ID, next, adminEmail(r)); err != nil {
+	if err := h.svc.DB().UpdateIssueStatus(r.Context(), issue.ID, next, note, adminEmail(r)); err != nil {
 		if h.telemetry != nil {
 			h.telemetry.ReportAction("admin_action", "issue_status:"+req.Status, http.StatusInternalServerError, time.Since(start).Milliseconds(), nil)
 		}
@@ -231,6 +254,7 @@ func (h *handlers) patchAdminIssueStatus(w http.ResponseWriter, r *http.Request)
 	previous := issue.Status
 	issue.Status = next
 	issue.StatusBy = adminEmail(r)
+	issue.StatusNote = note
 	h.svc.NotifyIssueStatus(r.Context(), issue, previous)
 
 	if h.telemetry != nil {
@@ -267,6 +291,15 @@ func (h *handlers) postAdminIssueComment(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Posting into a closed thread would silently resurrect it for the
+	// reporter, who was told the discussion had ended. Reopening is a separate,
+	// deliberate action.
+	if issue.ThreadState == model.IssueThreadClosed {
+		model.WriteError(w, http.StatusConflict, model.ErrInvalidRequest,
+			"the discussion is closed; reopen it before replying")
+		return
+	}
+
 	comment, err := h.svc.DB().AddIssueComment(r.Context(), model.IssueComment{
 		IssueID:     issue.ID,
 		AuthorRole:  model.IssueCommentAdmin,
@@ -282,11 +315,11 @@ func (h *handlers) postAdminIssueComment(w http.ResponseWriter, r *http.Request)
 	}
 
 	// The first admin comment is what opens the thread for the reporter.
-	if !issue.ThreadOpen {
-		if err := h.svc.DB().SetIssueThreadOpen(r.Context(), issue.ID, true); err != nil {
+	if !issue.ThreadState.Started() {
+		if err := h.svc.DB().SetIssueThreadState(r.Context(), issue.ID, model.IssueThreadOpen); err != nil {
 			slog.Error("opening issue thread", "error", err, "issue_id", issue.ID)
 		} else {
-			issue.ThreadOpen = true
+			issue.ThreadState = model.IssueThreadOpen
 		}
 	}
 
@@ -297,4 +330,85 @@ func (h *handlers) postAdminIssueComment(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{"comment": toIssueCommentView(comment)})
+}
+
+// patchAdminIssueThread opens, closes or reopens a discussion. Closing leaves
+// the transcript readable to the reporter but stops them replying; the thread
+// cannot be pushed back to "none", since a thread with history is not one that
+// never existed.
+func (h *handlers) patchAdminIssueThread(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+
+	issue, ok := h.issueFromPath(w, r)
+	if !ok {
+		return
+	}
+
+	var req updateIssueThreadRequest
+	if err := decodeJSON(r, &req); err != nil {
+		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "invalid JSON payload")
+		return
+	}
+
+	next := model.IssueThreadState(req.State)
+	if next != model.IssueThreadOpen && next != model.IssueThreadClosed {
+		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest,
+			`state must be "open" or "closed"`)
+		return
+	}
+	if next == model.IssueThreadClosed && !issue.ThreadState.Started() {
+		model.WriteError(w, http.StatusConflict, model.ErrInvalidRequest,
+			"there is no discussion to close yet")
+		return
+	}
+
+	if next == issue.ThreadState {
+		writeJSON(w, http.StatusOK, map[string]any{"issue": toIssueView(issue, 0), "changed": false})
+		return
+	}
+
+	if err := h.svc.DB().SetIssueThreadState(r.Context(), issue.ID, next); err != nil {
+		model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, err.Error())
+		return
+	}
+
+	previous := issue.ThreadState
+	issue.ThreadState = next
+	h.svc.NotifyIssueThreadState(r.Context(), issue, previous)
+
+	if h.telemetry != nil {
+		h.telemetry.ReportAction("admin_action", "issue_thread:"+req.State, http.StatusOK, time.Since(start).Milliseconds(), nil)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"issue": toIssueView(issue, 0), "changed": true})
+}
+
+// deleteAdminIssue removes an issue and its whole discussion permanently. The
+// reporter is not notified: an issue they can no longer see is not something a
+// DM can usefully explain, and a deletion is usually spam cleanup.
+func (h *handlers) deleteAdminIssue(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+
+	issue, ok := h.issueFromPath(w, r)
+	if !ok {
+		return
+	}
+
+	if err := h.svc.DB().DeleteIssue(r.Context(), issue.ID); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			model.WriteError(w, http.StatusNotFound, model.ErrIssueNotFound, "issue not found")
+			return
+		}
+		if h.telemetry != nil {
+			h.telemetry.ReportAction("admin_action", "issue_delete", http.StatusInternalServerError, time.Since(start).Milliseconds(), nil)
+		}
+		model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, err.Error())
+		return
+	}
+
+	if h.telemetry != nil {
+		h.telemetry.ReportAction("admin_action", "issue_delete", http.StatusOK, time.Since(start).Milliseconds(), nil)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }

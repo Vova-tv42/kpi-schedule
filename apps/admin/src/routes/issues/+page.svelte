@@ -6,6 +6,7 @@
 		RefreshCw,
 		Search,
 		MessageSquare,
+		MessageSquareOff,
 		ChevronLeft,
 		ChevronRight,
 		Lock
@@ -19,6 +20,7 @@
 		typeLabel,
 		reporterLabel,
 		formatIssueDate,
+		threadStarted,
 		type Issue
 	} from '$lib/issues';
 
@@ -235,8 +237,15 @@
 									</a>
 								</td>
 								<td class="py-3 px-4 whitespace-nowrap text-slate-500 dark:text-[#64748b]">
-									<a href="/issues/{issue.id}" class="flex items-center gap-1.5">
-										{#if issue.thread_open}
+									<a
+										href="/issues/{issue.id}"
+										class="flex items-center gap-1.5"
+										title={issue.thread_state === 'closed' ? 'Discussion closed' : undefined}
+									>
+										{#if issue.thread_state === 'closed'}
+											<MessageSquareOff size={13} class="text-slate-400 dark:text-[#64748b]" />
+											<span class="tabular-nums">{issue.comment_count}</span>
+										{:else if threadStarted(issue.thread_state)}
 											<MessageSquare size={13} class="text-sky-600 dark:text-[#06b6d4]" />
 											<span class="tabular-nums">{issue.comment_count}</span>
 										{:else}

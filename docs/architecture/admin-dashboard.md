@@ -74,14 +74,16 @@ The system defines three privilege tiers:
 | View SQLite Database Tables & Rows | ✅ | ✅ | ✅ |
 | Edit Database Table Rows | ✅ | ✅ | ❌ |
 | View Issue Queue & Discussion Threads | ✅ | ✅ | ✅ |
-| Change Issue Status | ✅ | ✅ | ❌ |
+| Change Issue Status (with an optional note) | ✅ | ✅ | ❌ |
 | Reply in an Issue Thread | ✅ | ✅ | ❌ |
+| Close / Reopen an Issue Thread | ✅ | ✅ | ❌ |
+| Delete an Issue | ✅ | ✅ | ❌ |
 | Run Custom SQL Queries | ✅ | ✅ | ❌ |
 | Add / Update / Delete Admins | ✅ | ❌ | ❌ |
 | Adjust Retention Settings | ✅ | ✅ | ❌ |
 | Trigger Manual Cleanup | ✅ | ✅ | ❌ |
 
-- **Protection of Issue Writes**: For `read-only` users, the status control and the thread composer are replaced by a lock affordance, the proxy route returns `403 Forbidden` before calling the main server, and the main server rejects the call again via `adminWritePermissionMiddleware`. Reading the queue and the full thread stays open to every role — triage is a team activity, and a read-only admin still needs the context.
+- **Protection of Issue Writes**: For `read-only` users, the status control, the thread composer, the close/reopen button and the delete action are all hidden or replaced by a lock affordance, the proxy route returns `403 Forbidden` before calling the main server, and the main server rejects the call again via `adminWritePermissionMiddleware`. Reading the queue and the full thread stays open to every role — triage is a team activity, and a read-only admin still needs the context.
 - **Protection of Custom Queries**: For `read-only` users, the Custom Query console is completely disabled in the UI and blocked at the API layer with `403 Forbidden`.
 - **Immediate Session Revocation**: When an admin's role is updated or their account is deleted by the superadmin, all their active sessions in `admin_sessions` are immediately purged.
 
@@ -184,14 +186,20 @@ The Issue Queue is the triage surface for bug reports and feature requests filed
 | Route | Purpose |
 | :--- | :--- |
 | `/issues` | Queue table: `#N`, title, type, reporter, status badge, thread indicator, filing date. Status tabs (with per-status counts), a type filter, free-text search over title and body, and 25-per-page paging. |
-| `/issues/[id]` | Issue detail: metadata strip, full body, the status control, and the discussion thread with its composer. |
+| `/issues/[id]` | Issue detail: metadata strip, full body, the status control with its optional note, the discussion thread with its composer and close/reopen control, and the delete action. |
 | `/api/issues` | `GET` proxy → `/api/v1/admin/issues`. |
-| `/api/issues/[id]` | `GET` proxy → the issue and its thread; `PATCH` → the status endpoint; `POST` → a new admin comment. |
+| `/api/issues/[id]` | `GET` proxy → the issue and its thread; `PATCH` → the status endpoint; `POST` → a new admin comment; `DELETE` → remove the issue. |
+| `/api/issues/[id]/thread` | `PATCH` proxy → close or reopen the discussion. |
 
 Neither page has a `+page.server.ts`: `hooks.server.ts` already blocks unauthenticated requests globally, and the pages read `page.data.user` from the root layout, matching `/database/[table]`.
 
-Two side effects are visible to the reporter, and the UI says so:
+Most actions here are visible to the reporter, and the UI says so:
 - **Saving a status** DMs them the change. The Save button is disabled until the selection actually differs, and re-sending an unchanged status is a no-op server-side, so an accidental double-save never produces a second DM.
-- **Sending a reply** opens the discussion thread in the bot — threads are admin-initiated, so the reporter cannot start one. The header states this while `thread_open` is false. The composer enforces the same 3000-character limit as the bot and the API.
+- **The optional note** beside the status control is a one-way explanation ("rejected because…") delivered with that DM and kept on the reporter's issue screen. It does not open a discussion. The field is disabled until the status actually changes, mirroring the server, which refuses a note without a change rather than dropping it silently. It resets on every load, because it belongs to the change being composed rather than to the issue.
+- **Sending a reply** opens the discussion thread in the bot — threads are admin-initiated, so the reporter cannot start one. The header states this while `thread_state` is `none`. The composer enforces the same 3000-character limit as the bot and the API.
+- **Close Discussion** stops the reporter replying while leaving the transcript readable to them, and can be reopened; both directions DM them. While closed, the composer is replaced by a lock notice — the server returns `409` on a reply into a closed thread, so reopening is always a deliberate act.
+- **Delete** is behind a `Modal` confirmation that names the issue and its message count, and states plainly that the reporter is *not* notified. On success the page navigates back to the queue, since nothing is left at that URL.
 
-Status vocabulary, badge palette and label fallbacks live in [`src/lib/issues.ts`](../../apps/admin/src/lib/issues.ts), the one place to update when a status is added on the server; an unrecognised value renders as its raw wire value rather than an empty cell.
+The queue's thread column distinguishes the three states: a muted `MessageSquareOff` for a closed discussion, a cyan `MessageSquare` for an open one, and an em dash when none was ever started.
+
+Status vocabulary, badge palette and label fallbacks live in [`src/lib/issues.ts`](../../apps/admin/src/lib/issues.ts), the one place to update when a status is added on the server; an unrecognised value renders as its raw wire value rather than an empty cell. `duplicate` uses the `violet` Badge variant added for it; `rejected` shares `crimson` with `cancelled`, since both are terminal refusals and the label already tells them apart.

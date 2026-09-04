@@ -51,3 +51,21 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
 
 	return json(result.data, { status: result.status });
 };
+
+// Deletes the issue and its whole discussion. Irreversible, so the page asks
+// for confirmation before calling this.
+export const DELETE: RequestHandler = async ({ params, locals }) => {
+	if (!locals.user) {
+		return json({ error: 'Unauthorized' }, { status: 401 });
+	}
+
+	if (locals.user.role === 'read-only') {
+		return json({ error: 'Forbidden: Read-only role cannot delete issues' }, { status: 403 });
+	}
+
+	const result = await fetchMainServer(`/api/v1/admin/issues/${params.id}`, locals.user, {
+		method: 'DELETE'
+	});
+
+	return json(result.data, { status: result.status });
+};

@@ -5,7 +5,8 @@ import {
 	statusLabel,
 	statusVariant,
 	typeLabel,
-	reporterLabel
+	reporterLabel,
+	threadStarted
 } from './issues';
 
 describe('Issue queue vocabulary', () => {
@@ -16,14 +17,34 @@ describe('Issue queue vocabulary', () => {
 			'ready',
 			'in_development',
 			'implemented',
+			'duplicate',
+			'rejected',
 			'cancelled'
 		]);
 		expect(ISSUE_TYPES.map((t) => t.value)).toEqual(['feature', 'bug', 'other']);
 	});
 
-	it('gives every status a distinct badge variant', () => {
+	it('gives every status a badge variant Badge.svelte knows', () => {
+		const known = ['lime', 'amber', 'emerald', 'crimson', 'slate', 'cyan', 'violet'];
+		for (const status of ISSUE_STATUSES) {
+			expect(known).toContain(statusVariant(status.value));
+		}
+		// 'rejected' and 'cancelled' intentionally share crimson (both are
+		// terminal refusals); nothing else may collide.
 		const variants = ISSUE_STATUSES.map((s) => statusVariant(s.value));
-		expect(new Set(variants).size).toBe(ISSUE_STATUSES.length);
+		expect(new Set(variants).size).toBe(ISSUE_STATUSES.length - 1);
+		expect(statusVariant('rejected')).toBe(statusVariant('cancelled'));
+		expect(statusVariant('duplicate')).not.toBe(statusVariant('on_review'));
+	});
+
+	it('treats a closed discussion as one that exists', () => {
+		// The reporter keeps read access to a closed thread, so both states
+		// count as started — only 'none' hides the discussion entirely.
+		expect(threadStarted('open')).toBe(true);
+		expect(threadStarted('closed')).toBe(true);
+		expect(threadStarted('none')).toBe(false);
+		// The zero value of an unpopulated field must not fake a thread.
+		expect(threadStarted('')).toBe(false);
 	});
 
 	it('falls back to the raw value for anything unrecognised', () => {

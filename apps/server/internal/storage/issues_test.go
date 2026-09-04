@@ -41,7 +41,7 @@ func TestCreateIssueAssignsSequentialNumbers(t *testing.T) {
 	if first.Status != model.IssueOnReview {
 		t.Errorf("expected new issue to start on_review, got %q", first.Status)
 	}
-	if first.ThreadOpen {
+	if first.ThreadState != model.IssueThreadNone {
 		t.Error("expected new issue to have no discussion thread")
 	}
 
@@ -107,7 +107,7 @@ func TestUpdateIssueStatusAndFilters(t *testing.T) {
 	bug := createTestIssue(t, db, telegramID, "Week view crashes", model.IssueTypeBug)
 	createTestIssue(t, db, telegramID, "Calendar export", model.IssueTypeFeature)
 
-	if err := db.UpdateIssueStatus(ctx, bug.ID, model.IssueInDevelopment, "admin@example.com"); err != nil {
+	if err := db.UpdateIssueStatus(ctx, bug.ID, model.IssueInDevelopment, "", "admin@example.com"); err != nil {
 		t.Fatalf("UpdateIssueStatus: %v", err)
 	}
 	updated, err := db.GetIssueByID(ctx, bug.ID)
@@ -121,7 +121,7 @@ func TestUpdateIssueStatusAndFilters(t *testing.T) {
 		t.Errorf("status_by = %q, want admin@example.com", updated.StatusBy)
 	}
 
-	if err := db.UpdateIssueStatus(ctx, uuid.New(), model.IssueReady, "admin@example.com"); !errors.Is(err, ErrNotFound) {
+	if err := db.UpdateIssueStatus(ctx, uuid.New(), model.IssueReady, "", "admin@example.com"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("UpdateIssueStatus(unknown) error = %v, want ErrNotFound", err)
 	}
 
@@ -202,14 +202,14 @@ func TestIssueCommentsAndThreadFlag(t *testing.T) {
 		t.Errorf("CountIssueComments = %d, want 2", n)
 	}
 
-	if err := db.SetIssueThreadOpen(ctx, issue.ID, true); err != nil {
+	if err := db.SetIssueThreadState(ctx, issue.ID, model.IssueThreadOpen); err != nil {
 		t.Fatalf("SetIssueThreadOpen: %v", err)
 	}
 	reloaded, err := db.GetIssueByID(ctx, issue.ID)
 	if err != nil {
 		t.Fatalf("GetIssueByID: %v", err)
 	}
-	if !reloaded.ThreadOpen {
+	if reloaded.ThreadState != model.IssueThreadOpen {
 		t.Error("expected thread_open to be true after SetIssueThreadOpen")
 	}
 	if !reloaded.UpdatedAt.After(issue.UpdatedAt) && !reloaded.UpdatedAt.Equal(issue.UpdatedAt) {
@@ -326,5 +326,158 @@ func TestIssueDraftExpiry(t *testing.T) {
 	}
 	if len(remaining) != 0 {
 		t.Errorf("expected the expired row to be gone, got %+v", remaining)
+	}
+}
+
+func TestDeleteIssueRemovesCommentsAndDrafts(t *testing.T) {
+	db, _, telegramID := setupTestDB(t)
+	ctx := context.Background()
+
+	issue, err := db.CreateIssue(ctx, model.Issue{
+		AuthorTelegramID: telegramID,
+		Type:             model.IssueTypeBug,
+		Title:            "Crash on /today",
+		Body:             "It crashes.",
+	})
+	if err != nil {
+		t.Fatalf("creating issue: %v", err)
+	}
+	keep, err := db.CreateIssue(ctx, model.Issue{
+		AuthorTelegramID: telegramID,
+		Type:             model.IssueTypeOther,
+		Title:            "Untouched",
+		Body:             "Stays.",
+	})
+	if err != nil {
+		t.Fatalf("creating second issue: %v", err)
+	}
+
+	if _, err := db.AddIssueComment(ctx, model.IssueComment{
+		IssueID: issue.ID, AuthorRole: model.IssueCommentAdmin, Body: "A question",
+	}); err != nil {
+		t.Fatalf("adding comment: %v", err)
+	}
+	if _, err := db.AddIssueComment(ctx, model.IssueComment{
+		IssueID: keep.ID, AuthorRole: model.IssueCommentAdmin, Body: "Unrelated",
+	}); err != nil {
+		t.Fatalf("adding comment to the other issue: %v", err)
+	}
+
+	// A reply draft pointing at the doomed issue must not survive it.
+	if err := db.SetIssueDraft(ctx, model.IssueDraft{
+		TelegramID: telegramID, ChatID: 1, PromptMessageID: 2,
+		Step: model.IssueStepReply, IssueID: &issue.ID,
+	}); err != nil {
+		t.Fatalf("setting draft: %v", err)
+	}
+
+	if err := db.DeleteIssue(ctx, issue.ID); err != nil {
+		t.Fatalf("deleting issue: %v", err)
+	}
+
+	if _, err := db.GetIssueByID(ctx, issue.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected the issue to be gone, got %v", err)
+	}
+	if n, err := db.CountIssueComments(ctx, issue.ID); err != nil || n != 0 {
+		t.Errorf("expected its comments to cascade away, got %d (%v)", n, err)
+	}
+	draft, err := db.GetIssueDraft(ctx, telegramID)
+	if err != nil {
+		t.Fatalf("reading draft: %v", err)
+	}
+	if draft != nil {
+		t.Error("expected the reply draft to be cleared with the issue")
+	}
+
+	// Deleting one issue must not touch its neighbours.
+	if _, err := db.GetIssueByID(ctx, keep.ID); err != nil {
+		t.Errorf("expected the other issue to survive, got %v", err)
+	}
+	if n, err := db.CountIssueComments(ctx, keep.ID); err != nil || n != 1 {
+		t.Errorf("expected the other issue to keep its comment, got %d (%v)", n, err)
+	}
+
+	if err := db.DeleteIssue(ctx, issue.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound deleting twice, got %v", err)
+	}
+}
+
+func TestIssueStatusNoteAndNewStatuses(t *testing.T) {
+	db, _, telegramID := setupTestDB(t)
+	ctx := context.Background()
+
+	issue, err := db.CreateIssue(ctx, model.Issue{
+		AuthorTelegramID: telegramID,
+		Type:             model.IssueTypeFeature,
+		Title:            "Add calendar export",
+		Body:             "Please.",
+	})
+	if err != nil {
+		t.Fatalf("creating issue: %v", err)
+	}
+	if issue.StatusNote != "" {
+		t.Errorf("expected no note on a fresh issue, got %q", issue.StatusNote)
+	}
+
+	// 'rejected' and 'duplicate' are new in 00008; the CHECK constraint has to
+	// accept them.
+	if err := db.UpdateIssueStatus(ctx, issue.ID, model.IssueRejected, "Out of scope for now.", "admin@example.com"); err != nil {
+		t.Fatalf("rejecting issue: %v", err)
+	}
+	reloaded, err := db.GetIssueByID(ctx, issue.ID)
+	if err != nil {
+		t.Fatalf("reloading issue: %v", err)
+	}
+	if reloaded.Status != model.IssueRejected || reloaded.StatusNote != "Out of scope for now." {
+		t.Errorf("expected rejected + note, got %q / %q", reloaded.Status, reloaded.StatusNote)
+	}
+
+	// A later change without a note must not leave the old explanation behind.
+	if err := db.UpdateIssueStatus(ctx, issue.ID, model.IssueDuplicate, "", "admin@example.com"); err != nil {
+		t.Fatalf("marking duplicate: %v", err)
+	}
+	reloaded, err = db.GetIssueByID(ctx, issue.ID)
+	if err != nil {
+		t.Fatalf("reloading issue: %v", err)
+	}
+	if reloaded.Status != model.IssueDuplicate {
+		t.Errorf("expected duplicate, got %q", reloaded.Status)
+	}
+	if reloaded.StatusNote != "" {
+		t.Errorf("expected the stale note to be cleared, got %q", reloaded.StatusNote)
+	}
+}
+
+func TestSetIssueThreadStateTransitions(t *testing.T) {
+	db, _, telegramID := setupTestDB(t)
+	ctx := context.Background()
+
+	issue, err := db.CreateIssue(ctx, model.Issue{
+		AuthorTelegramID: telegramID,
+		Type:             model.IssueTypeBug,
+		Title:            "Crash on /today",
+		Body:             "It crashes.",
+	})
+	if err != nil {
+		t.Fatalf("creating issue: %v", err)
+	}
+	if issue.ThreadState.Started() {
+		t.Error("a new issue must not look like it has a discussion")
+	}
+
+	for _, state := range []model.IssueThreadState{model.IssueThreadOpen, model.IssueThreadClosed, model.IssueThreadOpen} {
+		if err := db.SetIssueThreadState(ctx, issue.ID, state); err != nil {
+			t.Fatalf("setting thread state %q: %v", state, err)
+		}
+		reloaded, err := db.GetIssueByID(ctx, issue.ID)
+		if err != nil {
+			t.Fatalf("reloading issue: %v", err)
+		}
+		if reloaded.ThreadState != state {
+			t.Errorf("expected thread state %q, got %q", state, reloaded.ThreadState)
+		}
+		if !reloaded.ThreadState.Started() {
+			t.Errorf("state %q should count as started", state)
+		}
 	}
 }

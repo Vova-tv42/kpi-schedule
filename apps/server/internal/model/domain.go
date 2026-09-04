@@ -229,8 +229,30 @@ const (
 	IssueReady         IssueStatus = "ready"
 	IssueInDevelopment IssueStatus = "in_development"
 	IssueImplemented   IssueStatus = "implemented"
+	IssueDuplicate     IssueStatus = "duplicate"
+	IssueRejected      IssueStatus = "rejected"
 	IssueCancelled     IssueStatus = "cancelled"
 )
+
+// IssueThreadState is the discussion lifecycle. Threads are admin-initiated,
+// so an issue starts at IssueThreadNone; an admin's first comment opens it and
+// an admin can close it again, which leaves the transcript readable to the
+// reporter but stops them replying.
+type IssueThreadState string
+
+const (
+	IssueThreadNone   IssueThreadState = "none"
+	IssueThreadOpen   IssueThreadState = "open"
+	IssueThreadClosed IssueThreadState = "closed"
+)
+
+// Started reports whether a discussion exists at all — open or closed. Written
+// as a positive test rather than "!= IssueThreadNone" because the zero value of
+// IssueThreadState is the empty string, not "none": an Issue built in Go
+// without going through the database would otherwise look like it had a thread.
+func (s IssueThreadState) Started() bool {
+	return s == IssueThreadOpen || s == IssueThreadClosed
+}
 
 // IssueCommentRole marks which side of a discussion thread wrote a comment.
 type IssueCommentRole string
@@ -254,13 +276,15 @@ type Issue struct {
 	Body             string
 	Status           IssueStatus
 	StatusBy         string
-	ThreadOpen       bool
+	StatusNote       string
+	ThreadState      IssueThreadState
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }
 
 // IssueComment is one message in an issue's discussion thread. Threads are
-// admin-initiated: ThreadOpen only flips true once an admin has commented.
+// admin-initiated: ThreadState only leaves IssueThreadNone once an admin has
+// commented.
 type IssueComment struct {
 	ID          uuid.UUID
 	IssueID     uuid.UUID
@@ -287,7 +311,9 @@ type IssueDraft struct {
 }
 
 // IssueCommentMaxLen bounds a single message in a discussion thread, on both
-// sides, so a thread stays readable in a Telegram screen.
+// sides, so a thread stays readable in a Telegram screen. The optional note an
+// admin attaches to a status change is delivered the same way, so it shares
+// the limit.
 const IssueCommentMaxLen = 3000
 
 // Draft steps: which input the bot is currently waiting for.
@@ -297,10 +323,20 @@ const (
 	IssueStepReply = "reply"
 )
 
-// ValidIssueStatus reports whether s is one of the five triage statuses.
+// ValidIssueStatus reports whether s is one of the triage statuses.
 func ValidIssueStatus(s string) bool {
 	switch IssueStatus(s) {
-	case IssueOnReview, IssueReady, IssueInDevelopment, IssueImplemented, IssueCancelled:
+	case IssueOnReview, IssueReady, IssueInDevelopment, IssueImplemented,
+		IssueDuplicate, IssueRejected, IssueCancelled:
+		return true
+	}
+	return false
+}
+
+// ValidIssueThreadState reports whether s is one of the three thread states.
+func ValidIssueThreadState(s string) bool {
+	switch IssueThreadState(s) {
+	case IssueThreadNone, IssueThreadOpen, IssueThreadClosed:
 		return true
 	}
 	return false

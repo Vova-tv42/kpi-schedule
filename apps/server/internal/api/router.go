@@ -93,7 +93,9 @@ func NewRouterWithOpts(svc *Service, internalToken string, opts RouterOpts) http
 				r.Put("/tables/{table}/row", h.putAdminTableRow)
 				r.Post("/query", h.postAdminQuery)
 				r.Patch("/issues/{id}/status", h.patchAdminIssueStatus)
+				r.Patch("/issues/{id}/thread", h.patchAdminIssueThread)
 				r.Post("/issues/{id}/comments", h.postAdminIssueComment)
+				r.Delete("/issues/{id}", h.deleteAdminIssue)
 			})
 		})
 

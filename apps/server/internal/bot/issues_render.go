@@ -51,6 +51,10 @@ func issueStatusLabel(s model.IssueStatus) string {
 		return "🔨 In development"
 	case model.IssueImplemented:
 		return "✅ Implemented"
+	case model.IssueDuplicate:
+		return "🔁 Duplicate"
+	case model.IssueRejected:
+		return "⛔ Rejected"
 	case model.IssueCancelled:
 		return "🚫 Cancelled"
 	default:
@@ -235,8 +239,19 @@ func formatIssueView(issue model.Issue, commentCount int) string {
 	fmt.Fprintf(&b, "🗓 Filed %s\n\n", issue.CreatedAt.Format("02.01.2006"))
 	fmt.Fprintf(&b, "<blockquote>%s</blockquote>", html.EscapeString(issue.Body))
 
-	if issue.ThreadOpen {
+	// The note an admin attached to the last status change. Kept on the issue
+	// screen, not just in the one-off DM, so it can be re-read later.
+	if issue.StatusNote != "" {
+		fmt.Fprintf(&b, "\n\n🛠 <b>Note from the team</b>\n<blockquote>%s</blockquote>",
+			html.EscapeString(issue.StatusNote))
+	}
+
+	switch issue.ThreadState {
+	case model.IssueThreadOpen:
 		fmt.Fprintf(&b, "\n\n💬 The team started a discussion on this issue (%d %s).",
+			commentCount, pluralEN(commentCount, "message", "messages"))
+	case model.IssueThreadClosed:
+		fmt.Fprintf(&b, "\n\n🔒 The discussion on this issue is closed (%d %s). You can still read it.",
 			commentCount, pluralEN(commentCount, "message", "messages"))
 	}
 	return b.String()
@@ -244,18 +259,44 @@ func formatIssueView(issue model.Issue, commentCount int) string {
 
 func issueViewKeyboard(issue model.Issue, commentCount, page int) gotgbot.InlineKeyboardMarkup {
 	var rows [][]gotgbot.InlineKeyboardButton
-	if issue.ThreadOpen {
+	// A closed thread is still readable, so the button stays — only the padlock
+	// and the missing Reply inside tell the user they can no longer write.
+	if issue.ThreadState.Started() {
+		label := fmt.Sprintf("💬 Discussion (%d)", commentCount)
+		if issue.ThreadState == model.IssueThreadClosed {
+			label = fmt.Sprintf("🔒 Discussion (%d)", commentCount)
+		}
 		rows = append(rows, []gotgbot.InlineKeyboardButton{
-			{
-				Text:         fmt.Sprintf("💬 Discussion (%d)", commentCount),
-				CallbackData: fmt.Sprintf("%sthr:%s", issuesCallbackPrefix, issue.ID.String()),
-			},
+			{Text: label, CallbackData: fmt.Sprintf("%sthr:%s", issuesCallbackPrefix, issue.ID.String())},
 		})
 	}
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "🗑 Delete", CallbackData: fmt.Sprintf("%sdel:%d:%s", issuesCallbackPrefix, page, issue.ID.String())},
+	})
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
 		{Text: "◀️ Back", CallbackData: fmt.Sprintf("%slist:%d", issuesCallbackPrefix, page)},
 	})
 	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+// formatIssueDeleteConfirm is the interstitial that keeps a stray tap from
+// destroying an issue and its whole discussion.
+func formatIssueDeleteConfirm(issue model.Issue) string {
+	var b strings.Builder
+	b.WriteString("🗑 <b>Delete this issue?</b>\n")
+	b.WriteString(issueHeadline(issue))
+	b.WriteString("\n\nThis removes the issue and its discussion permanently, for you and for the team. It cannot be undone.")
+	return b.String()
+}
+
+func issueDeleteConfirmKeyboard(issue model.Issue, page int) gotgbot.InlineKeyboardMarkup {
+	id := issue.ID.String()
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{{Text: "🗑 Yes, delete it", CallbackData: fmt.Sprintf("%sdelok:%d:%s", issuesCallbackPrefix, page, id)}},
+			{{Text: "◀️ Keep it", CallbackData: fmt.Sprintf("%sview:%d:%s", issuesCallbackPrefix, page, id)}},
+		},
+	}
 }
 
 func pluralEN(n int, one, many string) string {
@@ -268,9 +309,17 @@ func pluralEN(n int, one, many string) string {
 // formatIssueThread renders the full admin↔user transcript, oldest first.
 func formatIssueThread(issue model.Issue, comments []model.IssueComment) string {
 	var b strings.Builder
-	b.WriteString("💬 <b>Discussion</b>\n")
+	if issue.ThreadState == model.IssueThreadClosed {
+		b.WriteString("🔒 <b>Discussion (closed)</b>\n")
+	} else {
+		b.WriteString("💬 <b>Discussion</b>\n")
+	}
 	b.WriteString(issueHeadline(issue))
 	fmt.Fprintf(&b, "\n%s\n\n", issueStatusLabel(issue.Status))
+
+	if issue.ThreadState == model.IssueThreadClosed {
+		b.WriteString("The team closed this discussion. You can still read it, but you can't send new messages.\n\n")
+	}
 
 	if len(comments) == 0 {
 		b.WriteString("No messages yet.")
@@ -290,15 +339,23 @@ func formatIssueThread(issue model.Issue, comments []model.IssueComment) string 
 
 func issueThreadKeyboard(issue model.Issue) gotgbot.InlineKeyboardMarkup {
 	id := issue.ID.String()
-	return gotgbot.InlineKeyboardMarkup{
-		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-			{
-				{Text: "✍️ Reply", CallbackData: issuesCallbackPrefix + "reply:" + id},
-				{Text: "🔄 Refresh", CallbackData: issuesCallbackPrefix + "thr:" + id},
-			},
-			{{Text: "◀️ Back", CallbackData: issuesCallbackPrefix + "view:0:" + id}},
-		},
+	var rows [][]gotgbot.InlineKeyboardButton
+	// Reply disappears once the team closes the discussion; the transcript and
+	// its Refresh stay, because a closed thread is still worth re-reading.
+	if issue.ThreadState == model.IssueThreadOpen {
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: "✍️ Reply", CallbackData: issuesCallbackPrefix + "reply:" + id},
+			{Text: "🔄 Refresh", CallbackData: issuesCallbackPrefix + "thr:" + id},
+		})
+	} else {
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: "🔄 Refresh", CallbackData: issuesCallbackPrefix + "thr:" + id},
+		})
 	}
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "◀️ Back", CallbackData: issuesCallbackPrefix + "view:0:" + id},
+	})
+	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 func formatIssueReplyPrompt(issue model.Issue, errorMsg string) string {
@@ -338,7 +395,36 @@ func formatIssueStatusNotification(issue model.Issue, previous model.IssueStatus
 	b.WriteString("🔄 <b>Issue status changed</b>\n")
 	b.WriteString(issueHeadline(issue))
 	fmt.Fprintf(&b, "\n\n%s → <b>%s</b>", issueStatusLabel(previous), issueStatusLabel(issue.Status))
+	// The admin's optional explanation, e.g. why the issue was rejected.
+	if issue.StatusNote != "" {
+		fmt.Fprintf(&b, "\n\n🛠 <b>Note from the team</b>\n<blockquote>%s</blockquote>",
+			html.EscapeString(issue.StatusNote))
+	}
 	return b.String()
+}
+
+// formatIssueThreadStateNotification tells the reporter their discussion was
+// closed or reopened, so a Reply button that vanishes is never a mystery.
+func formatIssueThreadStateNotification(issue model.Issue, _ model.IssueThreadState) string {
+	var b strings.Builder
+	if issue.ThreadState == model.IssueThreadClosed {
+		b.WriteString("🔒 <b>Discussion closed</b>\n")
+		b.WriteString(issueHeadline(issue))
+		b.WriteString("\n\nThe team closed the discussion on this issue. You can still read the history, but you can't send new messages.")
+		return b.String()
+	}
+	b.WriteString("💬 <b>Discussion reopened</b>\n")
+	b.WriteString(issueHeadline(issue))
+	b.WriteString("\n\nThe team reopened the discussion on this issue. You can reply again.")
+	return b.String()
+}
+
+func issueThreadStateNotificationKeyboard(issue model.Issue) gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{{Text: "💬 Open discussion", CallbackData: issuesCallbackPrefix + "thr:" + issue.ID.String()}},
+		},
+	}
 }
 
 func issueStatusNotificationKeyboard(issue model.Issue) gotgbot.InlineKeyboardMarkup {

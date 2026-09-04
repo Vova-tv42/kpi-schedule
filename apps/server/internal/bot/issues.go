@@ -80,6 +80,12 @@ func (b *Bot) onIssues(bot *gotgbot.Bot, ctx *ext.Context) error {
 	case strings.HasPrefix(action, "reply:"):
 		return b.startIssueReplyDraft(bot, cq, strings.TrimPrefix(action, "reply:"))
 
+	case strings.HasPrefix(action, "delok:"):
+		return b.deleteOwnIssue(bot, cq, strings.TrimPrefix(action, "delok:"))
+
+	case strings.HasPrefix(action, "del:"):
+		return b.confirmIssueDelete(bot, cq, strings.TrimPrefix(action, "del:"))
+
 	default:
 		return answerSilently(bot, cq)
 	}
@@ -193,13 +199,7 @@ func (b *Bot) editToIssueList(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, page 
 // editToIssueView opens one issue. arg is "<page>:<uuid>" so the Back button
 // can return to the list page the user came from.
 func (b *Bot) editToIssueView(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, arg string) error {
-	page, idStr := 0, arg
-	if left, right, found := strings.Cut(arg, ":"); found {
-		if n, err := strconv.Atoi(left); err == nil && n >= 0 {
-			page = n
-		}
-		idStr = right
-	}
+	page, idStr := splitIssuePageArg(arg)
 
 	issue, ok, err := b.authoredIssue(bot, cq, idStr)
 	if !ok {
@@ -207,7 +207,7 @@ func (b *Bot) editToIssueView(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, arg s
 	}
 
 	count := 0
-	if issue.ThreadOpen {
+	if issue.ThreadState.Started() {
 		if count, err = b.db.CountIssueComments(context.Background(), issue.ID); err != nil {
 			slog.Error("counting issue comments", "error", err, "issue_id", issue.ID)
 			count = 0
@@ -215,6 +215,53 @@ func (b *Bot) editToIssueView(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, arg s
 	}
 
 	return b.applyScreen(bot, cq, formatIssueView(issue, count), issueViewKeyboard(issue, count, page), true)
+}
+
+// confirmIssueDelete shows the delete interstitial. arg is "<page>:<uuid>", so
+// "Keep it" can return to the issue on the list page it was opened from.
+func (b *Bot) confirmIssueDelete(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, arg string) error {
+	page, idStr := splitIssuePageArg(arg)
+
+	issue, ok, err := b.authoredIssue(bot, cq, idStr)
+	if !ok {
+		return err
+	}
+
+	return b.applyScreen(bot, cq, formatIssueDeleteConfirm(issue), issueDeleteConfirmKeyboard(issue, page), true)
+}
+
+// deleteOwnIssue removes an issue the caller filed, then drops them back on
+// their list. authoredIssue is what stops a guessed callback deleting somebody
+// else's issue.
+func (b *Bot) deleteOwnIssue(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, arg string) error {
+	page, idStr := splitIssuePageArg(arg)
+
+	issue, ok, err := b.authoredIssue(bot, cq, idStr)
+	if !ok {
+		return err
+	}
+
+	if err := b.db.DeleteIssue(context.Background(), issue.ID); err != nil && !errors.Is(err, storage.ErrNotFound) {
+		slog.Error("deleting issue", "error", err, "issue_id", issue.ID)
+		return answerIssueError(bot, cq)
+	}
+
+	// The page the issue was on may no longer exist; editToIssueList clamps it.
+	return b.editToIssueList(bot, cq, page)
+}
+
+// splitIssuePageArg parses the "<page>:<uuid>" callback payload shared by the
+// issue view and the delete screens, defaulting to page 0.
+func splitIssuePageArg(arg string) (int, string) {
+	left, right, found := strings.Cut(arg, ":")
+	if !found {
+		return 0, arg
+	}
+	page, err := strconv.Atoi(left)
+	if err != nil || page < 0 {
+		page = 0
+	}
+	return page, right
 }
 
 // authoredIssue loads the issue named by idStr and confirms the caller filed
@@ -240,7 +287,8 @@ func (b *Bot) authoredIssue(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, idStr s
 }
 
 // editToIssueThread shows the discussion transcript. Threads are opened by
-// admins, so a closed one has nothing to show.
+// admins, so one that was never started has nothing to show; a closed one is
+// still readable.
 func (b *Bot) editToIssueThread(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, idStr string) error {
 	_ = b.db.ClearIssueDraft(context.Background(), cq.From.Id)
 
@@ -248,7 +296,7 @@ func (b *Bot) editToIssueThread(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, idS
 	if !ok {
 		return err
 	}
-	if !issue.ThreadOpen {
+	if !issue.ThreadState.Started() {
 		return answerSilently(bot, cq)
 	}
 
@@ -268,7 +316,10 @@ func (b *Bot) startIssueReplyDraft(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, 
 	if !ok {
 		return err
 	}
-	if !issue.ThreadOpen {
+	// Replying is gated on the thread being open, not merely started: an admin
+	// can close a discussion, and the guess-a-callback path has to respect that
+	// just as the hidden Reply button does.
+	if issue.ThreadState != model.IssueThreadOpen {
 		return answerSilently(bot, cq)
 	}
 
@@ -379,6 +430,17 @@ func (b *Bot) handleIssueReplyInput(bot *gotgbot.Bot, ctx *ext.Context, draft *m
 	if issue.AuthorTelegramID != draft.TelegramID {
 		_ = b.db.ClearIssueDraft(reqCtx, draft.TelegramID)
 		return nil
+	}
+	// The team may have closed the discussion between the prompt and the
+	// answer; drop the reply and show the closed transcript instead.
+	if issue.ThreadState != model.IssueThreadOpen {
+		_ = b.db.ClearIssueDraft(reqCtx, draft.TelegramID)
+		comments, listErr := b.db.ListIssueComments(reqCtx, issue.ID)
+		if listErr != nil {
+			slog.Error("reloading closed issue thread", "error", listErr, "issue_id", issue.ID)
+			return nil
+		}
+		return b.editIssuePrompt(bot, draft, formatIssueThread(issue, comments), issueThreadKeyboard(issue))
 	}
 
 	if msg := validateIssueText(input, model.IssueCommentMaxLen, "reply"); msg != "" {

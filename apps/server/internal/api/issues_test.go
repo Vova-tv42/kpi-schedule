@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -19,8 +21,9 @@ import (
 // stubIssueNotifier records what the handlers would have DM'd to the reporter,
 // standing in for the Telegram bot (which internal/api must not import).
 type stubIssueNotifier struct {
-	comments []model.IssueComment
-	statuses []model.IssueStatus
+	comments     []model.IssueComment
+	statuses     []model.IssueStatus
+	threadStates []model.IssueThreadState
 }
 
 func (s *stubIssueNotifier) NotifyIssueComment(_ context.Context, _ model.Issue, c model.IssueComment) error {
@@ -30,6 +33,11 @@ func (s *stubIssueNotifier) NotifyIssueComment(_ context.Context, _ model.Issue,
 
 func (s *stubIssueNotifier) NotifyIssueStatus(_ context.Context, issue model.Issue, _ model.IssueStatus) error {
 	s.statuses = append(s.statuses, issue.Status)
+	return nil
+}
+
+func (s *stubIssueNotifier) NotifyIssueThreadState(_ context.Context, issue model.Issue, _ model.IssueThreadState) error {
+	s.threadStates = append(s.threadStates, issue.ThreadState)
 	return nil
 }
 
@@ -118,7 +126,7 @@ func TestGetAdminIssuesListsAndFilters(t *testing.T) {
 	bug := seedIssue(t, db, "Crash on /today", model.IssueTypeBug)
 	seedIssue(t, db, "Add calendar export", model.IssueTypeFeature)
 
-	if err := db.UpdateIssueStatus(context.Background(), bug.ID, model.IssueInDevelopment, "admin@example.com"); err != nil {
+	if err := db.UpdateIssueStatus(context.Background(), bug.ID, model.IssueInDevelopment, "", "admin@example.com"); err != nil {
 		t.Fatalf("updating status: %v", err)
 	}
 
@@ -253,7 +261,7 @@ func TestPostAdminIssueCommentOpensThread(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reloading issue: %v", err)
 	}
-	if !stored.ThreadOpen {
+	if stored.ThreadState != model.IssueThreadOpen {
 		t.Error("expected the first admin comment to open the thread")
 	}
 	if len(notifier.comments) != 1 {
@@ -295,10 +303,166 @@ func TestIssueWritesRejectReadOnlyAdmins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reloading issue: %v", err)
 	}
-	if stored.Status != model.IssueOnReview || stored.ThreadOpen {
+	if stored.Status != model.IssueOnReview || stored.ThreadState != model.IssueThreadNone {
 		t.Error("expected the rejected writes to leave the issue untouched")
 	}
 	if len(notifier.comments)+len(notifier.statuses) != 0 {
 		t.Error("expected no notifications for rejected writes")
+	}
+}
+
+func TestPatchAdminIssueStatusNote(t *testing.T) {
+	router, db, notifier := setupIssuesRouter(t)
+	issue := seedIssue(t, db, "Add calendar export", model.IssueTypeFeature)
+	path := "/api/v1/admin/issues/" + issue.ID.String() + "/status"
+
+	// The whole point of the note: explain a rejection without opening a thread.
+	rec := adminRequest(t, router, http.MethodPatch, path, "",
+		map[string]string{"status": "rejected", "note": "Out of scope for this term."})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	view, _ := decodeBody(t, rec)["issue"].(map[string]any)
+	if view["status_note"] != "Out of scope for this term." {
+		t.Errorf("expected the note on the response, got %v", view["status_note"])
+	}
+
+	stored, err := db.GetIssueByID(context.Background(), issue.ID)
+	if err != nil {
+		t.Fatalf("reloading issue: %v", err)
+	}
+	if stored.Status != model.IssueRejected || stored.StatusNote != "Out of scope for this term." {
+		t.Errorf("expected rejected + note, got %q / %q", stored.Status, stored.StatusNote)
+	}
+	// A note must not open a discussion — that is the difference from a comment.
+	if stored.ThreadState.Started() {
+		t.Error("a status note must not start a discussion thread")
+	}
+	if len(notifier.statuses) != 1 {
+		t.Errorf("expected the reporter to be notified once, got %d", len(notifier.statuses))
+	}
+
+	// A note with no status change would be silently dropped, so it is refused.
+	rec = adminRequest(t, router, http.MethodPatch, path, "",
+		map[string]string{"status": "rejected", "note": "Another thought."})
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for a note without a status change, got %d", rec.Code)
+	}
+
+	// Over-long notes are rejected before anything is written.
+	rec = adminRequest(t, router, http.MethodPatch, path, "",
+		map[string]string{"status": "duplicate", "note": strings.Repeat("x", model.IssueCommentMaxLen+1)})
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for an over-long note, got %d", rec.Code)
+	}
+}
+
+func TestPatchAdminIssueThreadCloseAndReopen(t *testing.T) {
+	router, db, notifier := setupIssuesRouter(t)
+	issue := seedIssue(t, db, "Add calendar export", model.IssueTypeFeature)
+	threadPath := "/api/v1/admin/issues/" + issue.ID.String() + "/thread"
+	commentPath := "/api/v1/admin/issues/" + issue.ID.String() + "/comments"
+
+	// Nothing to close before a discussion exists.
+	rec := adminRequest(t, router, http.MethodPatch, threadPath, "", map[string]string{"state": "closed"})
+	if rec.Code != http.StatusConflict {
+		t.Errorf("expected 409 closing a thread that was never started, got %d", rec.Code)
+	}
+
+	rec = adminRequest(t, router, http.MethodPatch, threadPath, "", map[string]string{"state": "none"})
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for an unknown thread state, got %d", rec.Code)
+	}
+
+	if rec = adminRequest(t, router, http.MethodPost, commentPath, "", map[string]string{"body": "Which app?"}); rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 posting the first comment, got %d", rec.Code)
+	}
+
+	rec = adminRequest(t, router, http.MethodPatch, threadPath, "", map[string]string{"state": "closed"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 closing the thread, got %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := db.GetIssueByID(context.Background(), issue.ID)
+	if err != nil {
+		t.Fatalf("reloading issue: %v", err)
+	}
+	if stored.ThreadState != model.IssueThreadClosed {
+		t.Errorf("expected the thread to be closed, got %q", stored.ThreadState)
+	}
+	if len(notifier.threadStates) != 1 {
+		t.Errorf("expected the reporter to be told once, got %d", len(notifier.threadStates))
+	}
+
+	// Replying into a closed thread would resurrect it behind the reporter's back.
+	rec = adminRequest(t, router, http.MethodPost, commentPath, "", map[string]string{"body": "One more thing"})
+	if rec.Code != http.StatusConflict {
+		t.Errorf("expected 409 replying to a closed thread, got %d", rec.Code)
+	}
+
+	// Closing an already-closed thread is a no-op, not a second DM.
+	rec = adminRequest(t, router, http.MethodPatch, threadPath, "", map[string]string{"state": "closed"})
+	if changed, _ := decodeBody(t, rec)["changed"].(bool); changed {
+		t.Error("expected changed=false re-closing a closed thread")
+	}
+	if len(notifier.threadStates) != 1 {
+		t.Errorf("expected no extra notification, got %d", len(notifier.threadStates))
+	}
+
+	// Reopening restores replies on both sides.
+	if rec = adminRequest(t, router, http.MethodPatch, threadPath, "", map[string]string{"state": "open"}); rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 reopening, got %d", rec.Code)
+	}
+	if rec = adminRequest(t, router, http.MethodPost, commentPath, "", map[string]string{"body": "One more thing"}); rec.Code != http.StatusCreated {
+		t.Errorf("expected 201 replying after reopening, got %d", rec.Code)
+	}
+}
+
+func TestDeleteAdminIssue(t *testing.T) {
+	router, db, _ := setupIssuesRouter(t)
+	issue := seedIssue(t, db, "Spam", model.IssueTypeOther)
+	path := "/api/v1/admin/issues/" + issue.ID.String()
+
+	if rec := adminRequest(t, router, http.MethodDelete, path, "read-only", nil); rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for a read-only admin, got %d", rec.Code)
+	}
+	if _, err := db.GetIssueByID(context.Background(), issue.ID); err != nil {
+		t.Fatalf("the rejected delete must leave the issue in place: %v", err)
+	}
+
+	if rec := adminRequest(t, router, http.MethodDelete, path, "", nil); rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if _, err := db.GetIssueByID(context.Background(), issue.ID); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("expected the issue to be gone, got %v", err)
+	}
+
+	if rec := adminRequest(t, router, http.MethodDelete, path, "", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("expected 404 deleting it twice, got %d", rec.Code)
+	}
+}
+
+func TestIssueThreadWriteRejectsReadOnlyAdmins(t *testing.T) {
+	router, db, notifier := setupIssuesRouter(t)
+	issue := seedIssue(t, db, "Add calendar export", model.IssueTypeFeature)
+
+	if err := db.SetIssueThreadState(context.Background(), issue.ID, model.IssueThreadOpen); err != nil {
+		t.Fatalf("opening thread: %v", err)
+	}
+
+	rec := adminRequest(t, router, http.MethodPatch, "/api/v1/admin/issues/"+issue.ID.String()+"/thread",
+		"read-only", map[string]string{"state": "closed"})
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 closing a thread as read-only, got %d", rec.Code)
+	}
+
+	stored, err := db.GetIssueByID(context.Background(), issue.ID)
+	if err != nil {
+		t.Fatalf("reloading issue: %v", err)
+	}
+	if stored.ThreadState != model.IssueThreadOpen {
+		t.Errorf("expected the thread to stay open, got %q", stored.ThreadState)
+	}
+	if len(notifier.threadStates) != 0 {
+		t.Error("expected no notification for a rejected write")
 	}
 }

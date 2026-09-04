@@ -23,13 +23,14 @@ const IssueDraftTTL = 10 * time.Minute
 // get this exactly once and should tell the user the flow was interrupted.
 var ErrIssueDraftExpired = errors.New("issue draft expired")
 
-const issueColumns = `id, number, author_telegram_id, author_username, author_first_name, type, title, body, status, status_by, thread_open, created_at, updated_at`
+const issueColumns = `id, number, author_telegram_id, author_username, author_first_name, type, title, body, status, status_by, status_note, thread_state, created_at, updated_at`
 
 func scanIssue(row interface{ Scan(...any) error }) (model.Issue, error) {
 	var i model.Issue
 	var idStr string
 	err := row.Scan(&idStr, &i.Number, &i.AuthorTelegramID, &i.AuthorUsername, &i.AuthorFirstName,
-		&i.Type, &i.Title, &i.Body, &i.Status, &i.StatusBy, &i.ThreadOpen, &i.CreatedAt, &i.UpdatedAt)
+		&i.Type, &i.Title, &i.Body, &i.Status, &i.StatusBy, &i.StatusNote, &i.ThreadState,
+		&i.CreatedAt, &i.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return model.Issue{}, ErrNotFound
@@ -64,15 +65,16 @@ func (db *DB) CreateIssue(ctx context.Context, issue model.Issue) (model.Issue, 
 	issue.ID = uuid.New()
 	issue.Number = next
 	issue.Status = model.IssueOnReview
-	issue.ThreadOpen = false
+	issue.ThreadState = model.IssueThreadNone
 	issue.CreatedAt = now
 	issue.UpdatedAt = now
 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO issues (`+issueColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?)
 	`, issue.ID.String(), issue.Number, issue.AuthorTelegramID, issue.AuthorUsername, issue.AuthorFirstName,
-		string(issue.Type), issue.Title, issue.Body, string(issue.Status), now, now)
+		string(issue.Type), issue.Title, issue.Body, string(issue.Status),
+		string(issue.ThreadState), now, now)
 	if err != nil {
 		return model.Issue{}, fmt.Errorf("inserting issue: %w", err)
 	}
@@ -216,12 +218,16 @@ func (db *DB) CountIssuesByStatus(ctx context.Context) (map[string]int, error) {
 }
 
 // UpdateIssueStatus moves an issue through triage and records which admin did
-// it. Returns ErrNotFound if no such issue exists.
-func (db *DB) UpdateIssueStatus(ctx context.Context, id uuid.UUID, status model.IssueStatus, adminEmail string) error {
+// it. note is the optional explanation the admin attaches to the change (say,
+// why an issue was rejected); it is delivered to the reporter with the status
+// DM and shown on their issue screen. Passing an empty note clears the previous
+// one, so a stale explanation never outlives the status it explained.
+// Returns ErrNotFound if no such issue exists.
+func (db *DB) UpdateIssueStatus(ctx context.Context, id uuid.UUID, status model.IssueStatus, note, adminEmail string) error {
 	now := time.Now().UTC()
 	res, err := db.SQL.ExecContext(ctx, `
-		UPDATE issues SET status = ?, status_by = ?, updated_at = ? WHERE id = ?
-	`, string(status), adminEmail, now, id.String())
+		UPDATE issues SET status = ?, status_by = ?, status_note = ?, updated_at = ? WHERE id = ?
+	`, string(status), adminEmail, note, now, id.String())
 	if err != nil {
 		return fmt.Errorf("updating issue status: %w", err)
 	}
@@ -235,13 +241,16 @@ func (db *DB) UpdateIssueStatus(ctx context.Context, id uuid.UUID, status model.
 	return nil
 }
 
-// SetIssueThreadOpen marks whether a discussion thread has been opened by an
-// admin. Users can only see and use the thread once this is true.
-func (db *DB) SetIssueThreadOpen(ctx context.Context, id uuid.UUID, open bool) error {
+// SetIssueThreadState opens, closes or resets an issue's discussion. A user
+// sees the thread once it leaves IssueThreadNone and can reply only while it is
+// IssueThreadOpen; IssueThreadClosed keeps the transcript readable but stops
+// new messages from their side.
+func (db *DB) SetIssueThreadState(ctx context.Context, id uuid.UUID, state model.IssueThreadState) error {
 	now := time.Now().UTC()
-	res, err := db.SQL.ExecContext(ctx, `UPDATE issues SET thread_open = ?, updated_at = ? WHERE id = ?`, open, now, id.String())
+	res, err := db.SQL.ExecContext(ctx, `UPDATE issues SET thread_state = ?, updated_at = ? WHERE id = ?`,
+		string(state), now, id.String())
 	if err != nil {
-		return fmt.Errorf("updating issue thread flag: %w", err)
+		return fmt.Errorf("updating issue thread state: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
@@ -249,6 +258,39 @@ func (db *DB) SetIssueThreadOpen(ctx context.Context, id uuid.UUID, open bool) e
 	}
 	if n == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteIssue removes an issue permanently. Its comments go with it via the
+// ON DELETE CASCADE on issue_comments; any reply draft pointing at it is
+// cleared in the same transaction so the bot never prompts for a reply to an
+// issue that no longer exists.
+func (db *DB) DeleteIssue(ctx context.Context, id uuid.UUID) error {
+	tx, err := db.SQL.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("beginning tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM user_issue_drafts WHERE issue_id = ?`, id.String()); err != nil {
+		return fmt.Errorf("clearing drafts for issue: %w", err)
+	}
+
+	res, err := tx.ExecContext(ctx, `DELETE FROM issues WHERE id = ?`, id.String())
+	if err != nil {
+		return fmt.Errorf("deleting issue: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking affected rows: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing issue deletion: %w", err)
 	}
 	return nil
 }

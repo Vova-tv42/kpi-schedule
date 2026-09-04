@@ -29,6 +29,7 @@ var ErrNoScheduleData = errors.New("no schedule data stored for this user yet")
 type IssueNotifier interface {
 	NotifyIssueComment(ctx context.Context, issue model.Issue, comment model.IssueComment) error
 	NotifyIssueStatus(ctx context.Context, issue model.Issue, previous model.IssueStatus) error
+	NotifyIssueThreadState(ctx context.Context, issue model.Issue, previous model.IssueThreadState) error
 }
 
 type Service struct {
@@ -68,6 +69,18 @@ func (s *Service) NotifyIssueStatus(ctx context.Context, issue model.Issue, prev
 	}
 	if err := s.issueNotifier.NotifyIssueStatus(ctx, issue, previous); err != nil {
 		slog.Warn("notifying issue status change", "error", err, "issue_number", issue.Number)
+	}
+}
+
+// NotifyIssueThreadState tells the reporter their discussion was closed or
+// reopened, so a silently disabled Reply button never looks like a bug.
+// Best-effort, for the same reason as NotifyIssueComment.
+func (s *Service) NotifyIssueThreadState(ctx context.Context, issue model.Issue, previous model.IssueThreadState) {
+	if s.issueNotifier == nil {
+		return
+	}
+	if err := s.issueNotifier.NotifyIssueThreadState(ctx, issue, previous); err != nil {
+		slog.Warn("notifying issue thread state change", "error", err, "issue_number", issue.Number)
 	}
 }
 
