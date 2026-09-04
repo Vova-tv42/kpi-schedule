@@ -73,11 +73,15 @@ The system defines three privilege tiers:
 | View Recent Actions Telemetry | ✅ | ✅ | ✅ |
 | View SQLite Database Tables & Rows | ✅ | ✅ | ✅ |
 | Edit Database Table Rows | ✅ | ✅ | ❌ |
+| View Issue Queue & Discussion Threads | ✅ | ✅ | ✅ |
+| Change Issue Status | ✅ | ✅ | ❌ |
+| Reply in an Issue Thread | ✅ | ✅ | ❌ |
 | Run Custom SQL Queries | ✅ | ✅ | ❌ |
 | Add / Update / Delete Admins | ✅ | ❌ | ❌ |
 | Adjust Retention Settings | ✅ | ✅ | ❌ |
 | Trigger Manual Cleanup | ✅ | ✅ | ❌ |
 
+- **Protection of Issue Writes**: For `read-only` users, the status control and the thread composer are replaced by a lock affordance, the proxy route returns `403 Forbidden` before calling the main server, and the main server rejects the call again via `adminWritePermissionMiddleware`. Reading the queue and the full thread stays open to every role — triage is a team activity, and a read-only admin still needs the context.
 - **Protection of Custom Queries**: For `read-only` users, the Custom Query console is completely disabled in the UI and blocked at the API layer with `403 Forbidden`.
 - **Immediate Session Revocation**: When an admin's role is updated or their account is deleted by the superadmin, all their active sessions in `admin_sessions` are immediately purged.
 
@@ -137,6 +141,7 @@ The Admin Dashboard is built with a dual-theme design system: **Cyber-Industrial
 ### 5.2 Layout & Navigation Hierarchy
 - **Left Sidebar Rail (`Navbar.svelte`)**: Fixed 64-width navigation bar (`bg-white dark:bg-[#0e1117]`, border `border-[#d2d7e2] dark:border-[#252b3b]`) with operational pulse indicator and categorized links:
   - **Telemetry**: `Overview` (`/`), `Action Stream` (`/actions`).
+  - **Support**: `Issue Queue` (`/issues`, `RO` lock chip for read-only admins).
   - **Storage Engine**: `Tables & Rows` (`/database`), `SQL Workspace` (`/database/query`).
   - **Governance**: `Admin Access` (`/admins`, locked for non-superadmins), `Settings` (`/settings`).
   - **Mobile Support**: Off-canvas sliding drawer with adaptive backdrop overlay for viewports `< 1024px`.
@@ -172,3 +177,21 @@ The Admin Dashboard is built with a dual-theme design system: **Cyber-Industrial
 - `Modal.svelte`: Accessible dialog overlay with Esc key handling, backdrop blur, adaptive card backgrounds, and technical header with volt accent dot.
 - `ServerInterlockModal.svelte`: Specialized Scale-to-Zero warning dialog preventing unintentional cold boots of the Fly.io microVM, styled with industrial hazard stripes and tactile confirmation buttons.
 
+### 5.5 Issue Queue
+
+The Issue Queue is the triage surface for bug reports and feature requests filed from the bot's `/issues` command ([`docs/bot/issues.md`](../bot/issues.md)). Unlike telemetry, issues live in the **main server's SQLite database**, not in the dashboard's own Postgres — the dashboard is a client here, proxying through `fetchMainServer` exactly as the database browser does.
+
+| Route | Purpose |
+| :--- | :--- |
+| `/issues` | Queue table: `#N`, title, type, reporter, status badge, thread indicator, filing date. Status tabs (with per-status counts), a type filter, free-text search over title and body, and 25-per-page paging. |
+| `/issues/[id]` | Issue detail: metadata strip, full body, the status control, and the discussion thread with its composer. |
+| `/api/issues` | `GET` proxy → `/api/v1/admin/issues`. |
+| `/api/issues/[id]` | `GET` proxy → the issue and its thread; `PATCH` → the status endpoint; `POST` → a new admin comment. |
+
+Neither page has a `+page.server.ts`: `hooks.server.ts` already blocks unauthenticated requests globally, and the pages read `page.data.user` from the root layout, matching `/database/[table]`.
+
+Two side effects are visible to the reporter, and the UI says so:
+- **Saving a status** DMs them the change. The Save button is disabled until the selection actually differs, and re-sending an unchanged status is a no-op server-side, so an accidental double-save never produces a second DM.
+- **Sending a reply** opens the discussion thread in the bot — threads are admin-initiated, so the reporter cannot start one. The header states this while `thread_open` is false. The composer enforces the same 3000-character limit as the bot and the API.
+
+Status vocabulary, badge palette and label fallbacks live in [`src/lib/issues.ts`](../../apps/admin/src/lib/issues.ts), the one place to update when a status is added on the server; an unrecognised value renders as its raw wire value rather than an empty cell.

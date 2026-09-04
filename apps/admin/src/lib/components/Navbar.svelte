@@ -5,6 +5,7 @@
 		Database,
 		TerminalSquare,
 		Activity,
+		Inbox,
 		ShieldAlert,
 		Users,
 		Settings,
@@ -28,6 +29,7 @@
 
 	const isOverviewActive = $derived(pathname === '/');
 	const isActionsActive = $derived(pathname === '/actions');
+	const isIssuesActive = $derived(pathname.startsWith('/issues'));
 	const isDatabaseActive = $derived(pathname.startsWith('/database') && pathname !== '/database/query');
 	const isQueryActive = $derived(pathname === '/database/query');
 	const isAdminsActive = $derived(pathname === '/admins');
@@ -101,6 +103,27 @@
 		>
 			<Activity size={16} />
 			<span>Action Stream</span>
+		</a>
+
+		<!-- Section: User Feedback -->
+		<div class="pt-5 px-2 pb-1.5 text-xs font-mono tracking-widest uppercase text-slate-500 dark:text-[#64748b]">
+			Support
+		</div>
+
+		<a
+			href="/issues"
+			onclick={handleLinkClick}
+			class="flex items-center justify-between px-3 py-2 rounded-xs text-sm font-mono transition-colors {isIssuesActive ? 'bg-slate-100 text-slate-950 font-bold border border-slate-300 shadow-xs dark:bg-[#d4ff32]/10 dark:text-[#d4ff32] dark:border-[#d4ff32]/20 dark:shadow-none' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-[#94a3b8] dark:hover:bg-[#181c26] dark:hover:text-[#f1f5f9]'}"
+		>
+			<div class="flex items-center gap-2.5">
+				<Inbox size={16} />
+				<span>Issue Queue</span>
+			</div>
+			{#if user?.role === 'read-only'}
+				<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/30 flex items-center gap-1 font-semibold">
+					<Lock size={10} /> RO
+				</span>
+			{/if}
 		</a>
 
 		<!-- Section: Database Storage -->
