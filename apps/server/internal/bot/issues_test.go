@@ -33,7 +33,7 @@ func TestFormatIssueCreatedHeadline(t *testing.T) {
 	if !strings.Contains(text, "<b><code>#7</code> Add calendar export</b>") {
 		t.Errorf("success screen missing the #N headline:\n%s", text)
 	}
-	if !strings.Contains(text, "💡 Feature request") || !strings.Contains(text, "🕓 On review") {
+	if !strings.Contains(text, "💡 Пропозиція") || !strings.Contains(text, "🕓 На розгляді") {
 		t.Errorf("success screen missing type/status line:\n%s", text)
 	}
 }
@@ -65,10 +65,10 @@ func TestIssueTypePickerHasCancelButNoBack(t *testing.T) {
 	}
 
 	joinedText := strings.Join(texts, "|")
-	if strings.Contains(joinedText, "Back") {
+	if strings.Contains(joinedText, "Назад") {
 		t.Errorf("type picker must not offer Back, got buttons: %s", joinedText)
 	}
-	if !strings.Contains(joinedText, "Cancel") {
+	if !strings.Contains(joinedText, "Скасувати") {
 		t.Errorf("type picker must offer Cancel, got buttons: %s", joinedText)
 	}
 
@@ -86,10 +86,10 @@ func TestIssueWizardKeyboardHasBackAndCancel(t *testing.T) {
 		t.Fatalf("expected a single Back/Cancel row, got %+v", kb.InlineKeyboard)
 	}
 	back, cancel := kb.InlineKeyboard[0][0], kb.InlineKeyboard[0][1]
-	if !strings.Contains(back.Text, "Back") || back.CallbackData != "iss:new" {
+	if !strings.Contains(back.Text, "Назад") || back.CallbackData != "iss:new" {
 		t.Errorf("unexpected back button: %+v", back)
 	}
-	if !strings.Contains(cancel.Text, "Cancel") || cancel.CallbackData != "iss:cancel" {
+	if !strings.Contains(cancel.Text, "Скасувати") || cancel.CallbackData != "iss:cancel" {
 		t.Errorf("unexpected cancel button: %+v", cancel)
 	}
 }
@@ -98,7 +98,7 @@ func TestIssueWizardKeyboardHasBackAndCancel(t *testing.T) {
 func TestIssueCreatedKeyboardHasNoBackOrCancel(t *testing.T) {
 	for _, row := range issueCreatedKeyboard().InlineKeyboard {
 		for _, btn := range row {
-			if strings.Contains(btn.Text, "Back") || strings.Contains(btn.Text, "Cancel") {
+			if strings.Contains(btn.Text, "Назад") || strings.Contains(btn.Text, "Скасувати") {
 				t.Errorf("success screen should not offer %q", btn.Text)
 			}
 		}
@@ -107,11 +107,11 @@ func TestIssueCreatedKeyboardHasNoBackOrCancel(t *testing.T) {
 
 func TestIssueStatusAndTypeLabels(t *testing.T) {
 	statuses := map[model.IssueStatus]string{
-		model.IssueOnReview:      "On review",
-		model.IssueReady:         "Ready for development",
-		model.IssueInDevelopment: "In development",
-		model.IssueImplemented:   "Implemented",
-		model.IssueCancelled:     "Cancelled",
+		model.IssueOnReview:      "На розгляді",
+		model.IssueReady:         "Готово до розробки",
+		model.IssueInDevelopment: "У розробці",
+		model.IssueImplemented:   "Реалізовано",
+		model.IssueCancelled:     "Скасовано",
 	}
 	for status, want := range statuses {
 		if got := issueStatusLabel(status); !strings.Contains(got, want) {
@@ -120,9 +120,9 @@ func TestIssueStatusAndTypeLabels(t *testing.T) {
 	}
 
 	types := map[model.IssueType]string{
-		model.IssueTypeFeature: "Feature request",
-		model.IssueTypeBug:     "Bug fix",
-		model.IssueTypeOther:   "Other",
+		model.IssueTypeFeature: "Пропозиція",
+		model.IssueTypeBug:     "Помилка",
+		model.IssueTypeOther:   "Інше",
 	}
 	for issueType, want := range types {
 		if got := issueTypeLabel(issueType); !strings.Contains(got, want) {
@@ -171,7 +171,7 @@ func TestIssueListKeyboardWithoutPagination(t *testing.T) {
 
 func TestFormatIssueListEmptyState(t *testing.T) {
 	text := formatIssueList(nil, 0, 0)
-	if !strings.Contains(text, "haven't filed any issues") {
+	if !strings.Contains(text, "ще не створили жодного звернення") {
 		t.Errorf("empty list should explain there is nothing yet:\n%s", text)
 	}
 }
@@ -182,7 +182,7 @@ func TestIssueViewKeyboardHidesUnstartedThread(t *testing.T) {
 
 	for _, row := range issueViewKeyboard(issue, 0, 0).InlineKeyboard {
 		for _, btn := range row {
-			if strings.Contains(btn.Text, "Discussion") {
+			if strings.Contains(btn.Text, "Обговорення") {
 				t.Error("discussion button should be hidden until a thread is started")
 			}
 		}
@@ -192,13 +192,13 @@ func TestIssueViewKeyboardHidesUnstartedThread(t *testing.T) {
 	found := false
 	for _, row := range issueViewKeyboard(issue, 3, 2).InlineKeyboard {
 		for _, btn := range row {
-			if strings.Contains(btn.Text, "Discussion (3)") {
+			if strings.Contains(btn.Text, "Обговорення (3)") {
 				found = true
 				if btn.CallbackData != "iss:thr:"+issue.ID.String() {
 					t.Errorf("discussion callback = %q", btn.CallbackData)
 				}
 			}
-			if strings.Contains(btn.Text, "Back") && btn.CallbackData != "iss:list:2" {
+			if strings.Contains(btn.Text, "Назад") && btn.CallbackData != "iss:list:2" {
 				t.Errorf("back should return to the originating page, got %q", btn.CallbackData)
 			}
 		}
@@ -209,17 +209,17 @@ func TestIssueViewKeyboardHidesUnstartedThread(t *testing.T) {
 }
 
 func TestValidateIssueText(t *testing.T) {
-	if msg := validateIssueText("  ", issueTitleMaxLen, "title"); msg == "" {
+	if msg := validateIssueText("  ", issueTitleMaxLen, issueFieldTitle); msg == "" {
 		t.Error("blank title should be rejected")
 	}
-	if msg := validateIssueText(strings.Repeat("я", issueTitleMaxLen+1), issueTitleMaxLen, "title"); msg == "" {
+	if msg := validateIssueText(strings.Repeat("я", issueTitleMaxLen+1), issueTitleMaxLen, issueFieldTitle); msg == "" {
 		t.Error("over-long title should be rejected")
 	}
 	// Counted in runes, so a full-length Cyrillic title still fits.
-	if msg := validateIssueText(strings.Repeat("я", issueTitleMaxLen), issueTitleMaxLen, "title"); msg != "" {
+	if msg := validateIssueText(strings.Repeat("я", issueTitleMaxLen), issueTitleMaxLen, issueFieldTitle); msg != "" {
 		t.Errorf("exactly-max title should be accepted, got %q", msg)
 	}
-	if msg := validateIssueText("Add calendar export", issueTitleMaxLen, "title"); msg != "" {
+	if msg := validateIssueText("Add calendar export", issueTitleMaxLen, issueFieldTitle); msg != "" {
 		t.Errorf("valid title rejected: %q", msg)
 	}
 }
@@ -260,7 +260,7 @@ func TestFormatIssueThreadAttributesBothSides(t *testing.T) {
 
 	out := formatIssueThread(issue, comments)
 
-	if !strings.Contains(out, "🛠 Team") || !strings.Contains(out, "👤 You") {
+	if !strings.Contains(out, "🛠 Команда") || !strings.Contains(out, "👤 Ви") {
 		t.Errorf("expected both sides attributed, got:\n%s", out)
 	}
 	// The admin's identity stays inside the dashboard.
@@ -277,7 +277,7 @@ func TestFormatIssueThreadAttributesBothSides(t *testing.T) {
 
 func TestFormatIssueThreadEmptyState(t *testing.T) {
 	out := formatIssueThread(model.Issue{ID: uuid.New(), Number: 3, Title: "Dark mode"}, nil)
-	if !strings.Contains(out, "No messages yet.") {
+	if !strings.Contains(out, "Поки що немає повідомлень.") {
 		t.Errorf("expected an empty-thread notice, got:\n%s", out)
 	}
 }
@@ -326,10 +326,10 @@ func TestIssueStatusLabelsCoverEveryStatus(t *testing.T) {
 		}
 		seen[label] = true
 	}
-	if got := issueStatusLabel(model.IssueRejected); !strings.Contains(got, "Rejected") {
+	if got := issueStatusLabel(model.IssueRejected); !strings.Contains(got, "Відхилено") {
 		t.Errorf("rejected label = %q", got)
 	}
-	if got := issueStatusLabel(model.IssueDuplicate); !strings.Contains(got, "Duplicate") {
+	if got := issueStatusLabel(model.IssueDuplicate); !strings.Contains(got, "Дублікат") {
 		t.Errorf("duplicate label = %q", got)
 	}
 }
@@ -340,7 +340,7 @@ func TestIssueViewShowsStatusNote(t *testing.T) {
 	issue.StatusNote = "Out of scope <for now>"
 
 	text := formatIssueView(issue, 0)
-	if !strings.Contains(text, "Note from the team") {
+	if !strings.Contains(text, "Коментар команди") {
 		t.Errorf("expected the status note to be shown on the issue:\n%s", text)
 	}
 	if !strings.Contains(text, "Out of scope &lt;for now&gt;") {
@@ -349,7 +349,7 @@ func TestIssueViewShowsStatusNote(t *testing.T) {
 
 	// An issue with no note must not grow an empty section.
 	issue.StatusNote = ""
-	if strings.Contains(formatIssueView(issue, 0), "Note from the team") {
+	if strings.Contains(formatIssueView(issue, 0), "Коментар команди") {
 		t.Error("expected no note section when there is no note")
 	}
 }
@@ -365,7 +365,7 @@ func TestIssueStatusNotificationCarriesTheNote(t *testing.T) {
 	}
 
 	issue.StatusNote = ""
-	if strings.Contains(formatIssueStatusNotification(issue, model.IssueOnReview), "Note from the team") {
+	if strings.Contains(formatIssueStatusNotification(issue, model.IssueOnReview), "Коментар команди") {
 		t.Error("expected no note section in a plain status DM")
 	}
 }
@@ -377,7 +377,7 @@ func TestClosedThreadHidesReply(t *testing.T) {
 	hasReply := func(kb gotgbot.InlineKeyboardMarkup) bool {
 		for _, row := range kb.InlineKeyboard {
 			for _, btn := range row {
-				if strings.Contains(btn.Text, "Reply") {
+				if strings.Contains(btn.Text, "Відповісти") {
 					return true
 				}
 			}
@@ -398,7 +398,7 @@ func TestClosedThreadHidesReply(t *testing.T) {
 	text := formatIssueThread(issue, []model.IssueComment{
 		{AuthorRole: model.IssueCommentAdmin, Body: "Thanks!"},
 	})
-	if !strings.Contains(text, "closed") {
+	if !strings.Contains(text, "закрито") {
 		t.Errorf("a closed thread should say so:\n%s", text)
 	}
 	if !strings.Contains(text, "Thanks!") {
@@ -409,7 +409,7 @@ func TestClosedThreadHidesReply(t *testing.T) {
 	var found bool
 	for _, row := range issueViewKeyboard(issue, 2, 0).InlineKeyboard {
 		for _, btn := range row {
-			if strings.Contains(btn.Text, "Discussion (2)") {
+			if strings.Contains(btn.Text, "Обговорення (2)") {
 				found = true
 			}
 		}
@@ -426,7 +426,7 @@ func TestIssueDeleteConfirmation(t *testing.T) {
 	var deleteData string
 	for _, row := range issueViewKeyboard(issue, 0, 3).InlineKeyboard {
 		for _, btn := range row {
-			if strings.Contains(btn.Text, "Delete") {
+			if strings.Contains(btn.Text, "Видалити") {
 				deleteData = btn.CallbackData
 			}
 		}
@@ -436,7 +436,7 @@ func TestIssueDeleteConfirmation(t *testing.T) {
 	}
 
 	text := formatIssueDeleteConfirm(issue)
-	if !strings.Contains(text, "cannot be undone") {
+	if !strings.Contains(text, "Скасувати цю дію неможливо") {
 		t.Errorf("the confirmation should warn that deletion is permanent:\n%s", text)
 	}
 
@@ -472,7 +472,7 @@ func TestIssueScreensFitTelegramMessageLimit(t *testing.T) {
 	if n := renderedLen(view); n > telegramTextMaxLen {
 		t.Errorf("formatIssueView rendered %d characters, want at most %d", n, telegramTextMaxLen)
 	}
-	if !strings.Contains(view, "Note from the team") {
+	if !strings.Contains(view, "Коментар команди") {
 		t.Errorf("the team's note must survive truncation, got:\n%s", view)
 	}
 
@@ -494,7 +494,7 @@ func TestIssueScreensFitTelegramMessageLimit(t *testing.T) {
 	if !strings.Contains(thread, "The newest message.") {
 		t.Errorf("expected the newest message to survive, got:\n%s", thread)
 	}
-	if !strings.Contains(thread, "earlier messages hidden") {
+	if !strings.Contains(thread, "приховано") {
 		t.Errorf("expected a notice for the dropped messages, got:\n%s", thread)
 	}
 }
@@ -508,7 +508,7 @@ func TestFormatIssueThreadKeepsShortTranscriptsIntact(t *testing.T) {
 	}
 
 	out := formatIssueThread(issue, comments)
-	if strings.Contains(out, "hidden") {
+	if strings.Contains(out, "приховано") {
 		t.Errorf("a two-message thread must not be truncated, got:\n%s", out)
 	}
 	if !strings.Contains(out, "Which calendar app?") || !strings.Contains(out, "Google Calendar.") {

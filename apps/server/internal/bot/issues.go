@@ -381,7 +381,7 @@ func (b *Bot) handleIssueInput(bot *gotgbot.Bot, ctx *ext.Context, draft *model.
 func (b *Bot) handleIssueTitleInput(bot *gotgbot.Bot, ctx *ext.Context, draft *model.IssueDraft, input string) error {
 	reqCtx := context.Background()
 
-	if msg := validateIssueText(input, issueTitleMaxLen, "title"); msg != "" {
+	if msg := validateIssueText(input, issueTitleMaxLen, issueFieldTitle); msg != "" {
 		return b.editIssuePrompt(bot, draft, formatIssueTitlePrompt(draft.IssueType, msg),
 			issueWizardKeyboard(issuesCallbackPrefix+"new"))
 	}
@@ -400,7 +400,7 @@ func (b *Bot) handleIssueTitleInput(bot *gotgbot.Bot, ctx *ext.Context, draft *m
 func (b *Bot) handleIssueBodyInput(bot *gotgbot.Bot, ctx *ext.Context, draft *model.IssueDraft, input string) error {
 	reqCtx := context.Background()
 
-	if msg := validateIssueText(input, issueBodyMaxLen, "description"); msg != "" {
+	if msg := validateIssueText(input, issueBodyMaxLen, issueFieldBody); msg != "" {
 		return b.editIssuePrompt(bot, draft, formatIssueBodyPrompt(draft.IssueType, draft.Title, msg),
 			issueWizardKeyboard(issuesCallbackPrefix+"back:title"))
 	}
@@ -417,7 +417,7 @@ func (b *Bot) handleIssueBodyInput(bot *gotgbot.Bot, ctx *ext.Context, draft *mo
 	if err != nil {
 		slog.Error("creating issue", "error", err, "telegram_id", draft.TelegramID)
 		return b.editIssuePrompt(bot, draft, formatIssueBodyPrompt(draft.IssueType, draft.Title,
-			"Could not save the issue. Please send the description again."),
+			"Не вдалося зберегти звернення. Надішліть опис ще раз."),
 			issueWizardKeyboard(issuesCallbackPrefix+"back:title"))
 	}
 
@@ -455,7 +455,7 @@ func (b *Bot) handleIssueReplyInput(bot *gotgbot.Bot, ctx *ext.Context, draft *m
 		return b.editIssuePrompt(bot, draft, formatIssueThread(issue, comments), issueThreadKeyboard(issue))
 	}
 
-	if msg := validateIssueText(input, model.IssueCommentMaxLen, "reply"); msg != "" {
+	if msg := validateIssueText(input, model.IssueCommentMaxLen, issueFieldReply); msg != "" {
 		return b.editIssuePrompt(bot, draft, formatIssueReplyPrompt(issue, msg),
 			issueWizardKeyboard(issuesCallbackPrefix+"thr:"+issue.ID.String()))
 	}
@@ -471,7 +471,7 @@ func (b *Bot) handleIssueReplyInput(bot *gotgbot.Bot, ctx *ext.Context, draft *m
 		Body:        input,
 	}); err != nil {
 		slog.Error("saving issue reply", "error", err, "issue_id", issue.ID)
-		return b.editIssuePrompt(bot, draft, formatIssueReplyPrompt(issue, "Could not send the reply. Please try again."),
+		return b.editIssuePrompt(bot, draft, formatIssueReplyPrompt(issue, "Не вдалося надіслати відповідь. Спробуйте ще раз."),
 			issueWizardKeyboard(issuesCallbackPrefix+"thr:"+issue.ID.String()))
 	}
 
@@ -486,14 +486,38 @@ func (b *Bot) handleIssueReplyInput(bot *gotgbot.Bot, ctx *ext.Context, draft *m
 	return b.editIssuePrompt(bot, draft, formatIssueThread(issue, comments), issueThreadKeyboard(issue))
 }
 
+// issueField carries the two ready-made wordings a field needs for its
+// validation errors. Ukrainian inflects the noun and agrees the predicate with
+// its gender, so a single "The %s cannot be empty." template cannot be shared
+// across "заголовок", "опис" and "відповідь".
+type issueField struct {
+	empty      string
+	tooLongFmt string // takes the character limit
+}
+
+var (
+	issueFieldTitle = issueField{
+		empty:      "Заголовок не може бути порожнім.",
+		tooLongFmt: "Заголовок задовгий — вкладіться у %d символів.",
+	}
+	issueFieldBody = issueField{
+		empty:      "Опис не може бути порожнім.",
+		tooLongFmt: "Опис задовгий — вкладіться у %d символів.",
+	}
+	issueFieldReply = issueField{
+		empty:      "Відповідь не може бути порожньою.",
+		tooLongFmt: "Відповідь задовга — вкладіться у %d символів.",
+	}
+)
+
 // validateIssueText returns an empty string when input is acceptable, or the
 // error line to show above the prompt.
-func validateIssueText(input string, max int, field string) string {
+func validateIssueText(input string, max int, field issueField) string {
 	if strings.TrimSpace(input) == "" {
-		return fmt.Sprintf("The %s cannot be empty.", field)
+		return field.empty
 	}
 	if len([]rune(input)) > max {
-		return fmt.Sprintf("That %s is too long — keep it under %d characters.", field, max)
+		return fmt.Sprintf(field.tooLongFmt, max)
 	}
 	return ""
 }

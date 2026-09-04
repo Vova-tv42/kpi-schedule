@@ -142,7 +142,7 @@ func (b *Bot) SetupCommands() error {
 		{Command: "urls", Description: "Посилання на онлайн-заняття"},
 		{Command: "group", Description: "Керування академічними групами"},
 		{Command: "settings", Description: "Налаштування сповіщень"},
-		{Command: "issues", Description: "Report a bug or request a feature"},
+		{Command: "issues", Description: "Повідомити про помилку або запропонувати ідею"},
 		{Command: "install", Description: "Інструкція та завантаження розширення"},
 		{Command: "link", Description: "Отримати код прив'язки браузерного розширення"},
 		{Command: "start", Description: "Знайомство та головне меню"},
@@ -218,7 +218,7 @@ func (b *Bot) RegisterWebhook(webhookURL, secretToken string) error {
 	defer cancel()
 
 	// 0. Ensure commands are updated when commands configuration version changes
-	const currentCommandsVersion = "v3_issues"
+	const currentCommandsVersion = "v4_issues_ua"
 	if b.db != nil {
 		var cachedVer string
 		if ok, _ := b.db.CacheGet(ctx, "telegram_commands_version", 365*24*time.Hour, &cachedVer); !ok || cachedVer != currentCommandsVersion {

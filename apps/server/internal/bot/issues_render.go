@@ -21,45 +21,44 @@ const (
 // issuesPageSize is how many of a user's issues fit on one /issues list screen.
 const issuesPageSize = 5
 
-// The /issues screens are the bot's only English surface, at the user's
-// explicit request; every other screen in this package is Ukrainian.
+// Every /issues screen is Ukrainian, like the rest of the bot.
 const (
-	issuesDMOnlyText      = "⚠️ This command is available in a direct message with the bot only."
-	issuesGenericErrText  = "⚠️ Something went wrong. Please try again in a moment."
-	issuesInterruptedText = "⚠️ <b>That took too long.</b> The draft expired after 10 minutes and was discarded — nothing was saved. You can start again below.\n\n"
+	issuesDMOnlyText      = "⚠️ Ця команда доступна лише в приватному чаті з ботом."
+	issuesGenericErrText  = "⚠️ Щось пішло не так. Спробуйте ще раз за мить."
+	issuesInterruptedText = "⚠️ <b>Це зайняло забагато часу.</b> Чернетку втрачено через 10 хвилин — нічого не збережено. Можете почати знову нижче.\n\n"
 )
 
 func issueTypeLabel(t model.IssueType) string {
 	switch t {
 	case model.IssueTypeFeature:
-		return "💡 Feature request"
+		return "💡 Пропозиція"
 	case model.IssueTypeBug:
-		return "🐞 Bug fix"
+		return "🐞 Помилка"
 	case model.IssueTypeOther:
-		return "📝 Other"
+		return "📝 Інше"
 	default:
-		return "📝 Other"
+		return "📝 Інше"
 	}
 }
 
 func issueStatusLabel(s model.IssueStatus) string {
 	switch s {
 	case model.IssueOnReview:
-		return "🕓 On review"
+		return "🕓 На розгляді"
 	case model.IssueReady:
-		return "📌 Ready for development"
+		return "📌 Готово до розробки"
 	case model.IssueInDevelopment:
-		return "🔨 In development"
+		return "🔨 У розробці"
 	case model.IssueImplemented:
-		return "✅ Implemented"
+		return "✅ Реалізовано"
 	case model.IssueDuplicate:
-		return "🔁 Duplicate"
+		return "🔁 Дублікат"
 	case model.IssueRejected:
-		return "⛔ Rejected"
+		return "⛔ Відхилено"
 	case model.IssueCancelled:
-		return "🚫 Cancelled"
+		return "🚫 Скасовано"
 	default:
-		return "🕓 On review"
+		return "🕓 На розгляді"
 	}
 }
 
@@ -110,26 +109,26 @@ func renderedLen(s string) int {
 // (e.g. the expired-draft warning) above the body text.
 func formatIssuesMenu(notice string) string {
 	var b strings.Builder
-	b.WriteString("📮 <b>Issues</b>\n\n")
+	b.WriteString("📮 <b>Звернення</b>\n\n")
 	if notice != "" {
 		b.WriteString(notice)
 	}
-	b.WriteString("Found a bug or have an idea? File an issue and the team will pick it up here.\n\n")
-	b.WriteString("You can follow what happens to everything you file — every issue gets a number and a status.")
+	b.WriteString("Знайшли помилку або маєте ідею? Створіть звернення — команда розбереться з ним тут.\n\n")
+	b.WriteString("Ви можете стежити за всім, що надсилали, — кожне звернення отримує номер і статус.")
 	return b.String()
 }
 
 func issuesMenuKeyboard() gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-			{{Text: "📋 My issues", CallbackData: issuesCallbackPrefix + "list:0"}},
-			{{Text: "➕ New issue", CallbackData: issuesCallbackPrefix + "new"}},
+			{{Text: "📋 Мої звернення", CallbackData: issuesCallbackPrefix + "list:0"}},
+			{{Text: "➕ Нове звернення", CallbackData: issuesCallbackPrefix + "new"}},
 		},
 	}
 }
 
 func formatIssueTypePicker() string {
-	return "➕ <b>New issue</b>\n\nWhat kind of issue is this?"
+	return "➕ <b>Нове звернення</b>\n\nЯкого типу це звернення?"
 }
 
 // issueTypePickerKeyboard deliberately has no Back button: this is the first
@@ -137,34 +136,34 @@ func formatIssueTypePicker() string {
 func issueTypePickerKeyboard() gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-			{{Text: "💡 Feature request", CallbackData: issuesCallbackPrefix + "type:feature"}},
-			{{Text: "🐞 Bug fix", CallbackData: issuesCallbackPrefix + "type:bug"}},
-			{{Text: "📝 Other", CallbackData: issuesCallbackPrefix + "type:other"}},
-			{{Text: "✖️ Cancel", CallbackData: issuesCallbackPrefix + "cancel"}},
+			{{Text: "💡 Пропозиція", CallbackData: issuesCallbackPrefix + "type:feature"}},
+			{{Text: "🐞 Помилка", CallbackData: issuesCallbackPrefix + "type:bug"}},
+			{{Text: "📝 Інше", CallbackData: issuesCallbackPrefix + "type:other"}},
+			{{Text: "✖️ Скасувати", CallbackData: issuesCallbackPrefix + "cancel"}},
 		},
 	}
 }
 
 func formatIssueTitlePrompt(t model.IssueType, errorMsg string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "➕ <b>New issue</b> · %s\n\n", issueTypeLabel(t))
+	fmt.Fprintf(&b, "➕ <b>Нове звернення</b> · %s\n\n", issueTypeLabel(t))
 	if errorMsg != "" {
 		fmt.Fprintf(&b, "❌ <b>%s</b>\n\n", html.EscapeString(errorMsg))
 	}
-	b.WriteString("<b>Step 1 of 2 — Title</b>\n")
-	fmt.Fprintf(&b, "Send a short, descriptive title (up to %d characters).", issueTitleMaxLen)
+	b.WriteString("<b>Крок 1 з 2 — Заголовок</b>\n")
+	fmt.Fprintf(&b, "Надішліть короткий і зрозумілий заголовок (до %d символів).", issueTitleMaxLen)
 	return b.String()
 }
 
 func formatIssueBodyPrompt(t model.IssueType, title, errorMsg string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "➕ <b>New issue</b> · %s\n\n", issueTypeLabel(t))
+	fmt.Fprintf(&b, "➕ <b>Нове звернення</b> · %s\n\n", issueTypeLabel(t))
 	fmt.Fprintf(&b, "<b>%s</b>\n\n", html.EscapeString(title))
 	if errorMsg != "" {
 		fmt.Fprintf(&b, "❌ <b>%s</b>\n\n", html.EscapeString(errorMsg))
 	}
-	b.WriteString("<b>Step 2 of 2 — Description</b>\n")
-	fmt.Fprintf(&b, "Now send the details: what happens, what you expected, how to reproduce it (up to %d characters).", issueBodyMaxLen)
+	b.WriteString("<b>Крок 2 з 2 — Опис</b>\n")
+	fmt.Fprintf(&b, "Тепер надішліть деталі: що відбувається, чого ви очікували, як це відтворити (до %d символів).", issueBodyMaxLen)
 	return b.String()
 }
 
@@ -174,8 +173,8 @@ func issueWizardKeyboard(backCallback string) gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 			{
-				{Text: "◀️ Back", CallbackData: backCallback},
-				{Text: "✖️ Cancel", CallbackData: issuesCallbackPrefix + "cancel"},
+				{Text: "◀️ Назад", CallbackData: backCallback},
+				{Text: "✖️ Скасувати", CallbackData: issuesCallbackPrefix + "cancel"},
 			},
 		},
 	}
@@ -185,28 +184,28 @@ func issueWizardKeyboard(backCallback string) gotgbot.InlineKeyboardMarkup {
 // neither Back nor Cancel — the issue already exists at this point.
 func formatIssueCreated(issue model.Issue) string {
 	var b strings.Builder
-	b.WriteString("✅ <b>Issue created</b>\n\n")
+	b.WriteString("✅ <b>Звернення створено</b>\n\n")
 	b.WriteString(issueHeadline(issue))
 	fmt.Fprintf(&b, "\n%s · %s\n\n", issueTypeLabel(issue.Type), issueStatusLabel(issue.Status))
-	b.WriteString("Thanks! The team will review it soon.\n")
-	b.WriteString("You can track its status any time with /issues.")
+	b.WriteString("Дякуємо! Команда невдовзі його розгляне.\n")
+	b.WriteString("Перевірити статус можна будь-коли командою /issues.")
 	return b.String()
 }
 
 func issueCreatedKeyboard() gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-			{{Text: "📋 My issues", CallbackData: issuesCallbackPrefix + "list:0"}},
+			{{Text: "📋 Мої звернення", CallbackData: issuesCallbackPrefix + "list:0"}},
 		},
 	}
 }
 
 func formatIssueList(issues []model.Issue, page, total int) string {
 	var b strings.Builder
-	b.WriteString("📋 <b>My issues</b>\n\n")
+	b.WriteString("📋 <b>Мої звернення</b>\n\n")
 
 	if total == 0 {
-		b.WriteString("You haven't filed any issues yet.\nUse <b>«➕ New issue»</b> below to report a bug or suggest a feature.")
+		b.WriteString("Ви ще не створили жодного звернення.\nНатисніть <b>«➕ Нове звернення»</b> нижче, щоб повідомити про помилку або запропонувати ідею.")
 		return b.String()
 	}
 
@@ -217,9 +216,9 @@ func formatIssueList(issues []model.Issue, page, total int) string {
 
 	pages := (total + issuesPageSize - 1) / issuesPageSize
 	if pages > 1 {
-		fmt.Fprintf(&b, "<i>Page %d of %d · %d issues total</i>", page+1, pages, total)
+		fmt.Fprintf(&b, "<i>Сторінка %d з %d · усього звернень: %d</i>", page+1, pages, total)
 	} else {
-		b.WriteString("Tap an issue to open it.")
+		b.WriteString("Натисніть на звернення, щоб відкрити його.")
 	}
 	return b.String()
 }
@@ -254,10 +253,10 @@ func issueListKeyboard(issues []model.Issue, page, total int) gotgbot.InlineKeyb
 	}
 
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
-		{Text: "➕ New issue", CallbackData: issuesCallbackPrefix + "new"},
+		{Text: "➕ Нове звернення", CallbackData: issuesCallbackPrefix + "new"},
 	})
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
-		{Text: "◀️ Back", CallbackData: issuesCallbackPrefix + "menu"},
+		{Text: "◀️ Назад", CallbackData: issuesCallbackPrefix + "menu"},
 	})
 	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
@@ -266,12 +265,12 @@ func formatIssueView(issue model.Issue, commentCount int) string {
 	var b strings.Builder
 	b.WriteString(issueHeadline(issue))
 	fmt.Fprintf(&b, "\n%s · %s\n", issueTypeLabel(issue.Type), issueStatusLabel(issue.Status))
-	fmt.Fprintf(&b, "🗓 Filed %s\n\n", issue.CreatedAt.Format("02.01.2006"))
+	fmt.Fprintf(&b, "🗓 Створено %s\n\n", issue.CreatedAt.Format("02.01.2006"))
 
 	// The body and the team's note are each allowed to run to 3000 characters,
 	// so together they overflow a Telegram message. Split what the header left
 	// of the budget between them, giving the note at most half.
-	const noteHeading = "\n\n🛠 <b>Note from the team</b>\n"
+	const noteHeading = "\n\n🛠 <b>Коментар команди</b>\n"
 	budget := issueScreenBudget - renderedLen(b.String())
 	noteBudget := 0
 	if issue.StatusNote != "" {
@@ -290,11 +289,11 @@ func formatIssueView(issue model.Issue, commentCount int) string {
 
 	switch issue.ThreadState {
 	case model.IssueThreadOpen:
-		fmt.Fprintf(&b, "\n\n💬 The team started a discussion on this issue (%d %s).",
-			commentCount, pluralEN(commentCount, "message", "messages"))
+		fmt.Fprintf(&b, "\n\n💬 Команда розпочала обговорення цього звернення (%d %s).",
+			commentCount, pluralUA(commentCount, "повідомлення", "повідомлення", "повідомлень"))
 	case model.IssueThreadClosed:
-		fmt.Fprintf(&b, "\n\n🔒 The discussion on this issue is closed (%d %s). You can still read it.",
-			commentCount, pluralEN(commentCount, "message", "messages"))
+		fmt.Fprintf(&b, "\n\n🔒 Обговорення цього звернення закрито (%d %s). Його все ще можна читати.",
+			commentCount, pluralUA(commentCount, "повідомлення", "повідомлення", "повідомлень"))
 	}
 	return b.String()
 }
@@ -304,19 +303,19 @@ func issueViewKeyboard(issue model.Issue, commentCount, page int) gotgbot.Inline
 	// A closed thread is still readable, so the button stays — only the padlock
 	// and the missing Reply inside tell the user they can no longer write.
 	if issue.ThreadState.Started() {
-		label := fmt.Sprintf("💬 Discussion (%d)", commentCount)
+		label := fmt.Sprintf("💬 Обговорення (%d)", commentCount)
 		if issue.ThreadState == model.IssueThreadClosed {
-			label = fmt.Sprintf("🔒 Discussion (%d)", commentCount)
+			label = fmt.Sprintf("🔒 Обговорення (%d)", commentCount)
 		}
 		rows = append(rows, []gotgbot.InlineKeyboardButton{
 			{Text: label, CallbackData: fmt.Sprintf("%sthr:%s", issuesCallbackPrefix, issue.ID.String())},
 		})
 	}
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
-		{Text: "🗑 Delete", CallbackData: fmt.Sprintf("%sdel:%d:%s", issuesCallbackPrefix, page, issue.ID.String())},
+		{Text: "🗑 Видалити", CallbackData: fmt.Sprintf("%sdel:%d:%s", issuesCallbackPrefix, page, issue.ID.String())},
 	})
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
-		{Text: "◀️ Back", CallbackData: fmt.Sprintf("%slist:%d", issuesCallbackPrefix, page)},
+		{Text: "◀️ Назад", CallbackData: fmt.Sprintf("%slist:%d", issuesCallbackPrefix, page)},
 	})
 	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
@@ -325,9 +324,9 @@ func issueViewKeyboard(issue model.Issue, commentCount, page int) gotgbot.Inline
 // destroying an issue and its whole discussion.
 func formatIssueDeleteConfirm(issue model.Issue) string {
 	var b strings.Builder
-	b.WriteString("🗑 <b>Delete this issue?</b>\n")
+	b.WriteString("🗑 <b>Видалити це звернення?</b>\n")
 	b.WriteString(issueHeadline(issue))
-	b.WriteString("\n\nThis removes the issue and its discussion permanently, for you and for the team. It cannot be undone.")
+	b.WriteString("\n\nЦе назавжди видалить звернення та його обговорення — і для вас, і для команди. Скасувати цю дію неможливо.")
 	return b.String()
 }
 
@@ -335,52 +334,64 @@ func issueDeleteConfirmKeyboard(issue model.Issue, page int) gotgbot.InlineKeybo
 	id := issue.ID.String()
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-			{{Text: "🗑 Yes, delete it", CallbackData: fmt.Sprintf("%sdelok:%d:%s", issuesCallbackPrefix, page, id)}},
-			{{Text: "◀️ Keep it", CallbackData: fmt.Sprintf("%sview:%d:%s", issuesCallbackPrefix, page, id)}},
+			{{Text: "🗑 Так, видалити", CallbackData: fmt.Sprintf("%sdelok:%d:%s", issuesCallbackPrefix, page, id)}},
+			{{Text: "◀️ Залишити", CallbackData: fmt.Sprintf("%sview:%d:%s", issuesCallbackPrefix, page, id)}},
 		},
 	}
 }
 
-func pluralEN(n int, one, many string) string {
-	if n == 1 {
-		return one
+// pluralUA picks the Ukrainian plural form for n: "1 повідомлення",
+// "2 повідомлення", "5 повідомлень".
+func pluralUA(n int, one, few, many string) string {
+	if n < 0 {
+		n = -n
 	}
-	return many
+	if n%100 >= 11 && n%100 <= 14 {
+		return many
+	}
+	switch n % 10 {
+	case 1:
+		return one
+	case 2, 3, 4:
+		return few
+	default:
+		return many
+	}
 }
 
 // formatIssueThread renders the full admin↔user transcript, oldest first.
 func formatIssueThread(issue model.Issue, comments []model.IssueComment) string {
 	var b strings.Builder
 	if issue.ThreadState == model.IssueThreadClosed {
-		b.WriteString("🔒 <b>Discussion (closed)</b>\n")
+		b.WriteString("🔒 <b>Обговорення (закрито)</b>\n")
 	} else {
-		b.WriteString("💬 <b>Discussion</b>\n")
+		b.WriteString("💬 <b>Обговорення</b>\n")
 	}
 	b.WriteString(issueHeadline(issue))
 	fmt.Fprintf(&b, "\n%s\n\n", issueStatusLabel(issue.Status))
 
 	if issue.ThreadState == model.IssueThreadClosed {
-		b.WriteString("The team closed this discussion. You can still read it, but you can't send new messages.\n\n")
+		b.WriteString("Команда закрила це обговорення. Його ще можна читати, але надсилати нові повідомлення вже не можна.\n\n")
 	}
 
 	if len(comments) == 0 {
-		b.WriteString("No messages yet.")
+		b.WriteString("Поки що немає повідомлень.")
 		return b.String()
 	}
 
 	// A transcript grows without bound while a single message cannot, so the
 	// screen is filled newest-first and the oldest messages are dropped — a
 	// truncated tail beats a message Telegram refuses to send.
-	const hiddenNotice = "<i>… %d earlier %s hidden. The full discussion is in the dashboard.</i>\n\n"
-	budget := issueScreenBudget - renderedLen(b.String()) - renderedLen(fmt.Sprintf(hiddenNotice, len(comments), "messages"))
+	const hiddenNotice = "<i>… приховано %d попередніх %s. Повне обговорення — у панелі команди.</i>\n\n"
+	budget := issueScreenBudget - renderedLen(b.String()) - renderedLen(fmt.Sprintf(hiddenNotice, len(comments), "повідомлень"))
 
 	blocks := make([]string, 0, len(comments))
 	hidden := 0
 	for i := len(comments) - 1; i >= 0; i-- {
 		c := comments[i]
-		author := "🛠 Team"
+		author := "🛠 Команда"
 		if c.AuthorRole == model.IssueCommentUser {
-			author = "👤 You"
+			author = "👤 Ви"
 		}
 		head := fmt.Sprintf("%s · <i>%s</i>\n", author, c.CreatedAt.Format("02.01.2006 15:04"))
 		room := budget - renderedLen(head) - len("\n\n")
@@ -394,7 +405,7 @@ func formatIssueThread(issue model.Issue, comments []model.IssueComment) string 
 	}
 
 	if hidden > 0 {
-		fmt.Fprintf(&b, hiddenNotice, hidden, pluralEN(hidden, "message", "messages"))
+		fmt.Fprintf(&b, hiddenNotice, hidden, pluralUA(hidden, "повідомлення", "повідомлень", "повідомлень"))
 	}
 	for i := len(blocks) - 1; i >= 0; i-- {
 		b.WriteString(blocks[i])
@@ -409,29 +420,29 @@ func issueThreadKeyboard(issue model.Issue) gotgbot.InlineKeyboardMarkup {
 	// its Refresh stay, because a closed thread is still worth re-reading.
 	if issue.ThreadState == model.IssueThreadOpen {
 		rows = append(rows, []gotgbot.InlineKeyboardButton{
-			{Text: "✍️ Reply", CallbackData: issuesCallbackPrefix + "reply:" + id},
-			{Text: "🔄 Refresh", CallbackData: issuesCallbackPrefix + "thr:" + id},
+			{Text: "✍️ Відповісти", CallbackData: issuesCallbackPrefix + "reply:" + id},
+			{Text: "🔄 Оновити", CallbackData: issuesCallbackPrefix + "thr:" + id},
 		})
 	} else {
 		rows = append(rows, []gotgbot.InlineKeyboardButton{
-			{Text: "🔄 Refresh", CallbackData: issuesCallbackPrefix + "thr:" + id},
+			{Text: "🔄 Оновити", CallbackData: issuesCallbackPrefix + "thr:" + id},
 		})
 	}
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
-		{Text: "◀️ Back", CallbackData: issuesCallbackPrefix + "view:0:" + id},
+		{Text: "◀️ Назад", CallbackData: issuesCallbackPrefix + "view:0:" + id},
 	})
 	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 func formatIssueReplyPrompt(issue model.Issue, errorMsg string) string {
 	var b strings.Builder
-	b.WriteString("✍️ <b>Reply</b>\n")
+	b.WriteString("✍️ <b>Відповідь</b>\n")
 	b.WriteString(issueHeadline(issue))
 	b.WriteString("\n\n")
 	if errorMsg != "" {
 		fmt.Fprintf(&b, "❌ <b>%s</b>\n\n", html.EscapeString(errorMsg))
 	}
-	fmt.Fprintf(&b, "Send your reply as a message (up to %d characters). The team will see it on this issue.", model.IssueCommentMaxLen)
+	fmt.Fprintf(&b, "Надішліть відповідь повідомленням (до %d символів). Команда побачить її в цьому зверненні.", model.IssueCommentMaxLen)
 	return b.String()
 }
 
@@ -439,7 +450,7 @@ func formatIssueReplyPrompt(issue model.Issue, errorMsg string) string {
 // replies. It quotes the reply so the message is useful on its own.
 func formatIssueCommentNotification(issue model.Issue, comment model.IssueComment) string {
 	var b strings.Builder
-	b.WriteString("💬 <b>New reply on your issue</b>\n")
+	b.WriteString("💬 <b>Нова відповідь у вашому зверненні</b>\n")
 	b.WriteString(issueHeadline(issue))
 	fmt.Fprintf(&b, "\n\n<blockquote>%s</blockquote>", html.EscapeString(comment.Body))
 	return b.String()
@@ -448,7 +459,7 @@ func formatIssueCommentNotification(issue model.Issue, comment model.IssueCommen
 func issueCommentNotificationKeyboard(issue model.Issue) gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-			{{Text: "💬 Open discussion", CallbackData: issuesCallbackPrefix + "thr:" + issue.ID.String()}},
+			{{Text: "💬 Відкрити обговорення", CallbackData: issuesCallbackPrefix + "thr:" + issue.ID.String()}},
 		},
 	}
 }
@@ -457,12 +468,12 @@ func issueCommentNotificationKeyboard(issue model.Issue) gotgbot.InlineKeyboardM
 // their issue along.
 func formatIssueStatusNotification(issue model.Issue, previous model.IssueStatus) string {
 	var b strings.Builder
-	b.WriteString("🔄 <b>Issue status changed</b>\n")
+	b.WriteString("🔄 <b>Статус звернення змінився</b>\n")
 	b.WriteString(issueHeadline(issue))
 	fmt.Fprintf(&b, "\n\n%s → <b>%s</b>", issueStatusLabel(previous), issueStatusLabel(issue.Status))
 	// The admin's optional explanation, e.g. why the issue was rejected.
 	if issue.StatusNote != "" {
-		fmt.Fprintf(&b, "\n\n🛠 <b>Note from the team</b>\n<blockquote>%s</blockquote>",
+		fmt.Fprintf(&b, "\n\n🛠 <b>Коментар команди</b>\n<blockquote>%s</blockquote>",
 			html.EscapeString(issue.StatusNote))
 	}
 	return b.String()
@@ -473,21 +484,21 @@ func formatIssueStatusNotification(issue model.Issue, previous model.IssueStatus
 func formatIssueThreadStateNotification(issue model.Issue, _ model.IssueThreadState) string {
 	var b strings.Builder
 	if issue.ThreadState == model.IssueThreadClosed {
-		b.WriteString("🔒 <b>Discussion closed</b>\n")
+		b.WriteString("🔒 <b>Обговорення закрито</b>\n")
 		b.WriteString(issueHeadline(issue))
-		b.WriteString("\n\nThe team closed the discussion on this issue. You can still read the history, but you can't send new messages.")
+		b.WriteString("\n\nКоманда закрила обговорення цього звернення. Історію можна читати, але надсилати нові повідомлення вже не можна.")
 		return b.String()
 	}
-	b.WriteString("💬 <b>Discussion reopened</b>\n")
+	b.WriteString("💬 <b>Обговорення відновлено</b>\n")
 	b.WriteString(issueHeadline(issue))
-	b.WriteString("\n\nThe team reopened the discussion on this issue. You can reply again.")
+	b.WriteString("\n\nКоманда відновила обговорення цього звернення. Ви знову можете відповідати.")
 	return b.String()
 }
 
 func issueThreadStateNotificationKeyboard(issue model.Issue) gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-			{{Text: "💬 Open discussion", CallbackData: issuesCallbackPrefix + "thr:" + issue.ID.String()}},
+			{{Text: "💬 Відкрити обговорення", CallbackData: issuesCallbackPrefix + "thr:" + issue.ID.String()}},
 		},
 	}
 }
@@ -495,7 +506,7 @@ func issueThreadStateNotificationKeyboard(issue model.Issue) gotgbot.InlineKeybo
 func issueStatusNotificationKeyboard(issue model.Issue) gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-			{{Text: "📄 Open issue", CallbackData: issuesCallbackPrefix + "view:0:" + issue.ID.String()}},
+			{{Text: "📄 Відкрити звернення", CallbackData: issuesCallbackPrefix + "view:0:" + issue.ID.String()}},
 		},
 	}
 }
