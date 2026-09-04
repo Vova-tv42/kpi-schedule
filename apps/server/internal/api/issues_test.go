@@ -369,6 +369,13 @@ func TestPatchAdminIssueThreadCloseAndReopen(t *testing.T) {
 		t.Errorf("expected 409 closing a thread that was never started, got %d", rec.Code)
 	}
 
+	// Nor to reopen: that would give the reporter a Reply button over a blank
+	// transcript. Threads start with an admin comment, not with this endpoint.
+	rec = adminRequest(t, router, http.MethodPatch, threadPath, "", map[string]string{"state": "open"})
+	if rec.Code != http.StatusConflict {
+		t.Errorf("expected 409 opening a thread that was never started, got %d", rec.Code)
+	}
+
 	rec = adminRequest(t, router, http.MethodPatch, threadPath, "", map[string]string{"state": "none"})
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 for an unknown thread state, got %d", rec.Code)
@@ -414,6 +421,36 @@ func TestPatchAdminIssueThreadCloseAndReopen(t *testing.T) {
 	}
 	if rec = adminRequest(t, router, http.MethodPost, commentPath, "", map[string]string{"body": "One more thing"}); rec.Code != http.StatusCreated {
 		t.Errorf("expected 201 replying after reopening, got %d", rec.Code)
+	}
+}
+
+// TestPatchAdminIssueReportsCommentCount pins the issueView contract: every
+// response carrying an issue reports how many messages its thread holds.
+func TestPatchAdminIssueReportsCommentCount(t *testing.T) {
+	router, db, _ := setupIssuesRouter(t)
+	issue := seedIssue(t, db, "Add calendar export", model.IssueTypeFeature)
+	base := "/api/v1/admin/issues/" + issue.ID.String()
+
+	if rec := adminRequest(t, router, http.MethodPost, base+"/comments", "", map[string]string{"body": "Which app?"}); rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 posting a comment, got %d", rec.Code)
+	}
+
+	rec := adminRequest(t, router, http.MethodPatch, base+"/status", "", map[string]string{"status": "ready"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	view, _ := decodeBody(t, rec)["issue"].(map[string]any)
+	if count, _ := view["comment_count"].(float64); count != 1 {
+		t.Errorf("comment_count = %v, want 1", view["comment_count"])
+	}
+
+	rec = adminRequest(t, router, http.MethodPatch, base+"/thread", "", map[string]string{"state": "closed"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 closing the thread, got %d", rec.Code)
+	}
+	view, _ = decodeBody(t, rec)["issue"].(map[string]any)
+	if count, _ := view["comment_count"].(float64); count != 1 {
+		t.Errorf("comment_count = %v, want 1", view["comment_count"])
 	}
 }
 

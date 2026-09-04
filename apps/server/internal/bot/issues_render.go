@@ -3,6 +3,7 @@ package bot
 import (
 	"fmt"
 	"html"
+	"regexp"
 	"strings"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
@@ -69,11 +70,40 @@ func issueHeadline(issue model.Issue) string {
 }
 
 func truncateRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
 	runes := []rune(s)
 	if len(runes) <= max {
 		return s
 	}
+	if max == 1 {
+		return "…"
+	}
 	return strings.TrimSpace(string(runes[:max-1])) + "…"
+}
+
+// telegramTextMaxLen is Telegram's hard limit for a message's text. The limit
+// applies to the parsed text, so the HTML markup and the entity escapes these
+// screens are built from do not count against it.
+const telegramTextMaxLen = 4096
+
+// issueScreenBudget is the length an issue screen renders within. The headroom
+// under telegramTextMaxLen absorbs the wording of whatever notice a screen adds
+// around the parts being measured — an overlong screen is not merely ugly, it
+// is unsendable, which strands the user on a spinning button.
+const issueScreenBudget = telegramTextMaxLen - 196
+
+// minCommentPreview is the shortest excerpt of a discussion message worth
+// showing; anything less and the message is dropped from the screen instead.
+const minCommentPreview = 80
+
+var htmlTagPattern = regexp.MustCompile(`<[^>]*>`)
+
+// renderedLen is how long a fragment of these screens will be once Telegram has
+// parsed the HTML away — the length the 4096 limit is actually measured against.
+func renderedLen(s string) int {
+	return len([]rune(html.UnescapeString(htmlTagPattern.ReplaceAllString(s, ""))))
 }
 
 // formatIssuesMenu is the /issues root screen. notice carries a one-off banner
@@ -237,13 +267,25 @@ func formatIssueView(issue model.Issue, commentCount int) string {
 	b.WriteString(issueHeadline(issue))
 	fmt.Fprintf(&b, "\n%s · %s\n", issueTypeLabel(issue.Type), issueStatusLabel(issue.Status))
 	fmt.Fprintf(&b, "🗓 Filed %s\n\n", issue.CreatedAt.Format("02.01.2006"))
-	fmt.Fprintf(&b, "<blockquote>%s</blockquote>", html.EscapeString(issue.Body))
+
+	// The body and the team's note are each allowed to run to 3000 characters,
+	// so together they overflow a Telegram message. Split what the header left
+	// of the budget between them, giving the note at most half.
+	const noteHeading = "\n\n🛠 <b>Note from the team</b>\n"
+	budget := issueScreenBudget - renderedLen(b.String())
+	noteBudget := 0
+	if issue.StatusNote != "" {
+		budget -= renderedLen(noteHeading)
+		noteBudget = budget / 2
+	}
+
+	fmt.Fprintf(&b, "<blockquote>%s</blockquote>", html.EscapeString(truncateRunes(issue.Body, budget-noteBudget)))
 
 	// The note an admin attached to the last status change. Kept on the issue
 	// screen, not just in the one-off DM, so it can be re-read later.
 	if issue.StatusNote != "" {
-		fmt.Fprintf(&b, "\n\n🛠 <b>Note from the team</b>\n<blockquote>%s</blockquote>",
-			html.EscapeString(issue.StatusNote))
+		fmt.Fprintf(&b, noteHeading+"<blockquote>%s</blockquote>",
+			html.EscapeString(truncateRunes(issue.StatusNote, noteBudget)))
 	}
 
 	switch issue.ThreadState {
@@ -326,13 +368,36 @@ func formatIssueThread(issue model.Issue, comments []model.IssueComment) string 
 		return b.String()
 	}
 
-	for _, c := range comments {
+	// A transcript grows without bound while a single message cannot, so the
+	// screen is filled newest-first and the oldest messages are dropped — a
+	// truncated tail beats a message Telegram refuses to send.
+	const hiddenNotice = "<i>… %d earlier %s hidden. The full discussion is in the dashboard.</i>\n\n"
+	budget := issueScreenBudget - renderedLen(b.String()) - renderedLen(fmt.Sprintf(hiddenNotice, len(comments), "messages"))
+
+	blocks := make([]string, 0, len(comments))
+	hidden := 0
+	for i := len(comments) - 1; i >= 0; i-- {
+		c := comments[i]
 		author := "🛠 Team"
 		if c.AuthorRole == model.IssueCommentUser {
 			author = "👤 You"
 		}
-		fmt.Fprintf(&b, "%s · <i>%s</i>\n<blockquote>%s</blockquote>\n\n",
-			author, c.CreatedAt.Format("02.01.2006 15:04"), html.EscapeString(c.Body))
+		head := fmt.Sprintf("%s · <i>%s</i>\n", author, c.CreatedAt.Format("02.01.2006 15:04"))
+		room := budget - renderedLen(head) - len("\n\n")
+		if room < minCommentPreview {
+			hidden = i + 1
+			break
+		}
+		body := truncateRunes(c.Body, room)
+		budget -= renderedLen(head) + len([]rune(body)) + len("\n\n")
+		blocks = append(blocks, fmt.Sprintf("%s<blockquote>%s</blockquote>\n\n", head, html.EscapeString(body)))
+	}
+
+	if hidden > 0 {
+		fmt.Fprintf(&b, hiddenNotice, hidden, pluralEN(hidden, "message", "messages"))
+	}
+	for i := len(blocks) - 1; i >= 0; i-- {
+		b.WriteString(blocks[i])
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

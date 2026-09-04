@@ -144,12 +144,25 @@ type IssueFilter struct {
 	Offset int
 }
 
+// likeEscapeChar is the escape character declared by the ESCAPE clause in the
+// search predicate. A user searching for "100_000" or a literal "%" means those
+// characters, not LIKE wildcards, so they are neutralised before the pattern is
+// built.
+const likeEscapeChar = `\`
+
+var likeEscaper = strings.NewReplacer(
+	likeEscapeChar, likeEscapeChar+likeEscapeChar,
+	"%", likeEscapeChar+"%",
+	"_", likeEscapeChar+"_",
+)
+
 // buildIssueWhere renders the shared WHERE clause for ListIssues/CountIssues so
-// the list and its total can never drift apart.
-func buildIssueWhere(f IssueFilter) (string, []any) {
+// the list and its total can never drift apart. withStatus is false for the
+// per-status tally, which needs every status under the *other* filters.
+func buildIssueWhere(f IssueFilter, withStatus bool) (string, []any) {
 	var clauses []string
 	var args []any
-	if f.Status != "" {
+	if withStatus && f.Status != "" {
 		clauses = append(clauses, `status = ?`)
 		args = append(args, f.Status)
 	}
@@ -158,8 +171,11 @@ func buildIssueWhere(f IssueFilter) (string, []any) {
 		args = append(args, f.Type)
 	}
 	if q := strings.TrimSpace(f.Query); q != "" {
-		clauses = append(clauses, `(title LIKE ? OR body LIKE ? OR author_username LIKE ?)`)
-		like := "%" + q + "%"
+		// Positional (never numbered) placeholders: LIMIT/OFFSET are appended
+		// to the same arg list by the caller.
+		const esc = ` ESCAPE '` + likeEscapeChar + `'`
+		clauses = append(clauses, `(title LIKE ?`+esc+` OR body LIKE ?`+esc+` OR author_username LIKE ?`+esc+`)`)
+		like := "%" + likeEscaper.Replace(q) + "%"
 		args = append(args, like, like, like)
 	}
 	if len(clauses) == 0 {
@@ -177,7 +193,7 @@ func (db *DB) ListIssues(ctx context.Context, f IssueFilter) ([]model.Issue, err
 	if limit > 200 {
 		limit = 200
 	}
-	where, args := buildIssueWhere(f)
+	where, args := buildIssueWhere(f, true)
 	args = append(args, limit, f.Offset)
 
 	rows, err := db.SQL.QueryContext(ctx, `SELECT `+issueColumns+` FROM issues`+where+` ORDER BY number DESC LIMIT ? OFFSET ?`, args...)
@@ -189,7 +205,7 @@ func (db *DB) ListIssues(ctx context.Context, f IssueFilter) ([]model.Issue, err
 
 // CountIssues returns the total number of issues matching the filter.
 func (db *DB) CountIssues(ctx context.Context, f IssueFilter) (int, error) {
-	where, args := buildIssueWhere(f)
+	where, args := buildIssueWhere(f, true)
 	var n int
 	if err := db.SQL.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues`+where, args...).Scan(&n); err != nil {
 		return 0, fmt.Errorf("counting issues: %w", err)
@@ -198,8 +214,12 @@ func (db *DB) CountIssues(ctx context.Context, f IssueFilter) (int, error) {
 }
 
 // CountIssuesByStatus returns totals per status for the dashboard's filter tabs.
-func (db *DB) CountIssuesByStatus(ctx context.Context) (map[string]int, error) {
-	rows, err := db.SQL.QueryContext(ctx, `SELECT status, COUNT(*) FROM issues GROUP BY status`)
+// The filter's own Status is ignored — the tabs exist to switch between
+// statuses — but Type and Query are honoured, so the tab labels always describe
+// the same set of issues the table below them is paging through.
+func (db *DB) CountIssuesByStatus(ctx context.Context, f IssueFilter) (map[string]int, error) {
+	where, args := buildIssueWhere(f, false)
+	rows, err := db.SQL.QueryContext(ctx, `SELECT status, COUNT(*) FROM issues`+where+` GROUP BY status`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("counting issues by status: %w", err)
 	}
@@ -322,6 +342,13 @@ func scanIssueComment(row interface{ Scan(...any) error }) (model.IssueComment, 
 
 // AddIssueComment appends one message to an issue's discussion thread and
 // bumps the issue's updated_at so the dashboard can sort by recent activity.
+//
+// The same transaction lifts a thread that was still "none" to "open": the
+// first admin comment is what starts a discussion, and doing it in a second
+// statement risked a stored comment the reporter could never reach (an "Open
+// discussion" DM whose button leads to a thread the bot still considers
+// unstarted). A reply from the reporter can only happen on an already-open
+// thread, so the CASE is a no-op there.
 func (db *DB) AddIssueComment(ctx context.Context, comment model.IssueComment) (model.IssueComment, error) {
 	now := time.Now().UTC()
 	comment.ID = uuid.New()
@@ -341,7 +368,12 @@ func (db *DB) AddIssueComment(ctx context.Context, comment model.IssueComment) (
 		return model.IssueComment{}, fmt.Errorf("inserting issue comment: %w", err)
 	}
 
-	if _, err := tx.ExecContext(ctx, `UPDATE issues SET updated_at = ? WHERE id = ?`, now, comment.IssueID.String()); err != nil {
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE issues
+		SET updated_at = ?,
+		    thread_state = CASE WHEN thread_state = ? THEN ? ELSE thread_state END
+		WHERE id = ?
+	`, now, string(model.IssueThreadNone), string(model.IssueThreadOpen), comment.IssueID.String()); err != nil {
 		return model.IssueComment{}, fmt.Errorf("touching issue: %w", err)
 	}
 
@@ -370,6 +402,46 @@ func (db *DB) ListIssueComments(ctx context.Context, issueID uuid.UUID) ([]model
 			return nil, err
 		}
 		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// CountIssueCommentsByIssue tallies the messages of several threads at once, so
+// listing the queue costs one query instead of one per row. Issues with no
+// comments are simply absent from the map.
+func (db *DB) CountIssueCommentsByIssue(ctx context.Context, issueIDs []uuid.UUID) (map[uuid.UUID]int, error) {
+	out := make(map[uuid.UUID]int, len(issueIDs))
+	if len(issueIDs) == 0 {
+		return out, nil
+	}
+
+	args := make([]any, len(issueIDs))
+	for i, id := range issueIDs {
+		args[i] = id.String()
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(issueIDs)), ",")
+
+	rows, err := db.SQL.QueryContext(ctx, `
+		SELECT issue_id, COUNT(*) FROM issue_comments
+		WHERE issue_id IN (`+placeholders+`)
+		GROUP BY issue_id
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("counting issue comments by issue: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var idStr string
+		var n int
+		if err := rows.Scan(&idStr, &n); err != nil {
+			return nil, fmt.Errorf("scanning issue comment count: %w", err)
+		}
+		id, err := uuid.Parse(idStr)
+		if err != nil {
+			return nil, fmt.Errorf("parsing comment issue uuid: %w", err)
+		}
+		out[id] = n
 	}
 	return out, rows.Err()
 }

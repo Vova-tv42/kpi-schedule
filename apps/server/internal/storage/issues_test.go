@@ -149,12 +149,136 @@ func TestUpdateIssueStatusAndFilters(t *testing.T) {
 		t.Fatalf("search returned %+v, want only the bug", matches)
 	}
 
-	counts, err := db.CountIssuesByStatus(ctx)
+	counts, err := db.CountIssuesByStatus(ctx, IssueFilter{})
 	if err != nil {
 		t.Fatalf("CountIssuesByStatus: %v", err)
 	}
 	if counts[string(model.IssueOnReview)] != 1 || counts[string(model.IssueInDevelopment)] != 1 {
 		t.Errorf("status counts = %v, want one on_review and one in_development", counts)
+	}
+
+	// The tally answers for the table below it, so the type and search filters
+	// narrow it too — only the status filter is ignored, since the tabs are how
+	// a status is chosen.
+	scoped, err := db.CountIssuesByStatus(ctx, IssueFilter{
+		Status: string(model.IssueOnReview),
+		Type:   string(model.IssueTypeBug),
+	})
+	if err != nil {
+		t.Fatalf("CountIssuesByStatus(type): %v", err)
+	}
+	if len(scoped) != 1 || scoped[string(model.IssueInDevelopment)] != 1 {
+		t.Errorf("scoped status counts = %v, want only the in_development bug", scoped)
+	}
+}
+
+// TestIssueSearchEscapesLikeWildcards keeps "_" and "%" in a search literal,
+// rather than letting them match any character.
+func TestIssueSearchEscapesLikeWildcards(t *testing.T) {
+	ctx := context.Background()
+	db, _, telegramID := setupTestDB(t)
+
+	literal := createTestIssue(t, db, telegramID, "Rejects 100_000 as a group size", model.IssueTypeBug)
+	createTestIssue(t, db, telegramID, "Rejects 100X000 as a group size", model.IssueTypeBug)
+
+	matches, err := db.ListIssues(ctx, IssueFilter{Query: "100_000"})
+	if err != nil {
+		t.Fatalf("ListIssues(query): %v", err)
+	}
+	if len(matches) != 1 || matches[0].ID != literal.ID {
+		t.Fatalf("search for 100_000 returned %d issues, want only the literal match", len(matches))
+	}
+
+	none, err := db.CountIssues(ctx, IssueFilter{Query: "%"})
+	if err != nil {
+		t.Fatalf("CountIssues(query): %v", err)
+	}
+	if none != 0 {
+		t.Errorf(`CountIssues(q="%%") = %d, want 0 — a bare %% is a literal, not "everything"`, none)
+	}
+}
+
+// TestAddIssueCommentOpensThread pins the invariant the reporter's DM depends
+// on: a stored comment always leaves the thread reachable.
+func TestAddIssueCommentOpensThread(t *testing.T) {
+	ctx := context.Background()
+	db, _, telegramID := setupTestDB(t)
+	issue := createTestIssue(t, db, telegramID, "Calendar export", model.IssueTypeFeature)
+
+	if issue.ThreadState != model.IssueThreadNone {
+		t.Fatalf("new issue thread state = %q, want none", issue.ThreadState)
+	}
+	if _, err := db.AddIssueComment(ctx, model.IssueComment{
+		IssueID:     issue.ID,
+		AuthorRole:  model.IssueCommentAdmin,
+		AuthorLabel: "admin@example.com",
+		Body:        "Which calendar app do you use?",
+	}); err != nil {
+		t.Fatalf("AddIssueComment: %v", err)
+	}
+
+	opened, err := db.GetIssueByID(ctx, issue.ID)
+	if err != nil {
+		t.Fatalf("GetIssueByID: %v", err)
+	}
+	if opened.ThreadState != model.IssueThreadOpen {
+		t.Errorf("thread state = %q, want open", opened.ThreadState)
+	}
+
+	// A comment on a closed thread must not silently reopen it.
+	if err := db.SetIssueThreadState(ctx, issue.ID, model.IssueThreadClosed); err != nil {
+		t.Fatalf("SetIssueThreadState: %v", err)
+	}
+	if _, err := db.AddIssueComment(ctx, model.IssueComment{
+		IssueID:     issue.ID,
+		AuthorRole:  model.IssueCommentAdmin,
+		AuthorLabel: "admin@example.com",
+		Body:        "Following up.",
+	}); err != nil {
+		t.Fatalf("AddIssueComment(closed): %v", err)
+	}
+	stillClosed, err := db.GetIssueByID(ctx, issue.ID)
+	if err != nil {
+		t.Fatalf("GetIssueByID: %v", err)
+	}
+	if stillClosed.ThreadState != model.IssueThreadClosed {
+		t.Errorf("thread state = %q, want closed", stillClosed.ThreadState)
+	}
+}
+
+// TestCountIssueCommentsByIssue covers the batched tally the queue listing uses.
+func TestCountIssueCommentsByIssue(t *testing.T) {
+	ctx := context.Background()
+	db, _, telegramID := setupTestDB(t)
+
+	withComments := createTestIssue(t, db, telegramID, "Calendar export", model.IssueTypeFeature)
+	silent := createTestIssue(t, db, telegramID, "Week view crashes", model.IssueTypeBug)
+
+	for i := 0; i < 3; i++ {
+		if _, err := db.AddIssueComment(ctx, model.IssueComment{
+			IssueID:     withComments.ID,
+			AuthorRole:  model.IssueCommentAdmin,
+			AuthorLabel: "admin@example.com",
+			Body:        "ping",
+		}); err != nil {
+			t.Fatalf("AddIssueComment: %v", err)
+		}
+	}
+
+	counts, err := db.CountIssueCommentsByIssue(ctx, []uuid.UUID{withComments.ID, silent.ID})
+	if err != nil {
+		t.Fatalf("CountIssueCommentsByIssue: %v", err)
+	}
+	if counts[withComments.ID] != 3 {
+		t.Errorf("count = %d, want 3", counts[withComments.ID])
+	}
+	if _, ok := counts[silent.ID]; ok {
+		t.Errorf("an issue with no comments should be absent from the map, got %v", counts[silent.ID])
+	}
+
+	empty, err := db.CountIssueCommentsByIssue(ctx, nil)
+	if err != nil || len(empty) != 0 {
+		t.Errorf("CountIssueCommentsByIssue(nil) = %v, %v; want empty map, nil", empty, err)
 	}
 }
 

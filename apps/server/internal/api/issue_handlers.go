@@ -135,7 +135,17 @@ func (h *handlers) getAdminIssues(w http.ResponseWriter, r *http.Request) {
 		model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, err.Error())
 		return
 	}
-	statusCounts, err := h.svc.DB().CountIssuesByStatus(r.Context())
+	statusCounts, err := h.svc.DB().CountIssuesByStatus(r.Context(), filter)
+	if err != nil {
+		model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, err.Error())
+		return
+	}
+
+	ids := make([]uuid.UUID, 0, len(issues))
+	for _, issue := range issues {
+		ids = append(ids, issue.ID)
+	}
+	counts, err := h.svc.DB().CountIssueCommentsByIssue(r.Context(), ids)
 	if err != nil {
 		model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, err.Error())
 		return
@@ -143,12 +153,7 @@ func (h *handlers) getAdminIssues(w http.ResponseWriter, r *http.Request) {
 
 	views := make([]issueView, 0, len(issues))
 	for _, issue := range issues {
-		count, err := h.svc.DB().CountIssueComments(r.Context(), issue.ID)
-		if err != nil {
-			// A missing count is not worth failing the whole queue over.
-			slog.Warn("counting issue comments", "error", err, "issue_id", issue.ID)
-		}
-		views = append(views, toIssueView(issue, count))
+		views = append(views, toIssueView(issue, counts[issue.ID]))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -204,6 +209,17 @@ func (h *handlers) getAdminIssue(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// issueCommentCount is a best-effort tally for a response body: a count the
+// caller only displays is not worth failing an already-committed write over.
+func (h *handlers) issueCommentCount(r *http.Request, issue model.Issue) int {
+	n, err := h.svc.DB().CountIssueComments(r.Context(), issue.ID)
+	if err != nil {
+		slog.Warn("counting issue comments", "error", err, "issue_id", issue.ID)
+		return 0
+	}
+	return n
+}
+
 func (h *handlers) patchAdminIssueStatus(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
@@ -239,7 +255,7 @@ func (h *handlers) patchAdminIssueStatus(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		// Nothing changed; don't notify the reporter about a no-op.
-		writeJSON(w, http.StatusOK, map[string]any{"issue": toIssueView(issue, 0), "changed": false})
+		writeJSON(w, http.StatusOK, map[string]any{"issue": toIssueView(issue, h.issueCommentCount(r, issue)), "changed": false})
 		return
 	}
 
@@ -264,7 +280,7 @@ func (h *handlers) patchAdminIssueStatus(w http.ResponseWriter, r *http.Request)
 		})
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"issue": toIssueView(issue, 0), "changed": true})
+	writeJSON(w, http.StatusOK, map[string]any{"issue": toIssueView(issue, h.issueCommentCount(r, issue)), "changed": true})
 }
 
 func (h *handlers) postAdminIssueComment(w http.ResponseWriter, r *http.Request) {
@@ -314,13 +330,12 @@ func (h *handlers) postAdminIssueComment(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// The first admin comment is what opens the thread for the reporter.
+	// The first admin comment is what opens the thread for the reporter, and
+	// AddIssueComment already did it in the same transaction — so the DM below
+	// can never hand out a button leading to a thread the bot thinks is
+	// unstarted.
 	if !issue.ThreadState.Started() {
-		if err := h.svc.DB().SetIssueThreadState(r.Context(), issue.ID, model.IssueThreadOpen); err != nil {
-			slog.Error("opening issue thread", "error", err, "issue_id", issue.ID)
-		} else {
-			issue.ThreadState = model.IssueThreadOpen
-		}
+		issue.ThreadState = model.IssueThreadOpen
 	}
 
 	h.svc.NotifyIssueComment(r.Context(), issue, comment)
@@ -356,14 +371,17 @@ func (h *handlers) patchAdminIssueThread(w http.ResponseWriter, r *http.Request)
 			`state must be "open" or "closed"`)
 		return
 	}
-	if next == model.IssueThreadClosed && !issue.ThreadState.Started() {
+	// Threads are admin-initiated by the first comment, so neither state can be
+	// reached from "none": there is nothing to close, and "reopening" an empty
+	// thread would hand the reporter a Reply button over a blank transcript.
+	if !issue.ThreadState.Started() {
 		model.WriteError(w, http.StatusConflict, model.ErrInvalidRequest,
-			"there is no discussion to close yet")
+			"there is no discussion yet; post a comment to start one")
 		return
 	}
 
 	if next == issue.ThreadState {
-		writeJSON(w, http.StatusOK, map[string]any{"issue": toIssueView(issue, 0), "changed": false})
+		writeJSON(w, http.StatusOK, map[string]any{"issue": toIssueView(issue, h.issueCommentCount(r, issue)), "changed": false})
 		return
 	}
 
@@ -380,7 +398,7 @@ func (h *handlers) patchAdminIssueThread(w http.ResponseWriter, r *http.Request)
 		h.telemetry.ReportAction("admin_action", "issue_thread:"+req.State, http.StatusOK, time.Since(start).Milliseconds(), nil)
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"issue": toIssueView(issue, 0), "changed": true})
+	writeJSON(w, http.StatusOK, map[string]any{"issue": toIssueView(issue, h.issueCommentCount(r, issue)), "changed": true})
 }
 
 // deleteAdminIssue removes an issue and its whole discussion permanently. The

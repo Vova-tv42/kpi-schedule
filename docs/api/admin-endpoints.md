@@ -126,7 +126,7 @@ For SELECT/read queries (including `WITH`, `PRAGMA`, `EXPLAIN`, `VALUES`, and `R
 - **Query Parameters**:
   - `status`: One of `on_review`, `ready`, `in_development`, `implemented`, `duplicate`, `rejected`, `cancelled`. An unknown value returns `400 ERR_INVALID_REQUEST`.
   - `type`: One of `feature`, `bug`, `other`. An unknown value returns `400 ERR_INVALID_REQUEST`.
-  - `q`: Case-insensitive substring match against the issue title and body.
+  - `q`: Substring match against the issue title, body and reporter `@username`. `%` and `_` in the term are matched literally, not as SQL wildcards. Case-insensitivity comes from SQLite's `LIKE`, which folds ASCII only — a Cyrillic term matches case-sensitively.
   - `limit`: Integer (default: 50).
   - `offset`: Integer (default: 0).
 - **Access**: `read-only`, `read-write`, `superadmin`
@@ -158,7 +158,7 @@ For SELECT/read queries (including `WITH`, `PRAGMA`, `EXPLAIN`, `VALUES`, and `R
   "status_counts": { "on_review": 1 }
 }
 ```
-`status_counts` is a tally across the whole table (it ignores the filters) so the dashboard can label its status tabs without an extra round trip.
+`status_counts` is the per-status tally the dashboard labels its status tabs with, saving a round trip. It honours the `type` and `q` filters but ignores `status` — the tabs are how a status is picked — so the tab labels always describe the same set of issues the table below them is paging through.
 
 ### 2.6 Get Issue with Discussion Thread
 - **Method**: `GET`
@@ -189,6 +189,8 @@ For SELECT/read queries (including `WITH`, `PRAGMA`, `EXPLAIN`, `VALUES`, and `R
 ```
 Comments are ordered oldest first. `author_role` is `admin` or `user`; `author_label` is the admin email or the reporter's `@username` (their first name when they have no username).
 
+Every response carrying an `issue` object reports its real `comment_count`, including the `PATCH` responses of §2.7 and §2.9.
+
 `thread_state` is `none` (no discussion yet), `open` (the reporter can read and reply) or `closed` (the reporter can read but not reply). See §2.9.
 
 ### 2.7 Update Issue Status
@@ -218,7 +220,7 @@ Re-sending the status an issue already has is a no-op: the response carries `"ch
 { "body": "Which calendar app do you use?" }
 ```
 - **Validation**: The body is trimmed and must be 1–3000 characters; otherwise `400 ERR_INVALID_REQUEST`.
-- **Side effects**: The comment is stored with `author_role: "admin"` and `author_label` set from `X-Admin-Email`. The **first** admin comment moves `issues.thread_state` from `none` to `open`, which is what makes the discussion screen visible to the reporter in the bot — threads are admin-initiated by design. The reporter is then DM'd with a button that opens the thread. See [`docs/bot/issues.md`](../bot/issues.md).
+- **Side effects**: The comment is stored with `author_role: "admin"` and `author_label` set from `X-Admin-Email`. The **first** admin comment moves `issues.thread_state` from `none` to `open`, which is what makes the discussion screen visible to the reporter in the bot — threads are admin-initiated by design. The insert and that transition share one transaction, so a comment is never stored behind a thread the bot still considers unstarted (which would leave the reporter a DM button that goes nowhere). The reporter is then DM'd with a button that opens the thread. See [`docs/bot/issues.md`](../bot/issues.md).
 - **Closed threads**: posting into a thread whose `thread_state` is `closed` returns `409 ERR_INVALID_REQUEST`. Reopening it (§2.9) is a separate, deliberate act, so a reply never silently resurrects a discussion the reporter was told had ended.
 - **Telemetry**: Reports an anonymous `admin_action` event (`issue_comment`).
 - **Response**: `201 Created`
@@ -243,7 +245,7 @@ Re-sending the status an issue already has is a no-op: the response carries `"ch
 ```json
 { "state": "closed" }
 ```
-- **Validation**: `state` must be `"open"` or `"closed"` — anything else, including `"none"`, returns `400 ERR_INVALID_REQUEST`, since a thread with history is not one that never existed. Closing a thread that was never started returns `409 ERR_INVALID_REQUEST`.
+- **Validation**: `state` must be `"open"` or `"closed"` — anything else, including `"none"`, returns `400 ERR_INVALID_REQUEST`, since a thread with history is not one that never existed. Either state on a thread that was never started returns `409 ERR_INVALID_REQUEST`: there is nothing to close, and "reopening" an empty thread would hand the reporter a Reply button over a blank transcript. Post a comment (§2.8) to start one.
 - **Semantics**: Closing stops the reporter sending new messages; they keep read access to the whole transcript, and the bot replaces their Reply button with a padlock. Reopening restores replies on both sides.
 - **Side effects**: DMs the reporter either way, so a Reply button that appears or disappears is never a mystery. Best-effort, as elsewhere.
 - **Telemetry**: Reports an anonymous `admin_action` event (`issue_thread:{state}`).

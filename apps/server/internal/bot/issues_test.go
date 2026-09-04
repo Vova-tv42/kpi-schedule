@@ -456,3 +456,65 @@ func TestIssueDeleteConfirmation(t *testing.T) {
 		}
 	}
 }
+
+// Telegram refuses a message longer than 4096 parsed characters, and a refused
+// edit strands the reporter on a spinning button — so every screen built from
+// user- or admin-supplied text has to fit on its own.
+func TestIssueScreensFitTelegramMessageLimit(t *testing.T) {
+	long := strings.Repeat("я", model.IssueCommentMaxLen)
+
+	issue := sampleIssue(12, strings.Repeat("t", issueTitleMaxLen))
+	issue.Body = long
+	issue.StatusNote = long
+	issue.ThreadState = model.IssueThreadOpen
+
+	view := formatIssueView(issue, 40)
+	if n := renderedLen(view); n > telegramTextMaxLen {
+		t.Errorf("formatIssueView rendered %d characters, want at most %d", n, telegramTextMaxLen)
+	}
+	if !strings.Contains(view, "Note from the team") {
+		t.Errorf("the team's note must survive truncation, got:\n%s", view)
+	}
+
+	comments := make([]model.IssueComment, 12)
+	for i := range comments {
+		comments[i] = model.IssueComment{
+			AuthorRole: model.IssueCommentAdmin,
+			Body:       long,
+			CreatedAt:  time.Date(2026, 9, 4, 12, i, 0, 0, time.UTC),
+		}
+	}
+	comments[len(comments)-1].Body = "The newest message."
+
+	thread := formatIssueThread(issue, comments)
+	if n := renderedLen(thread); n > telegramTextMaxLen {
+		t.Errorf("formatIssueThread rendered %d characters, want at most %d", n, telegramTextMaxLen)
+	}
+	// The tail is what the reporter is here for; the head is what gets dropped.
+	if !strings.Contains(thread, "The newest message.") {
+		t.Errorf("expected the newest message to survive, got:\n%s", thread)
+	}
+	if !strings.Contains(thread, "earlier messages hidden") {
+		t.Errorf("expected a notice for the dropped messages, got:\n%s", thread)
+	}
+}
+
+// A short thread is shown whole, with no truncation notice.
+func TestFormatIssueThreadKeepsShortTranscriptsIntact(t *testing.T) {
+	issue := sampleIssue(12, "Add calendar export")
+	comments := []model.IssueComment{
+		{AuthorRole: model.IssueCommentAdmin, Body: "Which calendar app?"},
+		{AuthorRole: model.IssueCommentUser, Body: "Google Calendar."},
+	}
+
+	out := formatIssueThread(issue, comments)
+	if strings.Contains(out, "hidden") {
+		t.Errorf("a two-message thread must not be truncated, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Which calendar app?") || !strings.Contains(out, "Google Calendar.") {
+		t.Errorf("expected both messages, got:\n%s", out)
+	}
+	if strings.Index(out, "Which calendar app?") > strings.Index(out, "Google Calendar.") {
+		t.Errorf("expected oldest-first ordering, got:\n%s", out)
+	}
+}

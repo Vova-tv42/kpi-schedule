@@ -21,6 +21,8 @@ import (
 // not require a linked account — anyone who can talk to the bot can file an
 // issue. It is private-chat only.
 func (b *Bot) cmdIssues(bot *gotgbot.Bot, ctx *ext.Context) error {
+	// The command is not even listed in the group command menus (see
+	// SetupCommands); typing it anyway gets a pointer to the DM, not a screen.
 	if isGroupChat(ctx.EffectiveChat) {
 		_, err := bot.SendMessage(ctx.EffectiveChat.Id, issuesDMOnlyText, nil)
 		return err
@@ -40,6 +42,16 @@ func (b *Bot) onIssues(bot *gotgbot.Bot, ctx *ext.Context) error {
 	cq := ctx.CallbackQuery
 	if cq == nil {
 		return nil
+	}
+	// Issues are a DM-only feature, so no issue screen — and therefore no issue
+	// button — can legitimately exist in a group. A tap that arrives from one
+	// was forwarded or crafted; it never touches the queue.
+	if isGroupChat(ctx.EffectiveChat) {
+		_, err := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+			Text:      issuesDMOnlyText,
+			ShowAlert: true,
+		})
+		return err
 	}
 	action := strings.TrimPrefix(cq.Data, issuesCallbackPrefix)
 	reqCtx := context.Background()

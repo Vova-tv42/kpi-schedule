@@ -10,7 +10,10 @@ Implementation: [`internal/bot/issues.go`](../../apps/server/internal/bot/issues
 
 ## 1. Scope & Access
 
-- **DM only.** `/issues` is registered under `BotCommandScopeAllPrivateChats` only. Invoked in a group it replies with the standard DM-only notice and does nothing else.
+- **DM only**, enforced on all three entry points rather than by the command menu alone:
+  - `/issues` is registered under `BotCommandScopeAllPrivateChats` only. Typed in a group anyway, `cmdIssues` replies with the standard DM-only notice and does nothing else.
+  - `onIssues` refuses every `iss:` callback that arrives from a group chat with the same notice as an alert. No issue screen can legitimately exist there, so such a tap was forwarded or crafted.
+  - `onTextMessage` does not even look up a wizard draft for a message sent in a group. The draft is keyed by `telegram_id`, so without this a user with an open wizard would have had their group messages deleted and filed as issue text. The DM path additionally checks `draft.chat_id` against the chat the message came from.
 - **No linked account required.** Unlike `/today` or `/urls`, filing an issue does not need a paired browser extension — anyone who can talk to the bot can report a problem.
 - **Private by author.** A user only ever sees issues they filed. `iss:view:` re-checks `author_telegram_id` against the caller before rendering, so a leaked or guessed callback payload cannot open someone else's issue.
 
@@ -114,7 +117,7 @@ Payloads stay well inside Telegram's 64-byte `callback_data` limit (`iss:view:0:
 
 ## 6. Discussion Threads
 
-Threads are **admin-initiated**, per the feature's spec. `issues.thread_state` starts at `none` and moves to `open` the first time an admin comments from the dashboard; only then does the user see a `💬 Discussion (N)` button on the issue view. A user cannot open a thread unilaterally — `iss:thr:` silently no-ops while the state is `none`, so a guessed callback cannot conjure one either.
+Threads are **admin-initiated**, per the feature's spec. `issues.thread_state` starts at `none` and moves to `open` the first time an admin comments from the dashboard — in the *same transaction* as the comment insert (`AddIssueComment`), so a stored comment can never leave the reporter with an "Open discussion" DM whose button leads to a thread the bot still thinks is unstarted. Only then does the user see a `💬 Discussion (N)` button on the issue view. A user cannot open a thread unilaterally — `iss:thr:` silently no-ops while the state is `none`, so a guessed callback cannot conjure one either.
 
 An admin can also **close** a thread, and reopen it later:
 
@@ -134,7 +137,16 @@ Closing is deliberately not deletion: the history stays fully readable, only the
 
 The Reply gate is enforced in three places, not just by hiding the button: `iss:reply:` no-ops unless the state is `open`, and `handleIssueReplyInput` re-checks it before saving — a thread closed between the prompt and the answer drops the reply and shows the closed transcript instead.
 
-The thread renders the full history oldest-first, each message in a `<blockquote>`, attributed `👤 You` or `🛠 Team` — the admin's email is never shown to the user. Replies obey the same 3000-rune limit as issue bodies (`model.IssueCommentMaxLen`).
+The thread renders the history oldest-first, each message in a `<blockquote>`, attributed `👤 You` or `🛠 Team` — the admin's email is never shown to the user. Replies obey the same 3000-rune limit as issue bodies (`model.IssueCommentMaxLen`).
+
+### Fitting a Telegram message
+
+Telegram rejects a message whose **parsed** text (markup and entity escapes do not count) exceeds 4096 characters, and a rejected edit leaves the tapped button spinning forever. A transcript grows without bound, and an issue body and a status note are 3000 runes each, so two screens are rendered against a budget (`issueScreenBudget`, measured with `renderedLen`):
+
+- **Issue view** splits what the header leaves of the budget between the body and the team's note, giving the note at most half. Both are elided with `…` when they do not fit.
+- **Discussion thread** fills newest-first and drops the oldest messages, prefacing the transcript with *"… N earlier messages hidden. The full discussion is in the dashboard."* A message with less than `minCommentPreview` characters of room is dropped rather than shown as a stub. Short threads render whole, with no notice.
+
+`applyScreen` also answers the callback query on an edit failure, so any screen that still manages to be unsendable stops the spinner instead of hanging the button.
 
 `✍️ Reply` writes a draft with `step = "reply"` and `issue_id` set, under the same 10-minute TTL as the creation wizard (§4), and reuses the identical mechanics: the user's message is deleted, the bot's single message is edited in place, and the thread re-renders with the new comment appended. `✖️ Cancel` deletes the bot's message, exactly as in the wizard.
 

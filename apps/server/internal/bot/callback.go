@@ -384,7 +384,10 @@ func (b *Bot) applyScreen(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, text stri
 		opts.ReplyMarkup = kb
 	}
 	if _, _, err := bot.EditMessageText(opts); err != nil && !isNotModified(err) {
-		return fmt.Errorf("editing message for callback: %w", err)
+		// The spinner has to stop even when the screen cannot be drawn —
+		// returning the error alone would leave the button loading forever.
+		slog.Error("editing message for callback", "error", err, "telegram_id", cq.From.Id)
+		return answerWithError(bot, cq)
 	}
 	return answerSilently(bot, cq)
 }

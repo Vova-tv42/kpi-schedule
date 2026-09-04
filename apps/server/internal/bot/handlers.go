@@ -878,6 +878,52 @@ func (b *Bot) handleGroupInput(bot *gotgbot.Bot, ctx *ext.Context, prompt *model
 	return nil
 }
 
+// consumeIssueDraftMessage feeds a typed message into the caller's in-flight
+// /issues wizard. It reports handled=true whenever the message belongs to the
+// wizard — including the paths that deliberately leave it alone — so the caller
+// never also offers it to the URL or group prompts, which starting a wizard
+// cleared anyway.
+func (b *Bot) consumeIssueDraftMessage(bot *gotgbot.Bot, ctx *ext.Context, reqCtx context.Context) (bool, error) {
+	msg := ctx.EffectiveMessage
+
+	draft, err := b.db.GetIssueDraft(reqCtx, ctx.EffectiveUser.Id)
+	if errors.Is(err, storage.ErrIssueDraftExpired) {
+		if _, delErr := bot.DeleteMessage(ctx.EffectiveChat.Id, msg.MessageId, nil); delErr != nil {
+			slog.Warn("could not delete user issue message", "error", delErr)
+		}
+		// Take the stale wizard message with it — the sweeper will never see
+		// this draft again now that reading it consumed the row.
+		if draft != nil {
+			if _, delErr := bot.DeleteMessage(draft.ChatID, draft.PromptMessageID, nil); delErr != nil {
+				slog.Warn("could not delete expired issue wizard message", "error", delErr)
+			}
+		}
+		return true, sendScreen(bot, ctx.EffectiveChat.Id, formatIssuesMenu(issuesInterruptedText), issuesMenuKeyboard(), true)
+	}
+	if err != nil {
+		slog.Error("checking issue draft", "error", err, "telegram_id", ctx.EffectiveUser.Id)
+		return true, nil
+	}
+	if draft == nil {
+		return false, nil
+	}
+	// The draft is keyed by user, not by chat. /issues is DM-only, so this only
+	// ever guards against a draft opened in some other private chat — the
+	// message there is none of this wizard's business.
+	if draft.ChatID != ctx.EffectiveChat.Id {
+		return true, nil
+	}
+
+	if _, delErr := bot.DeleteMessage(ctx.EffectiveChat.Id, msg.MessageId, nil); delErr != nil {
+		slog.Warn("could not delete user issue message", "error", delErr)
+	}
+	if strings.HasPrefix(msg.Text, "/") {
+		_ = b.db.ClearIssueDraft(reqCtx, ctx.EffectiveUser.Id)
+		return true, nil
+	}
+	return true, b.handleIssueInput(bot, ctx, draft, strings.TrimSpace(msg.Text))
+}
+
 func (b *Bot) onTextMessage(bot *gotgbot.Bot, ctx *ext.Context) error {
 	msg := ctx.EffectiveMessage
 	if msg == nil || msg.Text == "" {
@@ -901,34 +947,13 @@ func (b *Bot) onTextMessage(bot *gotgbot.Bot, ctx *ext.Context) error {
 
 	// 1. Check active /issues wizard draft. Checked first because it is the
 	// most recently opened prompt whenever one is active — starting a wizard
-	// clears the others, and vice versa.
-	draft, draftErr := b.db.GetIssueDraft(reqCtx, ctx.EffectiveUser.Id)
-	if errors.Is(draftErr, storage.ErrIssueDraftExpired) {
-		if _, delErr := bot.DeleteMessage(ctx.EffectiveChat.Id, msg.MessageId, nil); delErr != nil {
-			slog.Warn("could not delete user issue message", "error", delErr)
+	// clears the others, and vice versa. The wizard is DM-only, so a group
+	// message can never belong to one and is not even looked up.
+	if !isGroupChat(ctx.EffectiveChat) {
+		handled, err := b.consumeIssueDraftMessage(bot, ctx, reqCtx)
+		if handled {
+			return err
 		}
-		// Take the stale wizard message with it — the sweeper will never see
-		// this draft again now that reading it consumed the row.
-		if draft != nil {
-			if _, delErr := bot.DeleteMessage(draft.ChatID, draft.PromptMessageID, nil); delErr != nil {
-				slog.Warn("could not delete expired issue wizard message", "error", delErr)
-			}
-		}
-		return sendScreen(bot, ctx.EffectiveChat.Id, formatIssuesMenu(issuesInterruptedText), issuesMenuKeyboard(), true)
-	}
-	if draftErr != nil {
-		slog.Error("checking issue draft", "error", draftErr, "telegram_id", ctx.EffectiveUser.Id)
-		return nil
-	}
-	if draft != nil {
-		if _, delErr := bot.DeleteMessage(ctx.EffectiveChat.Id, msg.MessageId, nil); delErr != nil {
-			slog.Warn("could not delete user issue message", "error", delErr)
-		}
-		if strings.HasPrefix(msg.Text, "/") {
-			_ = b.db.ClearIssueDraft(reqCtx, ctx.EffectiveUser.Id)
-			return nil
-		}
-		return b.handleIssueInput(bot, ctx, draft, strings.TrimSpace(msg.Text))
 	}
 
 	// 2. Check active group input prompt
