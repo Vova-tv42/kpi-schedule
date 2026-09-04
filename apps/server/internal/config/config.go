@@ -20,6 +20,9 @@ type Config struct {
 	TelegramWebhookSecret string
 	ExtensionInstallURL   string
 	CronSecret            string
+	AdminAPISecret        string
+	AdminIngestURL        string
+	AdminIngestKey        string
 }
 
 func Load() (Config, error) {
@@ -36,12 +39,18 @@ func Load() (Config, error) {
 		TelegramWebhookSecret: os.Getenv("TELEGRAM_WEBHOOK_SECRET"),
 		ExtensionInstallURL:   os.Getenv("EXTENSION_INSTALL_URL"),
 		CronSecret:            os.Getenv("CRON_SECRET"),
+		AdminAPISecret:        os.Getenv("ADMIN_API_SECRET"),
+		AdminIngestURL:        os.Getenv("ADMIN_INGEST_URL"),
+		AdminIngestKey:        os.Getenv("ADMIN_INGEST_KEY"),
 	}
 	if cfg.ExtensionInstallURL == "" {
 		cfg.ExtensionInstallURL = os.Getenv("EXTENSION_DOWNLOAD_URL")
 	}
 	if cfg.CronSecret == "" {
 		cfg.CronSecret = cfg.InternalAPIToken
+	}
+	if cfg.AdminAPISecret == "" {
+		cfg.AdminAPISecret = cfg.InternalAPIToken
 	}
 
 	if cfg.DatabasePath == "" {

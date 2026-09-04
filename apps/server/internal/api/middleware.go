@@ -24,6 +24,38 @@ func internalTokenMiddleware(expected string) func(http.Handler) http.Handler {
 	}
 }
 
+// adminTokenMiddleware requires the X-Admin-Secret header (or X-Internal-Token fallback)
+// to match the configured secret.
+func adminTokenMiddleware(expected string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token := r.Header.Get("X-Admin-Secret")
+			if token == "" {
+				token = r.Header.Get("X-Internal-Token")
+			}
+			if token != expected {
+				model.WriteError(w, http.StatusUnauthorized, model.ErrUnauthorized, "missing or invalid X-Admin-Secret header")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// adminWritePermissionMiddleware ensures that callers with role 'read-only' cannot perform write operations.
+func adminWritePermissionMiddleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			role := r.Header.Get("X-Admin-Role")
+			if role == "read-only" {
+				model.WriteError(w, http.StatusForbidden, model.ErrUnauthorized, "read-only role cannot perform write or custom query operations")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // requestsPerMinutePerIP caps how many /api/v1 requests a single client IP
 // may make. This is separate from (and cannot substitute for) the per-user
 // limiter the future Telegram webhook route will need — every one of a

@@ -36,6 +36,11 @@ func (s *Service) Campus() *campus.Client {
 	return s.campus
 }
 
+// DB returns the underlying storage.DB client.
+func (s *Service) DB() *storage.DB {
+	return s.db
+}
+
 // GeneratePairCode creates a fresh one-time pairing code for telegramID,
 // retrying on the rare code collision. Shared by the HTTP endpoint
 // (sync_handlers.go, POST /api/v1/auth/pair/generate) and the Telegram

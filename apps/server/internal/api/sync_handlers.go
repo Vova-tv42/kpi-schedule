@@ -147,8 +147,12 @@ func (h *handlers) postAuthPairVerify(w http.ResponseWriter, r *http.Request) {
 // POST /api/v1/schedule/sync
 // Ingestion endpoint for the browser extension
 func (h *handlers) postScheduleSync(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	var req scheduleSyncRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if h.telemetry != nil {
+			h.telemetry.ReportAction("extension_sync", "schedule_sync", http.StatusBadRequest, time.Since(start).Milliseconds(), nil)
+		}
 		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "invalid json payload")
 		return
 	}
@@ -307,8 +311,17 @@ func (h *handlers) postScheduleSync(w http.ResponseWriter, r *http.Request) {
 
 	// 5. Replace lessons in DB
 	if err := h.svc.db.ReplaceLessons(r.Context(), user.ID, lessonsToStore, enrichmentStatus, nil); err != nil {
+		if h.telemetry != nil {
+			h.telemetry.ReportAction("extension_sync", "schedule_sync", http.StatusInternalServerError, time.Since(start).Milliseconds(), nil)
+		}
 		model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, fmt.Sprintf("storing lessons: %s", err))
 		return
+	}
+
+	if h.telemetry != nil {
+		h.telemetry.ReportAction("extension_sync", "schedule_sync", http.StatusOK, time.Since(start).Milliseconds(), map[string]any{
+			"lesson_count": len(lessonsToStore),
+		})
 	}
 
 	writeJSON(w, http.StatusOK, scheduleSyncResponse{

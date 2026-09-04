@@ -20,6 +20,7 @@ import (
 
 	"kpi-schedule-bot/server/internal/api"
 	"kpi-schedule-bot/server/internal/storage"
+	"kpi-schedule-bot/server/internal/telemetry"
 )
 
 // Bot wraps the Telegram bot's lifecycle: construction, update dispatch, and
@@ -31,6 +32,28 @@ type Bot struct {
 	svc                 *api.Service
 	db                  *storage.DB
 	extensionInstallURL string
+	telemetry           *telemetry.Client
+}
+
+// SetTelemetry registers a telemetry client for anonymous action logging.
+func (b *Bot) SetTelemetry(t *telemetry.Client) {
+	b.telemetry = t
+}
+
+func (b *Bot) wrap(actionType, actionName string, fn handlers.Response) handlers.Response {
+	return func(bot *gotgbot.Bot, ctx *ext.Context) error {
+		start := time.Now()
+		err := fn(bot, ctx)
+		duration := time.Since(start).Milliseconds()
+		status := 200
+		if err != nil {
+			status = 500
+		}
+		if b.telemetry != nil {
+			b.telemetry.ReportAction(actionType, actionName, status, duration, nil)
+		}
+		return err
+	}
 }
 
 // SetExtensionInstallURL overrides the external URL for installing the extension.
@@ -80,25 +103,25 @@ func New(token string, svc *api.Service, db *storage.DB, botOpts ...*gotgbot.Bot
 			return ext.DispatcherActionNoop
 		},
 	})
-	dispatcher.AddHandler(handlers.NewCommand("start", b.cmdStart))
-	dispatcher.AddHandler(handlers.NewCommand("install", b.cmdInstall))
-	dispatcher.AddHandler(handlers.NewCommand("link", b.cmdLink))
-	dispatcher.AddHandler(handlers.NewCommand("today", b.cmdToday))
-	dispatcher.AddHandler(handlers.NewCommand("week", b.cmdWeek))
-	dispatcher.AddHandler(handlers.NewCommand("urls", b.cmdURLs))
-	dispatcher.AddHandler(handlers.NewCommand("group", b.cmdGroup))
-	dispatcher.AddHandler(handlers.NewCommand("group_today", b.cmdGroupToday))
-	dispatcher.AddHandler(handlers.NewCommand("group_week", b.cmdGroupWeek))
-	dispatcher.AddHandler(handlers.NewCommand("settings", b.cmdSettings))
-	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(navCallbackPrefix), b.onNav))
-	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(weekCallbackPrefix), b.onWeek))
-	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(menuCallbackPrefix), b.onMenu))
-	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(urlsCallbackPrefix), b.onURLs))
-	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupCallbackPrefix), b.onGroup))
-	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupNavCallbackPrefix), b.onGroupNav))
-	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupWeekCallbackPrefix), b.onGroupWeek))
-	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix("settings:"), b.onSettings))
-	dispatcher.AddHandler(handlers.NewMessage(message.All, b.onTextMessage))
+	dispatcher.AddHandler(handlers.NewCommand("start", b.wrap("telegram_command", "/start", b.cmdStart)))
+	dispatcher.AddHandler(handlers.NewCommand("install", b.wrap("telegram_command", "/install", b.cmdInstall)))
+	dispatcher.AddHandler(handlers.NewCommand("link", b.wrap("telegram_command", "/link", b.cmdLink)))
+	dispatcher.AddHandler(handlers.NewCommand("today", b.wrap("telegram_command", "/today", b.cmdToday)))
+	dispatcher.AddHandler(handlers.NewCommand("week", b.wrap("telegram_command", "/week", b.cmdWeek)))
+	dispatcher.AddHandler(handlers.NewCommand("urls", b.wrap("telegram_command", "/urls", b.cmdURLs)))
+	dispatcher.AddHandler(handlers.NewCommand("group", b.wrap("telegram_command", "/group", b.cmdGroup)))
+	dispatcher.AddHandler(handlers.NewCommand("group_today", b.wrap("telegram_command", "/group_today", b.cmdGroupToday)))
+	dispatcher.AddHandler(handlers.NewCommand("group_week", b.wrap("telegram_command", "/group_week", b.cmdGroupWeek)))
+	dispatcher.AddHandler(handlers.NewCommand("settings", b.wrap("telegram_command", "/settings", b.cmdSettings)))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(navCallbackPrefix), b.wrap("telegram_callback", "nav", b.onNav)))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(weekCallbackPrefix), b.wrap("telegram_callback", "week", b.onWeek)))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(menuCallbackPrefix), b.wrap("telegram_callback", "menu", b.onMenu)))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(urlsCallbackPrefix), b.wrap("telegram_callback", "urls", b.onURLs)))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupCallbackPrefix), b.wrap("telegram_callback", "group", b.onGroup)))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupNavCallbackPrefix), b.wrap("telegram_callback", "group_nav", b.onGroupNav)))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupWeekCallbackPrefix), b.wrap("telegram_callback", "group_week", b.onGroupWeek)))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix("settings:"), b.wrap("telegram_callback", "settings", b.onSettings)))
+	dispatcher.AddHandler(handlers.NewMessage(message.All, b.wrap("telegram_message", "text", b.onTextMessage)))
 
 	b.dispatcher = dispatcher
 	b.updater = ext.NewUpdater(dispatcher, nil)

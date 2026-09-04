@@ -18,6 +18,7 @@ import (
 	"kpi-schedule-bot/server/internal/config"
 	"kpi-schedule-bot/server/internal/idle"
 	"kpi-schedule-bot/server/internal/storage"
+	"kpi-schedule-bot/server/internal/telemetry"
 )
 
 func main() {
@@ -43,6 +44,7 @@ func main() {
 
 	campusClient := campus.NewClient(db)
 	svc := api.NewService(db, campusClient)
+	telemetryClient := telemetry.NewClient(cfg.AdminIngestURL, cfg.AdminIngestKey)
 
 	var tgBot *bot.Bot
 	var webhookHandler http.HandlerFunc
@@ -52,6 +54,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("bot: %v", err)
 		}
+		tgBot.SetTelemetry(telemetryClient)
 		if cfg.ExtensionInstallURL != "" {
 			tgBot.SetExtensionInstallURL(cfg.ExtensionInstallURL)
 		}
@@ -66,6 +69,7 @@ func main() {
 	}
 
 	cronHandler := api.NewCronHandler(alertDispatcher, cfg.CronSecret)
+	cronHandler.SetTelemetry(telemetryClient)
 
 	idleWatcher := idle.New(cfg.IdleTimeout, "/healthz")
 	defer idleWatcher.Stop()
@@ -98,6 +102,8 @@ func main() {
 	router := api.NewRouterWithOpts(svc, cfg.InternalAPIToken, api.RouterOpts{
 		TelegramWebhookHandler: webhookHandler,
 		CronHandler:            cronHandler,
+		AdminSecret:            cfg.AdminAPISecret,
+		Telemetry:              telemetryClient,
 	})
 
 	srv := &http.Server{
