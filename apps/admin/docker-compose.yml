@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: kpi-admin-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: kpi_admin
+    ports:
+      - "${POSTGRES_PORT:-5435}:5432"
+    volumes:
+      - kpi_admin_pgdata:/var/lib/postgresql/data
+
+volumes:
+  kpi_admin_pgdata:

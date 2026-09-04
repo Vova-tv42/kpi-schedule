@@ -8,11 +8,13 @@ import (
 
 	"kpi-schedule-bot/server/internal/alerts"
 	"kpi-schedule-bot/server/internal/model"
+	"kpi-schedule-bot/server/internal/telemetry"
 )
 
 type CronHandler struct {
 	dispatcher *alerts.Dispatcher
 	cronSecret string
+	telemetry  *telemetry.Client
 }
 
 func NewCronHandler(dispatcher *alerts.Dispatcher, cronSecret string) *CronHandler {
@@ -20,6 +22,11 @@ func NewCronHandler(dispatcher *alerts.Dispatcher, cronSecret string) *CronHandl
 		dispatcher: dispatcher,
 		cronSecret: cronSecret,
 	}
+}
+
+// SetTelemetry attaches a telemetry client to report cron alert runs.
+func (h *CronHandler) SetTelemetry(t *telemetry.Client) {
+	h.telemetry = t
 }
 
 // HandleLessonAlerts triggers the scheduled lesson alerts check for personal users and group chats.
@@ -47,6 +54,7 @@ func (h *CronHandler) HandleLessonAlerts(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	start := time.Now()
 	if h.dispatcher == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"success": true,
@@ -56,9 +64,20 @@ func (h *CronHandler) HandleLessonAlerts(w http.ResponseWriter, r *http.Request)
 	}
 
 	result, err := h.dispatcher.Dispatch(r.Context(), time.Now())
+	duration := time.Since(start).Milliseconds()
 	if err != nil {
+		if h.telemetry != nil {
+			h.telemetry.ReportAction("cron_alert", "lesson_alerts", http.StatusInternalServerError, duration, nil)
+		}
 		model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, err.Error())
 		return
+	}
+
+	if h.telemetry != nil {
+		h.telemetry.ReportAction("cron_alert", "lesson_alerts", http.StatusOK, duration, map[string]any{
+			"personal_alerts": result.PersonalAlertsSent,
+			"group_alerts":    result.GroupAlertsSent,
+		})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

@@ -5,17 +5,22 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
+	"kpi-schedule-bot/server/internal/telemetry"
 )
 
 type handlers struct {
 	svc           *Service
 	internalToken string
+	telemetry     *telemetry.Client
 }
 
 // RouterOpts holds optional dependencies and configuration for NewRouterWithOpts.
 type RouterOpts struct {
 	TelegramWebhookHandler http.HandlerFunc
 	CronHandler            *CronHandler
+	AdminSecret            string
+	Telemetry              *telemetry.Client
 }
 
 // NewRouter builds the full /api/v1 route tree. Optional telegramWebhookHandler
@@ -35,6 +40,7 @@ func NewRouterWithOpts(svc *Service, internalToken string, opts RouterOpts) http
 	h := &handlers{
 		svc:           svc,
 		internalToken: internalToken,
+		telemetry:     opts.Telemetry,
 	}
 	r := chi.NewRouter()
 
@@ -64,6 +70,25 @@ func NewRouterWithOpts(svc *Service, internalToken string, opts RouterOpts) http
 		if opts.CronHandler != nil {
 			r.HandleFunc("/cron/lesson-alerts", opts.CronHandler.HandleLessonAlerts)
 		}
+
+		// Protected admin dashboard routes (require X-Admin-Secret).
+		// Must NOT be wrapped by ipRateLimitMiddleware — dashboard requests proxy from single server IP.
+		r.Route("/admin", func(r chi.Router) {
+			adminSecret := opts.AdminSecret
+			if adminSecret == "" {
+				adminSecret = internalToken
+			}
+			r.Use(adminTokenMiddleware(adminSecret))
+
+			r.Get("/tables", h.getAdminTables)
+			r.Get("/tables/{table}", h.getAdminTableRows)
+
+			r.Group(func(r chi.Router) {
+				r.Use(adminWritePermissionMiddleware())
+				r.Put("/tables/{table}/row", h.putAdminTableRow)
+				r.Post("/query", h.postAdminQuery)
+			})
+		})
 
 		// Rate-limit incoming requests
 		r.Group(func(r chi.Router) {

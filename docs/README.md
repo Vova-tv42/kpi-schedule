@@ -17,6 +17,7 @@ Welcome to the technical documentation for the **KPI Personalized Schedule Platf
 - [Fly.io Scale-to-Zero & 15m Idle](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/fly-scale-to-zero.md): Firecracker microVM scale-to-zero, in-app 15m idle shutdown, wake-on-request proxy, and volume persistence.
 - [CI/CD Deployment via GitHub Actions](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/ci-cd-deployment.md): Automated tests, flyctl deployment on main branch pushes, and deploy token configuration.
 - [Notifications & Scheduled Cron](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/notifications-and-cron.md): Automated lesson alerts (10m before and at start), idempotency, and cron-job.org setup.
+- [Admin Web Dashboard Architecture](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/admin-dashboard.md): Vercel hosting, NeonDB telemetry storage, Google OAuth security, and Fly scale-to-zero interlock.
 
 
 ### 📁 Schedule Sources
@@ -33,6 +34,7 @@ Welcome to the technical documentation for the **KPI Personalized Schedule Platf
 ### 📁 Golang Backend API
 - [API Overview](file:///home/volodymyr/apps/kpi-schedule-bot/docs/api/overview.md): REST routing, conventions, and status codes.
 - [Auth Endpoints](file:///home/volodymyr/apps/kpi-schedule-bot/docs/api/auth-endpoints.md): Link status checks and unlinking — no credentials to link/store any more.
+- [Admin Endpoints](file:///home/volodymyr/apps/kpi-schedule-bot/docs/api/admin-endpoints.md): Database inspection, row editing, and custom query endpoints for the admin dashboard.
 - [Schedule Endpoints](file:///home/volodymyr/apps/kpi-schedule-bot/docs/api/schedule-endpoints.md): Queries for `/today`, `/tomorrow`, `/week`, and specific dates.
 - [Local Development & Manual Testing](file:///home/volodymyr/apps/kpi-schedule-bot/docs/api/local-development.md): No-Docker-needed SQLite setup, `.env` configuration, the `curl` walkthrough, and testing the Docker deployment shape (no bot/extension yet, and no way to push a real schedule until the sync endpoint exists).
 
