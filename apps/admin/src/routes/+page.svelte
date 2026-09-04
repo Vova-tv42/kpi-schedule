@@ -2,14 +2,13 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { serverStatus } from '$lib/server-status-store.svelte';
-	import { 
-		Database, 
-		Activity, 
-		Server, 
-		ShieldCheck, 
-		RefreshCw, 
-		ArrowUpRight, 
-		Clock, 
+	import {
+		Database,
+		Activity,
+		Server,
+		RefreshCw,
+		ArrowUpRight,
+		Clock,
 		Zap,
 		Layers
 	} from 'lucide-svelte';
@@ -110,9 +109,6 @@
 					TELEMETRY OVERVIEW
 				</h1>
 			</div>
-			<p class="font-mono text-xs sm:text-sm text-[#94a3b8]">
-				Live operational metrics, database table counts, and anonymous action monitoring
-			</p>
 		</div>
 
 		<div class="flex items-center gap-2">
@@ -122,7 +118,7 @@
 					<span class="font-semibold text-[#f1f5f9] uppercase">{user.role}</span>
 				</div>
 			{/if}
-			<button 
+			<button
 				onclick={loadOverviewData}
 				disabled={loading}
 				class="px-3 py-1.5 bg-[#181c26] hover:bg-[#252b3b] text-[#f1f5f9] border border-[#252b3b] text-xs sm:text-sm font-mono rounded-xs flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -140,7 +136,7 @@
 	{/if}
 
 	<!-- Metric Cards Grid -->
-	<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+	<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
 		<!-- Card 1: Active Tables -->
 		<div class="bg-[#12151d] border border-[#252b3b] p-4 rounded-xs relative overflow-hidden">
 			<div class="flex items-center justify-between text-[#94a3b8] mb-2">
@@ -190,23 +186,6 @@
 			<div class="font-display font-bold text-3xl text-[#f1f5f9]">
 				{totalActionsCount.toLocaleString()}
 			</div>
-			<div class="text-[11px] font-mono text-[#64748b] mt-1">
-				NeonDB Retention Store
-			</div>
-		</div>
-
-		<!-- Card 4: Access Governance -->
-		<div class="bg-[#12151d] border border-[#252b3b] p-4 rounded-xs relative overflow-hidden">
-			<div class="flex items-center justify-between text-[#94a3b8] mb-2">
-				<span class="text-xs font-mono tracking-wider uppercase text-[#64748b]">Access Control</span>
-				<ShieldCheck size={16} class="text-[#f59e0b]" />
-			</div>
-			<div class="font-display font-bold text-3xl text-[#f1f5f9]">
-				Strict OAuth
-			</div>
-			<div class="text-[11px] font-mono text-[#64748b] mt-1">
-				Google Verified Only
-			</div>
 		</div>
 	</div>
 
@@ -221,7 +200,7 @@
 						Database Tables
 					</h3>
 				</div>
-				<a 
+				<a
 					href="/database"
 					class="text-xs font-mono text-[#d4ff32] hover:underline flex items-center gap-1"
 				>
@@ -242,7 +221,7 @@
 							<p class="text-xs text-amber-400 font-mono">
 								Main server is currently in Scale-to-Zero standby.
 							</p>
-							<button 
+							<button
 								onclick={loadTablesData}
 								class="px-3 py-1.5 bg-[#d4ff32] text-black font-bold text-xs uppercase tracking-wider rounded-xs hover:bg-[#e2f952] transition-colors"
 							>
@@ -282,7 +261,7 @@
 						Anonymous Action Stream (Last {recentActions.length})
 					</h3>
 				</div>
-				<a 
+				<a
 					href="/actions"
 					class="text-xs font-mono text-[#06b6d4] hover:underline flex items-center gap-1"
 				>

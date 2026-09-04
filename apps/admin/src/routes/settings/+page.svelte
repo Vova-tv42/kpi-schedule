@@ -98,9 +98,6 @@
 					SYSTEM & RETENTION SETTINGS
 				</h1>
 			</div>
-			<p class="font-mono text-xs sm:text-sm text-[#94a3b8]">
-				Configure action telemetry lifecycle, NeonDB storage pruning, and automated cron tasks
-			</p>
 		</div>
 	</div>
 
@@ -136,7 +133,7 @@
 		</div>
 
 		<p class="text-[#94a3b8] leading-relaxed max-w-2xl text-xs sm:text-sm">
-			Anonymous action records (Telegram commands, extension syncs, cron alert logs) are stored in NeonDB.
+			Action records (Bot commands, extension syncs, cron alert logs) are stored in DB.
 			Actions older than this threshold will be pruned by scheduled cleanup jobs.
 		</p>
 
@@ -194,47 +191,5 @@
 			<RefreshCw size={13} class={isCleaning ? 'animate-spin' : ''} />
 			<span>{isCleaning ? 'Pruning...' : 'Run Cleanup Now'}</span>
 		</button>
-	</div>
-
-	<!-- Scheduled External Cron Instructions Card -->
-	<div class="border border-[#252b3b] bg-[#12151d] p-5 rounded-xs space-y-4 font-mono text-xs sm:text-sm">
-		<div class="flex items-center gap-2">
-			<ExternalLink size={16} class="text-[#06b6d4]" />
-			<h2 class="text-sm sm:text-base font-bold text-[#f1f5f9] font-display">
-				Vercel Free Tier Cron Configuration
-			</h2>
-		</div>
-
-		<div class="text-[#94a3b8] space-y-3 leading-relaxed max-w-3xl text-xs sm:text-sm">
-			<p>
-				On Vercel's Hobby (free) tier, native cron jobs are capped at once per 24 hours.
-				To clean up actions more frequently (e.g. every 6 or 12 hours), configure a free HTTP task on 
-				<a href="https://cron-jobs.com" target="_blank" rel="noreferrer" class="text-[#d4ff32] hover:underline">cron-jobs.com</a> or
-				<a href="https://cron-job.org" target="_blank" rel="noreferrer" class="text-[#d4ff32] hover:underline">cron-job.org</a>:
-			</p>
-
-			<div class="p-3.5 border border-[#252b3b] bg-[#0a0b0e] rounded-xs space-y-2 text-xs">
-				<div>
-					<span class="text-[#64748b]">Endpoint URL:</span>
-					<code class="text-[#d4ff32] block mt-0.5">https://&lt;your-admin-app&gt;.vercel.app/api/cron/cleanup</code>
-				</div>
-				<div>
-					<span class="text-[#64748b]">HTTP Method:</span>
-					<code class="text-[#f1f5f9] block mt-0.5">POST (or GET)</code>
-				</div>
-				<div>
-					<span class="text-[#64748b]">HTTP Header:</span>
-					<code class="text-[#f1f5f9] block mt-0.5">Authorization: Bearer &lt;CRON_SECRET&gt;</code>
-				</div>
-				<div>
-					<span class="text-[#64748b]">Schedule:</span>
-					<code class="text-[#f1f5f9] block mt-0.5">Every 6 hours (or 12 hours)</code>
-				</div>
-			</div>
-
-			<p class="text-[#64748b] text-xs">
-				Additionally, the ingestion endpoint performs opportunistic cleanup during normal operations, ensuring NeonDB storage never exhausts free tier quotas even if external cron triggers are delayed.
-			</p>
-		</div>
 	</div>
 </div>

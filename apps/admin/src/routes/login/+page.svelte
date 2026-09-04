@@ -30,12 +30,6 @@
 </svelte:head>
 
 <div class="min-h-screen bg-[#0a0b0e] bg-tech-grid flex flex-col items-center justify-center p-6 relative">
-	<!-- Top status bar -->
-	<div class="absolute top-6 left-6 flex items-center gap-2 font-mono text-xs text-[#64748b]">
-		<span class="w-2 h-2 rounded-full bg-[#10b981] animate-pulse"></span>
-		<span>GATEWAY ONLINE // RESTRICTED ACCESS AREA</span>
-	</div>
-
 	<!-- Main Login Card -->
 	<div class="w-full max-w-md bg-[#12151d] border border-[#252b3b] shadow-2xl rounded-xs p-8 relative overflow-hidden">
 		<!-- Accent corner marker -->
@@ -79,9 +73,6 @@
 				<Lock size={14} class="text-[#d4ff32]" />
 				<span>Single Sign-On Security Rule</span>
 			</div>
-			<p class="leading-relaxed">
-				Authentication is restricted to verified administrators on the system whitelist.
-			</p>
 		</div>
 
 		<!-- Google OAuth Button -->

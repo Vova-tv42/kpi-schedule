@@ -2,13 +2,13 @@
 	import { onMount } from 'svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Badge from '$lib/components/Badge.svelte';
-	import { 
-		Users, 
-		UserPlus, 
-		Shield, 
-		Trash2, 
-		RefreshCw, 
-		Key, 
+	import {
+		Users,
+		UserPlus,
+		Shield,
+		Trash2,
+		RefreshCw,
+		Key,
 		AlertCircle,
 		ShieldCheck
 	} from 'lucide-svelte';
@@ -150,9 +150,6 @@
 					ADMIN ACCESS GOVERNANCE
 				</h1>
 			</div>
-			<p class="font-mono text-xs sm:text-sm text-[#94a3b8]">
-				Manage authorized operators and role-based access permissions. Strict Google OAuth enforced.
-			</p>
 		</div>
 
 		<div class="flex items-center gap-2.5">
@@ -194,7 +191,6 @@
 					<span class="font-display font-bold text-base text-[#f1f5f9]">{superadminEmail || 'Loading...'}</span>
 					<Badge variant="lime">SUPERADMIN</Badge>
 				</div>
-				<p class="font-mono text-xs text-[#64748b]">Configured via SUPERADMIN_EMAIL environment variable</p>
 			</div>
 		</div>
 		<div class="text-xs font-mono text-[#64748b] bg-[#0a0b0e] border border-[#252b3b] px-3 py-1.5 rounded-xs">

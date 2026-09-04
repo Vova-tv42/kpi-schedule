@@ -1,19 +1,18 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import Modal from '$lib/components/Modal.svelte';
-	import { 
-		Activity, 
-		RefreshCw, 
-		Search, 
-		Filter, 
-		Clock, 
-		ShieldCheck, 
-		Zap, 
-		AlertCircle, 
-		CheckCircle, 
-		Info, 
-		ChevronLeft, 
-		ChevronRight 
+	import {
+		Activity,
+		RefreshCw,
+		Search,
+		Filter,
+		Clock,
+		Zap,
+		AlertCircle,
+		CheckCircle,
+		Info,
+		ChevronLeft,
+		ChevronRight
 	} from 'lucide-svelte';
 
 	interface ActionItem {
@@ -149,9 +148,6 @@
 					ANONYMOUS ACTION TELEMETRY
 				</h1>
 			</div>
-			<p class="font-mono text-xs sm:text-sm text-[#94a3b8]">
-				Real-time telemetry event stream. User identities, Telegram IDs, and IPs are strictly unrecorded.
-			</p>
 		</div>
 
 		<!-- Stream Mode & Reconnect Controls -->
@@ -168,7 +164,7 @@
 				</span>
 			{/if}
 
-			<button 
+			<button
 				onclick={loadActions}
 				disabled={isLoading}
 				class="p-2 bg-[#181c26] hover:bg-[#252b3b] text-[#f1f5f9] border border-[#252b3b] rounded-xs text-xs sm:text-sm font-mono flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -181,32 +177,25 @@
 	</div>
 
 	<!-- Telemetry Diagnostics Cards -->
-	<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+	<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
 		<div class="bg-[#12151d] border border-[#252b3b] p-4 rounded-xs">
 			<span class="text-xs font-mono tracking-wider uppercase text-[#64748b] block mb-1">Total Telemetry Events</span>
 			<div class="font-display font-bold text-3xl text-[#f1f5f9]">{total.toLocaleString()}</div>
-			<span class="text-[11px] font-mono text-[#64748b]">NeonDB Retention Store</span>
 		</div>
 
 		<div class="bg-[#12151d] border border-[#252b3b] p-4 rounded-xs">
-			<span class="text-xs font-mono tracking-wider uppercase text-[#64748b] block mb-1">Mean Response Latency</span>
+			<span class="text-xs font-mono tracking-wider uppercase text-[#64748b] block mb-1">Avg Execution Duration</span>
 			<div class="font-display font-bold text-3xl text-[#10b981]">{avgDuration}ms</div>
-			<span class="text-[11px] font-mono text-[#64748b]">Across all endpoints</span>
 		</div>
 
 		<div class="bg-[#12151d] border border-[#252b3b] p-4 rounded-xs">
 			<span class="text-xs font-mono tracking-wider uppercase text-[#64748b] block mb-1">Success Rate</span>
-			<div class="font-display font-bold text-3xl {successRate >= 95 ? 'text-[#10b981]' : 'text-amber-400'}">{successRate}%</div>
-			<span class="text-[11px] font-mono text-[#64748b]">{successCount} OK • {errorCount} Errors</span>
-		</div>
-
-		<div class="bg-[#12151d] border border-[#252b3b] p-4 rounded-xs">
-			<span class="text-xs font-mono tracking-wider uppercase text-[#64748b] block mb-1">PII Masking</span>
-			<div class="font-display font-bold text-2xl text-[#d4ff32] flex items-center gap-1.5 mt-0.5">
-				<ShieldCheck size={20} />
-				<span>100% Zero PII</span>
+			<div class="flex items-center gap-2">
+  			<div class="font-display font-bold text-3xl {successRate >= 95 ? 'text-[#10b981]' : 'text-amber-400'}">{successRate}%</div>
+        {#if successCount > 0 && errorCount > 0}
+     			<span class="text-sm font-mono text-[#64748b]">(<span class="text-[#10b981cc]">{successCount} OK</span> • <span class="text-amber-400/80">{errorCount} Errors</span>)</span>
+   			{/if}
 			</div>
-			<span class="text-[11px] font-mono text-[#64748b]">Zero user tracking</span>
 		</div>
 	</div>
 

@@ -135,7 +135,6 @@ The Admin Dashboard follows a cyber-industrial mission control aesthetic with a 
   - **Mobile Support**: Off-canvas sliding drawer with dark backdrop overlay for viewports `< 1024px`.
 - **Top Diagnostics Header (`TelemetryHeader.svelte`)**: Sticky 14-height bar (`#0e1117`, border `#252b3b`):
   - Safe Fly.io VM status indicator (`awake`, `sleeping`, `transitioning`) with non-waking Machines API refresh button.
-  - Telemetry gateway latency heartbeat ping.
   - Authenticated user email and role badge (`SUPERADMIN` in lime, `READ & WRITE` in cyan, `READ ONLY` in amber).
   - Secure disconnect session termination action.
 - **Main Operations Viewport**: High-density workspace rendered inside an overflow scroll container with custom dark hairline scrollbars and technical background grids (`.bg-tech-grid`).

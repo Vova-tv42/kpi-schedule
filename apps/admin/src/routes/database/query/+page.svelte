@@ -2,14 +2,14 @@
 	import { page } from '$app/state';
 	import { serverStatus } from '$lib/server-status-store.svelte';
 	import ServerInterlockModal from '$lib/components/ServerInterlockModal.svelte';
-	import { 
-		TerminalSquare, 
-		Play, 
-		Clock, 
-		CheckCircle, 
-		AlertTriangle, 
-		Download, 
-		Trash2 
+	import {
+		TerminalSquare,
+		Play,
+		Clock,
+		CheckCircle,
+		AlertTriangle,
+		Download,
+		Trash2
 	} from 'lucide-svelte';
 
 	const user = $derived(page.data.user);
@@ -104,9 +104,6 @@
 					SQL WORKSPACE
 				</h1>
 			</div>
-			<p class="font-mono text-xs sm:text-sm text-[#94a3b8]">
-				Direct SQLite query runner against persistent NVMe storage on Fly.io
-			</p>
 		</div>
 	</div>
 

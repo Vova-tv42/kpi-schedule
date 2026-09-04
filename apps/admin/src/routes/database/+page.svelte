@@ -81,9 +81,6 @@
 					DATABASE TABLES
 				</h1>
 			</div>
-			<p class="font-mono text-xs sm:text-sm text-[#94a3b8]">
-				Mounted on persistent NVMe volume at <code class="text-[#f1f5f9] bg-[#12151d] px-1.5 py-0.5 rounded-xs border border-[#252b3b]">/data/kpi.db</code>
-			</p>
 		</div>
 
 		<button

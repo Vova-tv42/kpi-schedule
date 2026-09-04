@@ -2,7 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { serverStatus } from '$lib/server-status-store.svelte';
 	import Badge from './Badge.svelte';
-	import { LogOut, User, Activity, RefreshCw, Zap, Moon, AlertTriangle, Menu } from 'lucide-svelte';
+	import { LogOut, User, RefreshCw, Zap, Moon, AlertTriangle, Menu } from 'lucide-svelte';
 
 	interface Props {
 		user: {
@@ -14,30 +14,8 @@
 	}
 
 	let { user, onToggleMobile }: Props = $props();
-	let latency = $state<number | null>(null);
-	let isPinging = $state<boolean>(false);
-
-	async function checkLatency() {
-		if (isPinging) return;
-		isPinging = true;
-		const start = performance.now();
-		try {
-			// Ping the admin status endpoint which is always fast and doesn't wake Fly VM
-			const res = await fetch('/api/server-status');
-			if (res.ok) {
-				latency = Math.round(performance.now() - start);
-			} else {
-				latency = null;
-			}
-		} catch {
-			latency = null;
-		} finally {
-			isPinging = false;
-		}
-	}
 
 	onMount(() => {
-		checkLatency();
 		serverStatus.startPolling(20000);
 	});
 
@@ -50,7 +28,7 @@
 </script>
 
 <header class="h-14 border-b border-[#252b3b] bg-[#0e1117] px-4 sm:px-6 flex items-center justify-between shrink-0 select-none">
-	<!-- Left: Mobile Menu Toggle & Diagnostic Heartbeat -->
+	<!-- Left: Mobile Menu Toggle & Fly.io Scale-to-Zero VM Status -->
 	<div class="flex items-center gap-3 sm:gap-4 text-xs sm:text-sm font-mono">
 		<button
 			onclick={onToggleMobile}
@@ -96,7 +74,7 @@
 
 			<!-- Safe Recheck Button (talks to Machines API without waking VM) -->
 			<button
-				onclick={() => { serverStatus.checkStatus(); checkLatency(); }}
+				onclick={() => { serverStatus.checkStatus(); }}
 				disabled={serverStatus.isChecking}
 				title="Safe poll via Fly Machines API (Does not wake VM)"
 				class="p-1 border border-[#252b3b] hover:border-[#64748b] bg-[#12151d] hover:bg-[#181c26] text-[#94a3b8] hover:text-[#f1f5f9] rounded-xs transition-colors cursor-pointer"
@@ -104,23 +82,6 @@
 				<RefreshCw size={12} class={serverStatus.isChecking ? 'animate-spin text-[#d4ff32]' : ''} />
 			</button>
 		</div>
-
-		<span class="text-[#252b3b] hidden sm:inline">|</span>
-
-		<!-- Latency ping button -->
-		<button 
-			onclick={checkLatency}
-			class="hidden md:flex items-center gap-1.5 text-[#94a3b8] hover:text-[#f1f5f9] transition-colors cursor-pointer text-xs"
-			title="Click to check telemetry gateway latency"
-		>
-			<Activity size={13} class="text-[#d4ff32]" />
-			<span class="text-[#64748b] uppercase tracking-wider">LATENCY:</span>
-			{#if latency !== null}
-				<span class="text-[#10b981] font-semibold">{latency}ms</span>
-			{:else}
-				<span class="text-amber-400">test</span>
-			{/if}
-		</button>
 	</div>
 
 	<!-- Right: User session & sign out -->

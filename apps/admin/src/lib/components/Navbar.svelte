@@ -169,13 +169,4 @@
 			<span>Settings</span>
 		</a>
 	</nav>
-
-	<!-- Footer / Security Policy -->
-	<div class="p-3 border-t border-[#252b3b] bg-[#090b0e] text-xs font-mono text-[#64748b]">
-		<div class="flex items-center gap-1.5 text-[#94a3b8] mb-1">
-			<ShieldAlert size={14} class="text-[#d4ff32]" />
-			<span class="tracking-wider uppercase font-semibold text-xs">Security Policy</span>
-		</div>
-		<p class="leading-relaxed text-[10px]">Google OAuth verified. Anonymous action telemetry enabled.</p>
-	</div>
 </aside>
