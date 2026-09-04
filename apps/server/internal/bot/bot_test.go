@@ -174,3 +174,20 @@ func TestBotExtensionDownloadURL(t *testing.T) {
 		t.Errorf("expected set install URL, got %s", b.ExtensionInstallURL())
 	}
 }
+
+func TestDayKeyboard(t *testing.T) {
+	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+	kb := dayKeyboard(now)
+	if len(kb.InlineKeyboard) != 1 || len(kb.InlineKeyboard[0]) != 3 {
+		t.Fatalf("unexpected keyboard shape: %+v", kb)
+	}
+	if kb.InlineKeyboard[0][0].Text != "◀️" {
+		t.Errorf("expected prev button text '◀️', got %q", kb.InlineKeyboard[0][0].Text)
+	}
+	if kb.InlineKeyboard[0][1].Text != "📅 Сьогодні" {
+		t.Errorf("expected today button text '📅 Сьогодні', got %q", kb.InlineKeyboard[0][1].Text)
+	}
+	if kb.InlineKeyboard[0][2].Text != "▶️" {
+		t.Errorf("expected next button text '▶️', got %q", kb.InlineKeyboard[0][2].Text)
+	}
+}

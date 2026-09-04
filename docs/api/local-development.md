@@ -119,7 +119,7 @@ In Telegram, message your bot:
 /start   → onboarding screen with a «Прив'язати акаунт» button; once a schedule has
            been synced it also notes that and adds «Розклад на сьогодні»
 /link    → a 6-digit pairing code, valid 10 minutes
-/today   → day schedule with ◀️ Вчора / 📅 Сьогодні / Завтра ▶️ buttons once linked
+/today   → day schedule with ◀️ / 📅 Сьогодні / ▶️ buttons once linked
 /week    → one academic week, with previous/current/next week slots
 /urls    → interactive menu to add, edit, or delete video conference URLs for online lessons
 ```

@@ -522,9 +522,83 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 	reqCtx := context.Background()
 
 	switch {
+	case strings.HasPrefix(action, "open_bind:"):
+		chatIDStr := strings.TrimPrefix(action, "open_bind:")
+		chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
+		if err != nil {
+			return answerSilently(bot, cq)
+		}
+		if !isChatAdmin(bot, chatID, cq.From.Id) {
+			_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+				Text:      "⚠️ Тільки адміністратори цього чату можуть налаштовувати групу.",
+				ShowAlert: true,
+			})
+			return ansErr
+		}
+		_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+			Url: fmt.Sprintf("https://t.me/%s?start=bind_%d", bot.Username, chatID),
+		})
+		return ansErr
+
+	case strings.HasPrefix(action, "open_cfg:"):
+		gidStr := strings.TrimPrefix(action, "open_cfg:")
+		gid, err := uuid.Parse(gidStr)
+		if err != nil {
+			return answerSilently(bot, cq)
+		}
+		if cq.Message != nil {
+			if !isChatAdmin(bot, cq.Message.GetChat().Id, cq.From.Id) {
+				_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+					Text:      "⚠️ Тільки адміністратори цього чату можуть налаштовувати групу.",
+					ShowAlert: true,
+				})
+				return ansErr
+			}
+		}
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" && rel != "accepted" {
+			_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+				Text:      "⚠️ Тебе не додано до списку адміністраторів цієї групи.",
+				ShowAlert: true,
+			})
+			return ansErr
+		}
+		_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+			Url: fmt.Sprintf("https://t.me/%s?start=cfg_%s", bot.Username, gid.String()),
+		})
+		return ansErr
+
+	case strings.HasPrefix(action, "open_accept:"):
+		gidStr := strings.TrimPrefix(action, "open_accept:")
+		gid, err := uuid.Parse(gidStr)
+		if err != nil {
+			return answerSilently(bot, cq)
+		}
+		if cq.Message != nil {
+			if !isChatAdmin(bot, cq.Message.GetChat().Id, cq.From.Id) {
+				_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+					Text:      "⚠️ Тільки адміністратори цього чату можуть налаштовувати групу.",
+					ShowAlert: true,
+				})
+				return ansErr
+			}
+		}
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "invited" && rel != "accepted" && rel != "creator" {
+			_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+				Text:      "⚠️ Тебе не було запрошено до керування цією групою.",
+				ShowAlert: true,
+			})
+			return ansErr
+		}
+		_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+			Url: fmt.Sprintf("https://t.me/%s?start=accept_%s", bot.Username, gid.String()),
+		})
+		return ansErr
+
 	case action == "list":
 		_ = b.db.ClearGroupPrompt(reqCtx, cq.From.Id)
-		groups, err := b.db.GetBotGroupsByCreator(reqCtx, cq.From.Id)
+		groups, err := b.db.GetBotGroupsForUser(reqCtx, cq.From.Id)
 		if err != nil {
 			return answerWithError(bot, cq)
 		}
@@ -553,12 +627,21 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		if err != nil {
 			return answerWithError(bot, cq)
 		}
-		return b.applyScreen(bot, cq, formatGroupConfig(g, ""), groupConfigKeyboard(g), true)
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" && rel != "accepted" {
+			return answerWithError(bot, cq)
+		}
+		isCreator := (rel == "creator")
+		return b.applyScreen(bot, cq, formatGroupConfig(g, "", isCreator), groupConfigKeyboard(g, isCreator), true)
 
 	case strings.HasPrefix(action, "toggle_notify:"):
 		idStr := strings.TrimPrefix(action, "toggle_notify:")
 		gid, err := uuid.Parse(idStr)
 		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" && rel != "accepted" {
 			return answerWithError(bot, cq)
 		}
 		g, err := b.db.GetBotGroupByID(reqCtx, gid)
@@ -575,12 +658,142 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		if !newStatus {
 			notice = "🔕 Сповіщення для групи вимкнено."
 		}
-		return b.applyScreen(bot, cq, formatGroupConfig(g, notice), groupConfigKeyboard(g), true)
+		isCreator := (rel == "creator")
+		return b.applyScreen(bot, cq, formatGroupConfig(g, notice, isCreator), groupConfigKeyboard(g, isCreator), true)
+
+	case strings.HasPrefix(action, "admins:"):
+		idStr := strings.TrimPrefix(action, "admins:")
+		gid, err := uuid.Parse(idStr)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" {
+			return answerWithError(bot, cq)
+		}
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		admins, err := b.db.GetGroupAdmins(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		return b.applyScreen(bot, cq, formatGroupAdmins(g, admins, ""), groupAdminsKeyboard(idStr, admins, g.TelegramChatID != nil), true)
+
+	case strings.HasPrefix(action, "admin_add:"):
+		idStr := strings.TrimPrefix(action, "admin_add:")
+		gid, err := uuid.Parse(idStr)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" {
+			return answerWithError(bot, cq)
+		}
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		if g.TelegramChatID == nil {
+			_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+				Text:      "⚠️ Спочатку прив'яжіть групу до чату, щоб обрати адміністраторів.",
+				ShowAlert: true,
+			})
+			return ansErr
+		}
+		chatAdmins, err := bot.GetChatAdministrators(*g.TelegramChatID, nil)
+		if err != nil {
+			slog.Error("fetching chat administrators", "error", err, "chat_id", *g.TelegramChatID)
+			return answerWithError(bot, cq)
+		}
+		existingAdmins, _ := b.db.GetGroupAdmins(reqCtx, gid)
+		existingMap := make(map[int64]bool)
+		for _, ea := range existingAdmins {
+			existingMap[ea.TelegramID] = true
+		}
+		var candidates []gotgbot.User
+		for _, ca := range chatAdmins {
+			u := ca.GetUser()
+			if u.IsBot || u.Id == g.CreatorTelegramID || existingMap[u.Id] {
+				continue
+			}
+			candidates = append(candidates, u)
+		}
+		return b.applyScreen(bot, cq, formatGroupAddAdminPrompt(g.AcademicGroupName, len(candidates) > 0), groupAddAdminKeyboard(idStr, candidates), true)
+
+	case strings.HasPrefix(action, "admin_invite:"):
+		rest := strings.TrimPrefix(action, "admin_invite:")
+		parts := strings.Split(rest, ":")
+		if len(parts) != 2 {
+			return answerSilently(bot, cq)
+		}
+		gid, err := uuid.Parse(parts[0])
+		targetID, err2 := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil || err2 != nil {
+			return answerWithError(bot, cq)
+		}
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" {
+			return answerWithError(bot, cq)
+		}
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		var targetUser gotgbot.User
+		if g.TelegramChatID != nil {
+			if member, err := bot.GetChatMember(*g.TelegramChatID, targetID, nil); err == nil {
+				targetUser = member.GetUser()
+			}
+		}
+		firstName := targetUser.FirstName
+		if firstName == "" {
+			firstName = fmt.Sprintf("ID:%d", targetID)
+		}
+		if err := b.db.AddGroupAdmin(reqCtx, gid, targetID, targetUser.Username, firstName); err != nil {
+			slog.Error("adding group admin", "error", err)
+			return answerWithError(bot, cq)
+		}
+		admins, _ := b.db.GetGroupAdmins(reqCtx, gid)
+		notice := fmt.Sprintf("✅ Адміністратора «<b>%s</b>» успішно запрошено! Коли він напише /group у чаті, він зможе додати групу до свого списку.", html.EscapeString(formatUserName(&targetUser)))
+		return b.applyScreen(bot, cq, formatGroupAdmins(g, admins, notice), groupAdminsKeyboard(parts[0], admins, g.TelegramChatID != nil), true)
+
+	case strings.HasPrefix(action, "admin_rm:"):
+		rest := strings.TrimPrefix(action, "admin_rm:")
+		parts := strings.Split(rest, ":")
+		if len(parts) != 2 {
+			return answerSilently(bot, cq)
+		}
+		gid, err := uuid.Parse(parts[0])
+		targetID, err2 := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil || err2 != nil {
+			return answerWithError(bot, cq)
+		}
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" {
+			return answerWithError(bot, cq)
+		}
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		if err := b.db.RemoveGroupAdmin(reqCtx, gid, targetID); err != nil {
+			slog.Error("removing group admin", "error", err)
+			return answerWithError(bot, cq)
+		}
+		admins, _ := b.db.GetGroupAdmins(reqCtx, gid)
+		notice := "🗑 Адміністратора видалено зі списку групи."
+		return b.applyScreen(bot, cq, formatGroupAdmins(g, admins, notice), groupAdminsKeyboard(parts[0], admins, g.TelegramChatID != nil), true)
 
 	case strings.HasPrefix(action, "urls:"):
 		idStr := strings.TrimPrefix(action, "urls:")
 		gid, err := uuid.Parse(idStr)
 		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" && rel != "accepted" {
 			return answerWithError(bot, cq)
 		}
 		_ = b.db.ClearGroupPrompt(reqCtx, cq.From.Id)
@@ -603,6 +816,10 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		}
 		gid, err := uuid.Parse(parts[0])
 		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" && rel != "accepted" {
 			return answerWithError(bot, cq)
 		}
 		hash := parts[1]
@@ -661,6 +878,10 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		if err != nil {
 			return answerWithError(bot, cq)
 		}
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" && rel != "accepted" {
+			return answerWithError(bot, cq)
+		}
 		hash := parts[1]
 
 		g, err := b.db.GetBotGroupByID(reqCtx, gid)
@@ -699,6 +920,10 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		if err != nil {
 			return answerWithError(bot, cq)
 		}
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" && rel != "accepted" {
+			return answerWithError(bot, cq)
+		}
 		g, err := b.db.GetBotGroupByID(reqCtx, gid)
 		if err != nil {
 			return answerWithError(bot, cq)
@@ -721,6 +946,10 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		if err != nil {
 			return answerWithError(bot, cq)
 		}
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" && rel != "accepted" {
+			return answerWithError(bot, cq)
+		}
 		if err := b.db.UnbindBotGroupChat(reqCtx, gid); err != nil {
 			return answerWithError(bot, cq)
 		}
@@ -728,14 +957,15 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		if err != nil {
 			return answerWithError(bot, cq)
 		}
-		return b.applyScreen(bot, cq, formatGroupConfig(g, "✅ Чат успішно відв'язано."), groupConfigKeyboard(g), true)
+		isCreator := (rel == "creator")
+		return b.applyScreen(bot, cq, formatGroupConfig(g, "✅ Чат успішно відв'язано.", isCreator), groupConfigKeyboard(g, isCreator), true)
 
 	case strings.HasPrefix(action, "bind_help:"):
 		idStr := strings.TrimPrefix(action, "bind_help:")
 		helpText := "🔗 <b>Як прив'язати цю групу до Telegram-чату:</b>\n\n" +
 			"1. Додай цього бота до свого групового чату.\n" +
 			"2. Напиши в чаті команду <code>/group</code>.\n" +
-			"3. Натисни кнопку налаштування — бот надішле кнопку переходу в особисті повідомлення для прив'язки чату."
+			"3. Натисни кнопку налаштування — бот відкриє особисті повідомлення для прив'язки чату."
 		kb := groupPromptBackKeyboard(groupCallbackPrefix + "view:" + idStr)
 		return b.applyScreen(bot, cq, helpText, kb, true)
 
@@ -749,7 +979,22 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		if err != nil {
 			return answerWithError(bot, cq)
 		}
-		return b.applyScreen(bot, cq, formatGroupDeleteConfirm(g), groupDeleteConfirmKeyboard(idStr), true)
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" && rel != "accepted" {
+			return answerWithError(bot, cq)
+		}
+		isCreator := (rel == "creator")
+		hasOtherAdmins := false
+		if isCreator {
+			admins, _ := b.db.GetGroupAdmins(reqCtx, gid)
+			for _, a := range admins {
+				if a.Status == model.GroupAdminAccepted {
+					hasOtherAdmins = true
+					break
+				}
+			}
+		}
+		return b.applyScreen(bot, cq, formatGroupDeleteConfirm(g, isCreator, hasOtherAdmins), groupDeleteConfirmKeyboard(idStr), true)
 
 	case strings.HasPrefix(action, "del_confirm:"):
 		idStr := strings.TrimPrefix(action, "del_confirm:")
@@ -757,15 +1002,32 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		if err != nil {
 			return answerWithError(bot, cq)
 		}
-		g, _ := b.db.GetBotGroupByID(reqCtx, gid)
-		if err := b.db.DeleteBotGroup(reqCtx, gid); err != nil {
-			return answerWithError(bot, cq)
-		}
-		groups, err := b.db.GetBotGroupsByCreator(reqCtx, cq.From.Id)
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
 		if err != nil {
 			return answerWithError(bot, cq)
 		}
-		notice := fmt.Sprintf("🗑 Групу «<b>%s</b>» успішно видалено.", html.EscapeString(g.AcademicGroupName))
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" && rel != "accepted" {
+			return answerWithError(bot, cq)
+		}
+		isCreator := (rel == "creator")
+		transferred, _, err := b.db.DeleteOrTransferGroupOwnership(reqCtx, gid, cq.From.Id)
+		if err != nil {
+			slog.Error("deleting/transferring group", "error", err)
+			return answerWithError(bot, cq)
+		}
+		var notice string
+		if transferred {
+			notice = fmt.Sprintf("✅ Права творця передано іншому адміністраторові. Групу «<b>%s</b>» видалено з твого списку.", html.EscapeString(g.AcademicGroupName))
+		} else if isCreator {
+			notice = fmt.Sprintf("🗑 Групу «<b>%s</b>» остаточно видалено з бази даних.", html.EscapeString(g.AcademicGroupName))
+		} else {
+			notice = fmt.Sprintf("🚪 Ти вийшов з керування групою «<b>%s</b>». Її видалено з твого списку.", html.EscapeString(g.AcademicGroupName))
+		}
+		groups, err := b.db.GetBotGroupsForUser(reqCtx, cq.From.Id)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
 		return b.applyScreen(bot, cq, formatGroupListMenu(groups, notice), groupListKeyboard(groups), true)
 
 	case strings.HasPrefix(action, "bind_to:"):
@@ -782,6 +1044,40 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		if err != nil {
 			return answerWithError(bot, cq)
 		}
+		if !isChatAdmin(bot, chatID, cq.From.Id) {
+			_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+				Text:      "⚠️ Тільки адміністратори цього чату можуть прив'язувати групу.",
+				ShowAlert: true,
+			})
+			return ansErr
+		}
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" && rel != "accepted" {
+			return answerWithError(bot, cq)
+		}
+
+		// Check if chat is already bound to another group
+		if existing, err := b.db.GetBotGroupByChatID(reqCtx, chatID); err == nil && existing.ID != gid {
+			_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+				Text:      fmt.Sprintf("⚠️ Цей чат вже прив'язано до іншої групи (%s). Спочатку відв'яжіть його.", existing.AcademicGroupName),
+				ShowAlert: true,
+			})
+			return ansErr
+		}
+
+		// Check if group is already bound to another chat
+		targetGroup, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		if targetGroup.TelegramChatID != nil && *targetGroup.TelegramChatID != chatID {
+			_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+				Text:      fmt.Sprintf("⚠️ Ця група вже прив'язана до іншого чату (%s). Спочатку відв'яжіть її перед новою прив'язкою.", targetGroup.TelegramChatTitle),
+				ShowAlert: true,
+			})
+			return ansErr
+		}
+
 		chatTitle := fmt.Sprintf("ID: %d", chatID)
 		if tgChat, err := bot.GetChat(chatID, nil); err == nil && tgChat.Title != "" {
 			chatTitle = tgChat.Title
@@ -793,14 +1089,22 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		if err != nil {
 			return answerWithError(bot, cq)
 		}
+		isCreator := (rel == "creator")
 		notice := fmt.Sprintf("✅ Чат «<b>%s</b>» успішно прив'язано до групи <b>%s</b>!", html.EscapeString(chatTitle), html.EscapeString(g.AcademicGroupName))
-		return b.applyScreen(bot, cq, formatGroupConfig(g, notice), groupConfigKeyboard(g), true)
+		return b.applyScreen(bot, cq, formatGroupConfig(g, notice, isCreator), groupConfigKeyboard(g, isCreator), true)
 
 	case strings.HasPrefix(action, "bind_new:"):
 		chatIDStr := strings.TrimPrefix(action, "bind_new:")
 		chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
 		if err != nil {
 			return answerWithError(bot, cq)
+		}
+		if !isChatAdmin(bot, chatID, cq.From.Id) {
+			_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+				Text:      "⚠️ Тільки адміністратори цього чату можуть створювати прив'язку.",
+				ShowAlert: true,
+			})
+			return ansErr
 		}
 		chatTitle := fmt.Sprintf("ID: %d", chatID)
 		if tgChat, err := bot.GetChat(chatID, nil); err == nil && tgChat.Title != "" {
@@ -823,3 +1127,4 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		return answerSilently(bot, cq)
 	}
 }
+

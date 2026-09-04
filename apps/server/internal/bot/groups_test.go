@@ -141,6 +141,15 @@ func TestFormatGroupDayAndKeyboard(t *testing.T) {
 	if !strings.Contains(kb.InlineKeyboard[0][0].CallbackData, "gnav:prev:") {
 		t.Errorf("expected gnav:prev, got %s", kb.InlineKeyboard[0][0].CallbackData)
 	}
+	if kb.InlineKeyboard[0][0].Text != "◀️" {
+		t.Errorf("expected prev button text '◀️', got %q", kb.InlineKeyboard[0][0].Text)
+	}
+	if kb.InlineKeyboard[0][1].Text != "📅 Сьогодні" {
+		t.Errorf("expected today button text '📅 Сьогодні', got %q", kb.InlineKeyboard[0][1].Text)
+	}
+	if kb.InlineKeyboard[0][2].Text != "▶️" {
+		t.Errorf("expected next button text '▶️', got %q", kb.InlineKeyboard[0][2].Text)
+	}
 }
 
 func TestFormatGroupWeekAndKeyboard(t *testing.T) {
@@ -199,26 +208,82 @@ func TestGroupListAndConfigFormatting(t *testing.T) {
 		t.Fatalf("expected 2 rows (group + new), got: %d", len(listKb.InlineKeyboard))
 	}
 
-	// Config screen
-	cfgText := formatGroupConfig(groups[0], "")
-	if !strings.Contains(cfgText, "ІП-21 (ФІОТ)") || !strings.Contains(cfgText, "Чат групи ІП-21") {
-		t.Fatalf("unexpected config text: %s", cfgText)
+	// Config screen as creator
+	cfgText := formatGroupConfig(groups[0], "", true)
+	if !strings.Contains(cfgText, "ІП-21 (ФІОТ)") || !strings.Contains(cfgText, "Чат групи ІП-21") || !strings.Contains(cfgText, "👑 Творець") {
+		t.Fatalf("unexpected config text for creator: %s", cfgText)
 	}
 
-	cfgKb := groupConfigKeyboard(groups[0])
-	if len(cfgKb.InlineKeyboard) < 4 {
-		t.Fatalf("expected at least 4 config buttons, got: %d", len(cfgKb.InlineKeyboard))
+	cfgKb := groupConfigKeyboard(groups[0], true)
+	if len(cfgKb.InlineKeyboard) < 5 {
+		t.Fatalf("expected at least 5 config buttons for creator, got: %d", len(cfgKb.InlineKeyboard))
 	}
 
-	// Delete confirm
-	delText := formatGroupDeleteConfirm(groups[0])
-	if !strings.Contains(delText, "Видалення групи") || !strings.Contains(delText, "ІП-21") {
+	// Config screen as co-admin
+	cfgCoText := formatGroupConfig(groups[0], "", false)
+	if !strings.Contains(cfgCoText, "👤 Адміністратор") {
+		t.Fatalf("expected co-admin status in text: %s", cfgCoText)
+	}
+	cfgCoKb := groupConfigKeyboard(groups[0], false)
+	foundLeave := false
+	for _, row := range cfgCoKb.InlineKeyboard {
+		for _, btn := range row {
+			if strings.Contains(btn.Text, "Вийти з керування") {
+				foundLeave = true
+			}
+		}
+	}
+	if !foundLeave {
+		t.Errorf("expected 'Вийти з керування' button for co-admin")
+	}
+
+	// Delete confirm for creator with no other admins
+	delText := formatGroupDeleteConfirm(groups[0], true, false)
+	if !strings.Contains(delText, "Повне видалення групи") || !strings.Contains(delText, "ІП-21") {
 		t.Fatalf("unexpected delete text: %s", delText)
+	}
+
+	// Delete confirm for creator with other admins
+	delTransferText := formatGroupDeleteConfirm(groups[0], true, true)
+	if !strings.Contains(delTransferText, "передано одному з них") {
+		t.Fatalf("unexpected transfer text: %s", delTransferText)
+	}
+
+	// Delete confirm for co-admin
+	delCoText := formatGroupDeleteConfirm(groups[0], false, false)
+	if !strings.Contains(delCoText, "Вихід з керування групою") {
+		t.Fatalf("unexpected co-admin delete text: %s", delCoText)
 	}
 
 	delKb := groupDeleteConfirmKeyboard(gid.String())
 	if len(delKb.InlineKeyboard[0]) != 2 {
 		t.Fatalf("expected 2 buttons in delete confirm: %+v", delKb)
+	}
+
+	// Admins list formatting
+	admins := []model.GroupAdmin{
+		{
+			GroupID:    gid,
+			TelegramID: 111,
+			FirstName:  "Тарас",
+			Username:   "sheva",
+			Status:     model.GroupAdminAccepted,
+		},
+		{
+			GroupID:    gid,
+			TelegramID: 222,
+			FirstName:  "Леся",
+			Username:   "",
+			Status:     model.GroupAdminInvited,
+		},
+	}
+	adminsText := formatGroupAdmins(groups[0], admins, "")
+	if !strings.Contains(adminsText, "Тарас (@sheva)") || !strings.Contains(adminsText, "Леся") {
+		t.Fatalf("missing admin in formatGroupAdmins: %s", adminsText)
+	}
+	admKb := groupAdminsKeyboard(gid.String(), admins, true)
+	if len(admKb.InlineKeyboard) != 4 { // 2 admins + add + back
+		t.Fatalf("expected 4 rows in groupAdminsKeyboard, got: %d", len(admKb.InlineKeyboard))
 	}
 }
 

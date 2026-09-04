@@ -191,3 +191,23 @@ type GroupLessonURL struct {
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
+
+// GroupAdminStatus represents the invitation/acceptance state of a secondary group administrator.
+type GroupAdminStatus string
+
+const (
+	GroupAdminInvited  GroupAdminStatus = "invited"
+	GroupAdminAccepted GroupAdminStatus = "accepted"
+)
+
+// GroupAdmin tracks an invited or accepted co-administrator for a bot group.
+type GroupAdmin struct {
+	GroupID    uuid.UUID
+	TelegramID int64
+	Username   string
+	FirstName  string
+	Status     GroupAdminStatus
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+

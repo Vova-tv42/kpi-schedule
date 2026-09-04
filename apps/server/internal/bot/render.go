@@ -339,9 +339,9 @@ func dayKeyboard(date time.Time) gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 			{
-				{Text: "◀️ Вчора", CallbackData: navCallbackData("prev", date)},
+				{Text: "◀️", CallbackData: navCallbackData("prev", date)},
 				{Text: "📅 Сьогодні", CallbackData: navCallbackData("today", date)},
-				{Text: "Завтра ▶️", CallbackData: navCallbackData("next", date)},
+				{Text: "▶️", CallbackData: navCallbackData("next", date)},
 			},
 		},
 	}
@@ -507,9 +507,9 @@ func groupDayKeyboard(date time.Time, groupID int) gotgbot.InlineKeyboardMarkup 
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 			{
-				{Text: "◀️ Вчора", CallbackData: fmt.Sprintf("%sprev:%s:%d", groupNavCallbackPrefix, date.Format("2006-01-02"), groupID)},
+				{Text: "◀️", CallbackData: fmt.Sprintf("%sprev:%s:%d", groupNavCallbackPrefix, date.Format("2006-01-02"), groupID)},
 				{Text: "📅 Сьогодні", CallbackData: fmt.Sprintf("%stoday:%s:%d", groupNavCallbackPrefix, date.Format("2006-01-02"), groupID)},
-				{Text: "Завтра ▶️", CallbackData: fmt.Sprintf("%snext:%s:%d", groupNavCallbackPrefix, date.Format("2006-01-02"), groupID)},
+				{Text: "▶️", CallbackData: fmt.Sprintf("%snext:%s:%d", groupNavCallbackPrefix, date.Format("2006-01-02"), groupID)},
 			},
 		},
 	}
@@ -625,7 +625,7 @@ func groupListKeyboard(groups []model.BotGroup) gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-func formatGroupConfig(g model.BotGroup, notice string) string {
+func formatGroupConfig(g model.BotGroup, notice string, isCreator bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "⚙️ <b>Налаштування групи: %s</b>\n\n", html.EscapeString(g.AcademicGroupName))
 
@@ -633,6 +633,12 @@ func formatGroupConfig(g model.BotGroup, notice string) string {
 		b.WriteString(notice)
 		b.WriteString("\n\n")
 	}
+
+	status := "👤 Адміністратор"
+	if isCreator {
+		status = "👑 Творець"
+	}
+	fmt.Fprintf(&b, "• <b>Твій статус:</b> %s\n", status)
 
 	faculty := g.Faculty
 	if faculty == "" {
@@ -660,7 +666,7 @@ func formatGroupConfig(g model.BotGroup, notice string) string {
 	return b.String()
 }
 
-func groupConfigKeyboard(g model.BotGroup) gotgbot.InlineKeyboardMarkup {
+func groupConfigKeyboard(g model.BotGroup, isCreator bool) gotgbot.InlineKeyboardMarkup {
 	var rows [][]gotgbot.InlineKeyboardButton
 	idStr := g.ID.String()
 
@@ -674,6 +680,11 @@ func groupConfigKeyboard(g model.BotGroup) gotgbot.InlineKeyboardMarkup {
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
 		{Text: toggleNotifyText, CallbackData: groupCallbackPrefix + "toggle_notify:" + idStr},
 	})
+	if isCreator {
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: "👥 Адміністратори", CallbackData: groupCallbackPrefix + "admins:" + idStr},
+		})
+	}
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
 		{Text: "✏️ Змінити академічну групу", CallbackData: groupCallbackPrefix + "edit_acad:" + idStr},
 	})
@@ -686,29 +697,132 @@ func groupConfigKeyboard(g model.BotGroup) gotgbot.InlineKeyboardMarkup {
 			{Text: "🔗 Як прив'язати чат", CallbackData: groupCallbackPrefix + "bind_help:" + idStr},
 		})
 	}
-	rows = append(rows, []gotgbot.InlineKeyboardButton{
-		{Text: "🗑 Видалити групу", CallbackData: groupCallbackPrefix + "del_ask:" + idStr},
-	})
+	if isCreator {
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: "🗑 Видалити групу", CallbackData: groupCallbackPrefix + "del_ask:" + idStr},
+		})
+	} else {
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: "🚪 Вийти з керування", CallbackData: groupCallbackPrefix + "del_ask:" + idStr},
+		})
+	}
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
 		{Text: "◀️ Назад до списку", CallbackData: groupCallbackPrefix + "list"},
 	})
 	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-func formatGroupDeleteConfirm(g model.BotGroup) string {
-	return fmt.Sprintf("⚠️ <b>Видалення групи</b>\n\nТи впевнений, що хочеш видалити групу <b>%s</b>?\nРозклад цієї групи більше не буде доступний у прив'язаному чаті.", html.EscapeString(g.AcademicGroupName))
+func formatGroupDeleteConfirm(g model.BotGroup, isCreator, hasOtherAdmins bool) string {
+	if !isCreator {
+		return fmt.Sprintf("⚠️ <b>Вихід з керування групою</b>\n\nТи впевнений, що хочеш видалити групу <b>%s</b> зі свого списку?\nТи більше не матимеш доступу до її налаштувань.", html.EscapeString(g.AcademicGroupName))
+	}
+	if hasOtherAdmins {
+		return fmt.Sprintf("⚠️ <b>Видалення групи зі свого списку</b>\n\nТи є творцем групи <b>%s</b>. Оскільки в групі є інші адміністратори, статус творця та всі права буде передано одному з них.\n\nПідтвердити передачу прав та вихід?", html.EscapeString(g.AcademicGroupName))
+	}
+	return fmt.Sprintf("⚠️ <b>Повне видалення групи</b>\n\nТи впевнений, що хочеш видалити групу <b>%s</b>?\nОскільки інших адміністраторів немає, конфігурація буде повністю видалена з бази даних, а розклад групи стане недоступним у чаті.", html.EscapeString(g.AcademicGroupName))
 }
 
 func groupDeleteConfirmKeyboard(groupID string) gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 			{
-				{Text: "🗑 Так, видалити", CallbackData: groupCallbackPrefix + "del_confirm:" + groupID},
+				{Text: "🗑 Так, підтверджую", CallbackData: groupCallbackPrefix + "del_confirm:" + groupID},
 				{Text: "◀️ Скасувати", CallbackData: groupCallbackPrefix + "view:" + groupID},
 			},
 		},
 	}
 }
+
+func formatGroupAdmins(g model.BotGroup, admins []model.GroupAdmin, notice string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "👥 <b>Адміністратори групи %s</b>\n\n", html.EscapeString(g.AcademicGroupName))
+	if notice != "" {
+		b.WriteString(notice)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("👑 <b>Творець:</b> Ти\n\n")
+	if len(admins) == 0 {
+		b.WriteString("Ти ще не додав інших адміністраторів до цієї групи.\n" +
+			"Натисни «➕ Додати адміністратора» нижче, щоб обрати адміністратора з прив'язаного чату.")
+		return b.String()
+	}
+	b.WriteString("<b>Додані адміністратори:</b>\n")
+	for _, a := range admins {
+		name := a.FirstName
+		if name == "" {
+			name = fmt.Sprintf("ID:%d", a.TelegramID)
+		}
+		if a.Username != "" {
+			name += " (@" + a.Username + ")"
+		}
+		statusLabel := "⏳ Очікує додавання"
+		if a.Status == model.GroupAdminAccepted {
+			statusLabel = "✅ Додано"
+		}
+		fmt.Fprintf(&b, "• %s — <i>%s</i>\n", html.EscapeString(name), statusLabel)
+	}
+	b.WriteString("\nЩоб вилучити адміністратора, натисни на кнопку з його іменем:")
+	return b.String()
+}
+
+func groupAdminsKeyboard(groupID string, admins []model.GroupAdmin, hasBoundChat bool) gotgbot.InlineKeyboardMarkup {
+	var rows [][]gotgbot.InlineKeyboardButton
+	for _, a := range admins {
+		label := a.FirstName
+		if label == "" {
+			label = fmt.Sprintf("ID:%d", a.TelegramID)
+		}
+		if a.Username != "" {
+			label += " (@" + a.Username + ")"
+		}
+		runes := []rune(label)
+		if len(runes) > 25 {
+			label = string(runes[:22]) + "..."
+		}
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: "❌ " + label, CallbackData: fmt.Sprintf("%sadmin_rm:%s:%d", groupCallbackPrefix, groupID, a.TelegramID)},
+		})
+	}
+	if hasBoundChat {
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: "➕ Додати адміністратора", CallbackData: groupCallbackPrefix + "admin_add:" + groupID},
+		})
+	}
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "◀️ Назад", CallbackData: groupCallbackPrefix + "view:" + groupID},
+	})
+	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func formatGroupAddAdminPrompt(groupName string, hasCandidates bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "➕ <b>Додавання адміністратора до %s</b>\n\n", html.EscapeString(groupName))
+	if !hasCandidates {
+		b.WriteString("У прив'язаному чаті не знайдено інших адміністраторів, яких можна додати.")
+	} else {
+		b.WriteString("Обери адміністратора зі списку учасників чату, щоб надати йому доступ:")
+	}
+	return b.String()
+}
+
+func groupAddAdminKeyboard(groupID string, candidates []gotgbot.User) gotgbot.InlineKeyboardMarkup {
+	var rows [][]gotgbot.InlineKeyboardButton
+	for _, u := range candidates {
+		label := formatUserName(&u)
+		runes := []rune(label)
+		if len(runes) > 30 {
+			label = string(runes[:27]) + "..."
+		}
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: "➕ " + label, CallbackData: fmt.Sprintf("%sadmin_invite:%s:%d", groupCallbackPrefix, groupID, u.Id)},
+		})
+	}
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "◀️ Скасувати", CallbackData: groupCallbackPrefix + "admins:" + groupID},
+	})
+	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
 
 func formatGroupCreationPrompt(errorMsg string) string {
 	var b strings.Builder

@@ -159,8 +159,22 @@ func (b *Bot) SetupCommands() error {
 		slog.Warn("setting group chat commands", "error", err)
 	}
 
+	adminCommands := []gotgbot.BotCommand{
+		{Command: "today", Description: "Показати персональний розклад на сьогодні"},
+		{Command: "week", Description: "Показати персональний розклад на тиждень"},
+		{Command: "group_today", Description: "Показати розклад групи на сьогодні"},
+		{Command: "group_week", Description: "Показати розклад групи на тиждень"},
+		{Command: "group", Description: "Керування академічною групою"},
+	}
+	if _, err := b.gbot.SetMyCommands(adminCommands, &gotgbot.SetMyCommandsOpts{
+		Scope: gotgbot.BotCommandScopeAllChatAdministrators{},
+	}); err != nil {
+		slog.Warn("setting chat administrators commands", "error", err)
+	}
+
 	return nil
 }
+
 
 // WebhookPath is the URL path where the HTTP server receives Telegram updates.
 const WebhookPath = "/api/v1/telegram/webhook"

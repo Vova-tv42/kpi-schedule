@@ -27,12 +27,13 @@ Commands are scoped via Telegram's `setMyCommands` API (`BotCommandScopeAllPriva
 | `/urls` | DM only | `Посилання на онлайн-заняття` | ✅ Implemented | Interactive menu to manage custom lesson conference URLs (Zoom, Meet, etc.) with prompt-and-delete chat flow (see §3.4). |
 | `/today` | DM & Groups | DM: `Показати розклад на сьогодні`<br>Group: `Показати персональний розклад на сьогодні` | ✅ Implemented | Shows today's personal classes. In groups, prepends `👤 Розклад: <Користувач>` attributing who last triggered or navigated the schedule (see §3.5). |
 | `/week` | DM & Groups | DM: `Показати розклад на тиждень`<br>Group: `Показати персональний розклад на тиждень` | ✅ Implemented | Shows one academic week compactly. In groups, also carries caller attribution (see §3.5). |
-| `/group` | DM menu (usable in groups) | `Керування академічними групами` | ✅ Implemented | In DMs: interactive group management menu (create, view, edit academic group, unbind, delete, toggle notifications). In groups: hidden from menu suggestions, but if typed by an admin, checks rights and provides a deep-link button to configure in DM. |
+| `/group` | Chat Admins & DM | `Керування академічною групою` | ✅ Implemented | In DMs: interactive group management menu (create, view, edit academic group, unbind, delete, toggle notifications, manage admins). In groups: registered exclusively under `BotCommandScopeAllChatAdministrators` (invisible to regular members), providing secure callback buttons to configure in DM. |
 | `/group_today` (`/group-today`) | Groups only | `Показати розклад групи на сьогодні` | ✅ Implemented | Shows today's overall group schedule fetched directly from the secondary Campus API (`api.campus.kpi.ua`). |
 | `/group_week` (`/group-week`) | Groups only | `Показати розклад групи на тиждень` | ✅ Implemented | Shows one academic week of the overall group schedule from the secondary Campus API. |
 | `/settings` | DM only | `Налаштування сповіщень` | ✅ Implemented | Manage lesson reminders (10m before and at start) with in-place toggle. |
 | `/tomorrow` | Both | `Показати розклад на завтра` | Not yet built | Shows tomorrow's classes. |
 | `/help` | Both | `Довідка та інструкції` | Not yet built | FAQ, troubleshooting, and links to web extension. |
+
 
 ---
 
@@ -49,7 +50,7 @@ Commands are scoped via Telegram's `setMyCommands` API (`BotCommandScopeAllPriva
 10:25 Технології DevOps [Практ., Онлайн]    ← clickable link if URL added
 Викладач: Колумбет В. П.
 
-[ ◀️ Вчора ]  [ 📅 Сьогодні ]  [ Завтра ▶️ ]
+[ ◀️ ]  [ 📅 Сьогодні ]  [ ▶️ ]
 ```
 
 (`02.09`, `Викладач:`, and the time are HTML `<b>`/`<code>` — plain-text here for readability.)
@@ -205,23 +206,35 @@ online lessons.
 The bot supports Telegram group and supergroup chats with strict privacy, zero chat pollution, and contextual command menus:
 
 #### 1. Command Scopes & Isolation
-- **Command Scoping**: Telegram command lists are registered via `setMyCommands` using `BotCommandScopeAllPrivateChats` (personal schedule, URLs, pairing) and `BotCommandScopeAllGroupChats` (personal schedule in group, group schedule, group settings).
+- **Command Scoping**: Telegram command lists are registered via `setMyCommands` using:
+  - `BotCommandScopeAllPrivateChats`: personal schedule (`/today`, `/week`), `/urls`, `/group`, `/settings`, `/install`, `/link`, `/start`.
+  - `BotCommandScopeAllGroupChats`: personal schedule in group (`/today`, `/week`), group schedule (`/group_today`, `/group_week`).
+  - `BotCommandScopeAllChatAdministrators`: exposes `/group` exclusively to group and supergroup chat administrators alongside the regular group schedule commands. Regular members never see `/group` in command suggestions.
 - **Enforced Isolation**: Commands designed for DMs only (`/link`, `/urls`) return `⚠️ Ця команда доступна лише в особистих повідомленнях з ботом.` if invoked in a group. Conversely, group schedule commands (`/group_today`, `/group_week`) return `⚠️ Ця команда доступна лише у групових чатах.` if invoked in DMs.
 - **Hyphen & Underscore Aliases**: Group schedule commands are registered in Telegram as `/group_today` and `/group_week`, while message parsing also transparently supports `/group-today` and `/group-week`.
 
-#### 2. Group Administration in DM
-To prevent chat flooding and unauthorized modifications:
-- When `/group` is sent in a group chat, the bot verifies the caller's administrator status (`administrator` or `creator` via `getChatMember`/`getChatAdministrators`). Non-admins receive an alert.
-- Administrators receive a reply with an inline deep-link button `[ ⚙️ Налаштувати в особистих ]` (`t.me/<bot>?start=bind_<chatID>`).
-- All configuration occurs in the private chat:
-  - **Group Management Menu**: lists existing group configurations + `[ ➕ Нова група ]`.
-  - **Interactive Creation**: prompts for the KPI academic group name (e.g. `ІП-21`). User inputs are validated in real time against `api.campus.kpi.ua` and auto-deleted immediately upon arrival.
-  - **Group Settings Screen**: displays academic group, faculty, Campus ID, and bound chat; offers buttons to edit academic group, configure lesson URLs, unbind from chat, or delete the group with confirmation.
+#### 2. Group Administration, Multi-Admin Management & Security
+To prevent chat flooding, unauthorized modifications, and permission leaks:
+- **Admin Verification in Group**: When `/group` is sent in a group chat, the bot verifies the caller's administrator status (`administrator` or `creator` via `isChatAdmin`). Non-admins receive an immediate alert.
+- **Interactive In-Chat Buttons (Callback Protection)**:
+  - Rather than posting public URL links, `/group` generates interactive callback buttons (`grp:open_bind:`, `grp:open_cfg:`, `grp:open_accept:`).
+  - If a non-admin clicks an in-chat button, the bot re-verifies `isChatAdmin` on the callback query and triggers an alert (`ShowAlert: true`), preventing non-admins from opening the configuration flow.
+  - When an authorized administrator taps the button, Telegram opens the DM onboarding deep link (`t.me/<bot>?start=...`).
+- **Multi-Admin Management**:
+  - **Inviting Co-Admins**: From the DM group settings screen, the creator can tap `[ 👥 Керування адмінами ]` and `[ ➕ Додати адміністратора ]`. The bot queries `getChatAdministrators` for the bound Telegram chat, filtering out bots, the creator, and existing co-admins. The creator can invite eligible administrators with a single tap.
+  - **Acceptance Flow**: When an invited administrator executes `/group` in the group chat, the bot detects their `invited` status and offers `[ ➕ Додати до моїх груп ]`. Tapping this adds the group to their personal groups list with `accepted` status and opens the configuration menu in DM.
+  - **Strict Access Control**: Uninvited users (including uninvited chat administrators) do not see the group in their DM list and cannot edit its configuration. Deep links (`start=bind_`, `start=cfg_`, `start=accept_`) and all callback queries verify ownership relation against the database.
+  - **Removal of Co-Admins**: The creator can remove any added administrator at any time from the `[ 👥 Керування адмінами ]` screen.
+  - **Deletion & Ownership Transfer**:
+    - If a co-admin chooses `[ 🚪 Вийти з керування ]`, they are simply removed from the group's admin list.
+    - If the creator chooses `[ 🗑 Видалити групу ]`, the bot checks if other accepted administrators exist. If so, ownership and creator status are automatically transferred to one of the accepted co-admins; if no other co-admins remain, the group configuration is completely purged from the database.
+  - **Disconnect & Reconnect**: Any owner (creator or accepted co-admin) can unbind or rebind the group from/to the chat. Strict 1-to-1 mapping is maintained (a group cannot be bound to two chats, nor can a chat be bound to two groups).
+
 
 #### 3. Caller Attribution on `/today` and `/week` in Groups
 - When `/today` or `/week` is invoked in a group chat, it fetches the personalized schedule of the invoking user and prefixes the message with:
   `👤 Розклад: <b>Ім'я Користувача (@username)</b>`
-- When any member clicks a navigation button (`◀️ Вчора`, `📅 Сьогодні`, `Завтра ▶️`, or week slots), the schedule is refetched for that specific clicking member, and the caller title updates dynamically in place.
+- When any member clicks a navigation button (`◀️`, `📅 Сьогодні`, `▶️`, or week slots), the schedule is refetched for that specific clicking member, and the caller title updates dynamically in place.
 - If an unlinked member taps a navigation button, the group message is preserved and a personal popup alert is returned: `🔒 Твій акаунт ще не прив'язано...`.
 - In private chats (DMs), caller attribution is omitted completely, preserving personal UX intact.
 

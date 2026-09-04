@@ -38,7 +38,9 @@ user_lesson_urls     (id, user_id FK, subject_norm, tag, url, created_at, update
 user_url_prompts     (user_id PK/FK, telegram_id UNIQUE, prompt_message_id, subject_norm,
                        tag, subject_name, updated_at)
 bot_groups           (id PK, creator_telegram_id, academic_group_id, academic_group_name,
-                       faculty, telegram_chat_id UNIQUE, telegram_chat_title, created_at, updated_at)
+                       faculty, telegram_chat_id UNIQUE, telegram_chat_title, notifications_enabled, created_at, updated_at)
+bot_group_admins     (group_id, telegram_id, username, first_name, status, created_at, updated_at,
+                       PRIMARY KEY (group_id, telegram_id))
 user_group_prompts   (telegram_id PK, prompt_message_id, action, group_id, bind_chat_id,
                        bind_chat_title, updated_at)
 campus_cache         (key PK, value /* JSON */, fetched_at)
@@ -50,7 +52,10 @@ Migrations live in `apps/server/internal/storage/migrations/` (embedded, applied
 via `goose`). `00001_init.sql` establishes core user and schedule storage; `00002_lesson_urls.sql`
 introduces `user_lesson_urls` and `user_url_prompts`; `00003_groups.sql` introduces `bot_groups`
 (persisting user-configured academic group bindings for Telegram group chats) and `user_group_prompts`
-(tracking interactive prompt states for group creation and academic group updates with zero chat pollution).
+(tracking interactive prompt states for group creation and academic group updates with zero chat pollution);
+`00004_group_lesson_urls.sql` introduces `bot_group_lesson_urls`; `00005_notifications.sql` adds notifications;
+and `00006_group_admins.sql` introduces `bot_group_admins` for multi-admin co-management.
+
 
 **Engine: SQLite, not PostgreSQL** (`modernc.org/sqlite`, pure Go — no CGO, so it stays
 compatible with the distroless final image). This reverses an earlier decision recorded in
@@ -176,6 +181,20 @@ Allows group administrators to configure online conference links (Zoom, Google M
 #### Table `user_group_prompts`
 Tracks multi-step input prompts for creating groups, editing academic group names, or setting group lesson URLs (`action`: `"create"`, `"edit_academic"`, `"set_url"`).
 - Records `telegram_id`, `prompt_message_id`, `action`, `group_id`, `subject_norm`, `tag`, `subject_name`, `bind_chat_id`, and `bind_chat_title`.
+
+#### Table `bot_group_admins`
+Tracks co-administrators invited by the group creator (`00006_group_admins.sql`):
+- `group_id TEXT NOT NULL REFERENCES bot_groups(id) ON DELETE CASCADE`
+- `telegram_id INTEGER NOT NULL`
+- `username TEXT NOT NULL DEFAULT ''`
+- `first_name TEXT NOT NULL DEFAULT ''`
+- `status TEXT NOT NULL DEFAULT 'invited'` (`invited` when invited by creator, `accepted` once confirmed in chat)
+- `created_at TIMESTAMP NOT NULL`, `updated_at TIMESTAMP NOT NULL`
+- `PRIMARY KEY (group_id, telegram_id)`
+- Index: `idx_bot_group_admins_user (telegram_id, status)`
+
+**Ownership transfer on deletion**: when the creator leaves or deletes the group, ownership is automatically transferred to the earliest accepted administrator in `bot_group_admins`. If no accepted administrators remain, the group configuration, associated URLs, prompts, and admin records are deleted in a cascade.
+
 
 ## 3. No Credential Storage, No Encryption
 

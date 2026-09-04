@@ -283,13 +283,45 @@ func (b *Bot) cmdStart(bot *gotgbot.Bot, ctx *ext.Context) error {
 		if strings.HasPrefix(payload, "bind_") {
 			chatIDStr := strings.TrimPrefix(payload, "bind_")
 			if chatID, err := strconv.ParseInt(chatIDStr, 10, 64); err == nil {
+				if !isChatAdmin(bot, chatID, ctx.EffectiveUser.Id) {
+					_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, "⚠️ Тільки адміністратори цього чату можуть налаштовувати та прив'язувати групу.", nil)
+					return sendErr
+				}
 				return b.showGroupBindPicker(bot, ctx, chatID)
 			}
 		}
 		if strings.HasPrefix(payload, "cfg_") {
 			groupIDStr := strings.TrimPrefix(payload, "cfg_")
 			if groupID, err := uuid.Parse(groupIDStr); err == nil {
+				rel, rErr := b.db.GetGroupAdminRelation(reqCtx, groupID, ctx.EffectiveUser.Id)
+				if rErr != nil || (rel != "creator" && rel != "accepted") {
+					if rel == "invited" {
+						_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, "⚠️ Тебе запрошено до керування цією групою, але ти ще не додав її до списку своїх груп. Напиши /group у груповому чаті та натисни «Додати до моїх груп».", nil)
+						return sendErr
+					}
+					_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, "⚠️ У тебе немає прав для керування цією групою.", nil)
+					return sendErr
+				}
 				return b.showGroupConfigScreen(bot, ctx.EffectiveChat.Id, groupID, "")
+			}
+		}
+		if strings.HasPrefix(payload, "accept_") {
+			groupIDStr := strings.TrimPrefix(payload, "accept_")
+			if groupID, err := uuid.Parse(groupIDStr); err == nil {
+				rel, rErr := b.db.GetGroupAdminRelation(reqCtx, groupID, ctx.EffectiveUser.Id)
+				if rErr != nil || rel == "" {
+					_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, "⚠️ Тебе не було запрошено до керування цією групою.", nil)
+					return sendErr
+				}
+				if rel == "invited" {
+					_ = b.db.AcceptGroupAdmin(reqCtx, groupID, ctx.EffectiveUser.Id)
+				}
+				group, gErr := b.db.GetBotGroupByID(reqCtx, groupID)
+				notice := ""
+				if gErr == nil {
+					notice = fmt.Sprintf("✅ Групу «<b>%s</b>» успішно додано до твоїх груп!", html.EscapeString(group.AcademicGroupName))
+				}
+				return b.showGroupConfigScreen(bot, ctx.EffectiveChat.Id, groupID, notice)
 			}
 		}
 	}
@@ -316,9 +348,9 @@ func (b *Bot) showGroupBindPicker(bot *gotgbot.Bot, ctx *ext.Context, chatID int
 		chatTitle = tgChat.Title
 	}
 
-	groups, err := b.db.GetBotGroupsByCreator(reqCtx, ctx.EffectiveUser.Id)
+	groups, err := b.db.GetBotGroupsForUser(reqCtx, ctx.EffectiveUser.Id)
 	if err != nil {
-		slog.Error("getting creator groups for bind picker", "error", err)
+		slog.Error("getting user groups for bind picker", "error", err)
 	}
 
 	text := formatGroupBindPicker(chatTitle, groups)
@@ -338,8 +370,9 @@ func (b *Bot) showGroupConfigScreen(bot *gotgbot.Bot, chatID int64, groupID uuid
 		_, sendErr := bot.SendMessage(chatID, genericErrorText, nil)
 		return sendErr
 	}
-	text := formatGroupConfig(group, notice)
-	kb := groupConfigKeyboard(group)
+	isCreator := group.CreatorTelegramID == chatID
+	text := formatGroupConfig(group, notice, isCreator)
+	kb := groupConfigKeyboard(group, isCreator)
 	_, sendErr := bot.SendMessage(chatID, text, &gotgbot.SendMessageOpts{
 		ParseMode:          "HTML",
 		ReplyMarkup:        kb,
@@ -347,6 +380,7 @@ func (b *Bot) showGroupConfigScreen(bot *gotgbot.Bot, chatID int64, groupID uuid
 	})
 	return sendErr
 }
+
 
 func (b *Bot) cmdInstall(bot *gotgbot.Bot, ctx *ext.Context) error {
 	if isGroupChat(ctx.EffectiveChat) {
@@ -504,26 +538,49 @@ func (b *Bot) cmdGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		}
 
 		group, err := b.db.GetBotGroupByChatID(reqCtx, chatID)
-		botUsername := bot.Username
 		if group.AcademicGroupName != "" && err == nil {
-			msg := fmt.Sprintf("👥 <b>Налаштування групи</b>\n\nЦей чат прив'язано до: <b>%s</b>.\n\nКерування налаштуваннями здійснюється в особистих повідомленнях з ботом.", html.EscapeString(group.AcademicGroupName))
-			kb := gotgbot.InlineKeyboardMarkup{
-				InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-					{{Text: "⚙️ Відкрити налаштування в особистих", Url: fmt.Sprintf("https://t.me/%s?start=cfg_%s", botUsername, group.ID.String())}},
-				},
+			rel, _ := b.db.GetGroupAdminRelation(reqCtx, group.ID, userID)
+			switch rel {
+			case "creator", "accepted":
+				msg := fmt.Sprintf("👥 <b>Налаштування групи</b>\n\nЦей чат прив'язано до: <b>%s</b>.\n\nКерування налаштуваннями здійснюється в особистих повідомленнях з ботом.", html.EscapeString(group.AcademicGroupName))
+				kb := gotgbot.InlineKeyboardMarkup{
+					InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+						{{Text: "⚙️ Відкрити налаштування в особистих", CallbackData: fmt.Sprintf("%sopen_cfg:%s", groupCallbackPrefix, group.ID.String())}},
+					},
+				}
+				_, sendErr := bot.SendMessage(chatID, msg, &gotgbot.SendMessageOpts{
+					ParseMode:          "HTML",
+					ReplyMarkup:        kb,
+					LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
+				})
+				return sendErr
+			case "invited":
+				msg := fmt.Sprintf("👥 <b>Налаштування групи</b>\n\nЦей чат прив'язано до: <b>%s</b>.\n\nТебе запрошено до керування цією групою! Ти можеш додати її до списку своїх груп для налаштування.", html.EscapeString(group.AcademicGroupName))
+				kb := gotgbot.InlineKeyboardMarkup{
+					InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+						{{Text: "➕ Додати до моїх груп", CallbackData: fmt.Sprintf("%sopen_accept:%s", groupCallbackPrefix, group.ID.String())}},
+					},
+				}
+				_, sendErr := bot.SendMessage(chatID, msg, &gotgbot.SendMessageOpts{
+					ParseMode:          "HTML",
+					ReplyMarkup:        kb,
+					LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
+				})
+				return sendErr
+			default:
+				msg := fmt.Sprintf("👥 <b>Налаштування групи</b>\n\nЦей чат прив'язано до: <b>%s</b>.\n\n⚠️ Тільки творець конфігурації або запрошені ним адміністратори можуть керувати налаштуваннями цієї групи.", html.EscapeString(group.AcademicGroupName))
+				_, sendErr := bot.SendMessage(chatID, msg, &gotgbot.SendMessageOpts{
+					ParseMode:          "HTML",
+					LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
+				})
+				return sendErr
 			}
-			_, sendErr := bot.SendMessage(chatID, msg, &gotgbot.SendMessageOpts{
-				ParseMode:          "HTML",
-				ReplyMarkup:        kb,
-				LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
-			})
-			return sendErr
 		}
 
 		msg := "⚙️ <b>Налаштування групи</b>\n\nЦей чат ще не прив'язано до жодної академічної групи КПІ.\n\nНалаштування здійснюються в особистих повідомленнях з ботом, щоб не захаращувати чат."
 		kb := gotgbot.InlineKeyboardMarkup{
 			InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-				{{Text: "⚙️ Налаштувати в особистих", Url: fmt.Sprintf("https://t.me/%s?start=bind_%d", botUsername, chatID)}},
+				{{Text: "⚙️ Налаштувати в особистих", CallbackData: fmt.Sprintf("%sopen_bind:%d", groupCallbackPrefix, chatID)}},
 			},
 		}
 		_, sendErr := bot.SendMessage(chatID, msg, &gotgbot.SendMessageOpts{
@@ -535,9 +592,9 @@ func (b *Bot) cmdGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 	}
 
 	_ = b.db.ClearGroupPrompt(reqCtx, ctx.EffectiveUser.Id)
-	groups, err := b.db.GetBotGroupsByCreator(reqCtx, ctx.EffectiveUser.Id)
+	groups, err := b.db.GetBotGroupsForUser(reqCtx, ctx.EffectiveUser.Id)
 	if err != nil {
-		slog.Error("getting bot groups for creator", "error", err, "telegram_id", ctx.EffectiveUser.Id)
+		slog.Error("getting bot groups for user", "error", err, "telegram_id", ctx.EffectiveUser.Id)
 		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, genericErrorText, nil)
 		return sendErr
 	}
@@ -716,8 +773,8 @@ func (b *Bot) handleGroupInput(bot *gotgbot.Bot, ctx *ext.Context, prompt *model
 			return nil
 		}
 		notice := fmt.Sprintf("✅ Групу <b>%s</b> успішно створено!", html.EscapeString(created.AcademicGroupName))
-		text := formatGroupConfig(created, notice)
-		kb := groupConfigKeyboard(created)
+		text := formatGroupConfig(created, notice, true)
+		kb := groupConfigKeyboard(created, true)
 		opts := &gotgbot.EditMessageTextOpts{
 			ChatId:             ctx.EffectiveChat.Id,
 			MessageId:          prompt.PromptMessageID,
@@ -740,9 +797,10 @@ func (b *Bot) handleGroupInput(bot *gotgbot.Bot, ctx *ext.Context, prompt *model
 		if fErr != nil {
 			return nil
 		}
+		isCreator := updated.CreatorTelegramID == ctx.EffectiveUser.Id
 		notice := fmt.Sprintf("✅ Академічну групу змінено на <b>%s</b>!", html.EscapeString(updated.AcademicGroupName))
-		text := formatGroupConfig(updated, notice)
-		kb := groupConfigKeyboard(updated)
+		text := formatGroupConfig(updated, notice, isCreator)
+		kb := groupConfigKeyboard(updated, isCreator)
 		opts := &gotgbot.EditMessageTextOpts{
 			ChatId:             ctx.EffectiveChat.Id,
 			MessageId:          prompt.PromptMessageID,

@@ -161,8 +161,11 @@ func (db *DB) UnbindBotGroupChat(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// DeleteBotGroup deletes a bot group.
+// DeleteBotGroup deletes a bot group and its associated records.
 func (db *DB) DeleteBotGroup(ctx context.Context, id uuid.UUID) error {
+	_, _ = db.SQL.ExecContext(ctx, `DELETE FROM bot_group_lesson_urls WHERE group_id = ?`, id.String())
+	_, _ = db.SQL.ExecContext(ctx, `DELETE FROM bot_group_admins WHERE group_id = ?`, id.String())
+	_, _ = db.SQL.ExecContext(ctx, `DELETE FROM user_group_prompts WHERE group_id = ?`, id.String())
 	res, err := db.SQL.ExecContext(ctx, `DELETE FROM bot_groups WHERE id = ?`, id.String())
 	if err != nil {
 		return fmt.Errorf("deleting bot group: %w", err)
@@ -176,6 +179,7 @@ func (db *DB) DeleteBotGroup(ctx context.Context, id uuid.UUID) error {
 	}
 	return nil
 }
+
 
 // SetGroupPrompt records an active group input prompt for a user.
 func (db *DB) SetGroupPrompt(ctx context.Context, p model.GroupPrompt) error {
@@ -345,3 +349,183 @@ func (db *DB) GetActiveBotGroupsWithNotifications(ctx context.Context) ([]model.
 	}
 	return groups, rows.Err()
 }
+
+// GetBotGroupsForUser returns all bot groups where the user is the creator or an accepted admin.
+func (db *DB) GetBotGroupsForUser(ctx context.Context, telegramID int64) ([]model.BotGroup, error) {
+	rows, err := db.SQL.QueryContext(ctx, `
+		SELECT `+botGroupColumns+` FROM bot_groups
+		WHERE creator_telegram_id = ?
+		   OR id IN (SELECT group_id FROM bot_group_admins WHERE telegram_id = ? AND status = 'accepted')
+		ORDER BY created_at DESC
+	`, telegramID, telegramID)
+	if err != nil {
+		return nil, fmt.Errorf("querying user bot groups: %w", err)
+	}
+	defer rows.Close()
+
+	var groups []model.BotGroup
+	for rows.Next() {
+		g, err := scanBotGroup(rows)
+		if err != nil {
+			return nil, err
+		}
+		groups = append(groups, g)
+	}
+	return groups, rows.Err()
+}
+
+// GetGroupAdmins returns all invited and accepted administrators for a group.
+func (db *DB) GetGroupAdmins(ctx context.Context, groupID uuid.UUID) ([]model.GroupAdmin, error) {
+	rows, err := db.SQL.QueryContext(ctx, `
+		SELECT group_id, telegram_id, username, first_name, status, created_at, updated_at
+		FROM bot_group_admins
+		WHERE group_id = ?
+		ORDER BY created_at ASC
+	`, groupID.String())
+	if err != nil {
+		return nil, fmt.Errorf("querying group admins: %w", err)
+	}
+	defer rows.Close()
+
+	var admins []model.GroupAdmin
+	for rows.Next() {
+		var a model.GroupAdmin
+		var gidStr string
+		var statusStr string
+		if err := rows.Scan(&gidStr, &a.TelegramID, &a.Username, &a.FirstName, &statusStr, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning group admin: %w", err)
+		}
+		parsedID, err := uuid.Parse(gidStr)
+		if err != nil {
+			return nil, fmt.Errorf("parsing group admin uuid: %w", err)
+		}
+		a.GroupID = parsedID
+		a.Status = model.GroupAdminStatus(statusStr)
+		admins = append(admins, a)
+	}
+	return admins, rows.Err()
+}
+
+// AddGroupAdmin invites or records a user as an administrator for a group.
+func (db *DB) AddGroupAdmin(ctx context.Context, groupID uuid.UUID, telegramID int64, username, firstName string) error {
+	now := time.Now().UTC()
+	_, err := db.SQL.ExecContext(ctx, `
+		INSERT INTO bot_group_admins (group_id, telegram_id, username, first_name, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'invited', ?, ?)
+		ON CONFLICT (group_id, telegram_id) DO UPDATE
+		SET username = excluded.username,
+		    first_name = excluded.first_name,
+		    updated_at = excluded.updated_at
+	`, groupID.String(), telegramID, username, firstName, now, now)
+	if err != nil {
+		return fmt.Errorf("adding group admin: %w", err)
+	}
+	return nil
+}
+
+// RemoveGroupAdmin removes an administrator record for a group.
+func (db *DB) RemoveGroupAdmin(ctx context.Context, groupID uuid.UUID, telegramID int64) error {
+	_, err := db.SQL.ExecContext(ctx, `
+		DELETE FROM bot_group_admins
+		WHERE group_id = ? AND telegram_id = ?
+	`, groupID.String(), telegramID)
+	if err != nil {
+		return fmt.Errorf("removing group admin: %w", err)
+	}
+	return nil
+}
+
+// AcceptGroupAdmin marks an invited administrator as accepted.
+func (db *DB) AcceptGroupAdmin(ctx context.Context, groupID uuid.UUID, telegramID int64) error {
+	now := time.Now().UTC()
+	res, err := db.SQL.ExecContext(ctx, `
+		UPDATE bot_group_admins
+		SET status = 'accepted', updated_at = ?
+		WHERE group_id = ? AND telegram_id = ?
+	`, now, groupID.String(), telegramID)
+	if err != nil {
+		return fmt.Errorf("accepting group admin: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// GetGroupAdminRelation returns "creator", "accepted", "invited", or "" for a user.
+func (db *DB) GetGroupAdminRelation(ctx context.Context, groupID uuid.UUID, telegramID int64) (string, error) {
+	group, err := db.GetBotGroupByID(ctx, groupID)
+	if err != nil {
+		return "", err
+	}
+	if group.CreatorTelegramID == telegramID {
+		return "creator", nil
+	}
+
+	var status string
+	err = db.SQL.QueryRowContext(ctx, `
+		SELECT status FROM bot_group_admins
+		WHERE group_id = ? AND telegram_id = ?
+	`, groupID.String(), telegramID).Scan(&status)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("checking group admin relation: %w", err)
+	}
+	return status, nil
+}
+
+// DeleteOrTransferGroupOwnership handles group deletion:
+// If telegramID is a co-admin: removes them from group admins.
+// If telegramID is the creator:
+//   - If another accepted co-admin exists, transfers ownership to that admin.
+//   - If no other accepted co-admins exist, completely deletes the group.
+func (db *DB) DeleteOrTransferGroupOwnership(ctx context.Context, groupID uuid.UUID, telegramID int64) (transferred bool, newOwnerID int64, err error) {
+	group, err := db.GetBotGroupByID(ctx, groupID)
+	if err != nil {
+		return false, 0, err
+	}
+
+	if group.CreatorTelegramID != telegramID {
+		if err := db.RemoveGroupAdmin(ctx, groupID, telegramID); err != nil {
+			return false, 0, err
+		}
+		return false, 0, nil
+	}
+
+	var nextAdminID int64
+	err = db.SQL.QueryRowContext(ctx, `
+		SELECT telegram_id FROM bot_group_admins
+		WHERE group_id = ? AND status = 'accepted'
+		ORDER BY created_at ASC LIMIT 1
+	`, groupID.String()).Scan(&nextAdminID)
+
+	if err == nil {
+		now := time.Now().UTC()
+		_, err = db.SQL.ExecContext(ctx, `
+			UPDATE bot_groups
+			SET creator_telegram_id = ?, updated_at = ?
+			WHERE id = ?
+		`, nextAdminID, now, groupID.String())
+		if err != nil {
+			return false, 0, fmt.Errorf("transferring creator ownership: %w", err)
+		}
+		_ = db.RemoveGroupAdmin(ctx, groupID, nextAdminID)
+		return true, nextAdminID, nil
+	}
+
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, 0, fmt.Errorf("checking next admin for transfer: %w", err)
+	}
+
+	if err := db.DeleteBotGroup(ctx, groupID); err != nil {
+		return false, 0, err
+	}
+	return false, 0, nil
+}
+
