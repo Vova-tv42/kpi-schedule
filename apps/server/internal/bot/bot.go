@@ -204,8 +204,20 @@ func (b *Bot) RegisterWebhook(webhookURL, secretToken string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// 0. Ensure commands are updated when commands configuration version changes
+	const currentCommandsVersion = "v2_admin_scope"
+	if b.db != nil {
+		var cachedVer string
+		if ok, _ := b.db.CacheGet(ctx, "telegram_commands_version", 365*24*time.Hour, &cachedVer); !ok || cachedVer != currentCommandsVersion {
+			_ = b.SetupCommands()
+			_ = b.db.CacheSet(ctx, "telegram_commands_version", currentCommandsVersion)
+		}
+	} else {
+		_ = b.SetupCommands()
+	}
 
 	// 1. Check local persistent disk cache (fastest: < 1ms on wake)
 	if b.db != nil {
@@ -215,6 +227,7 @@ func (b *Bot) RegisterWebhook(webhookURL, secretToken string) error {
 			return nil
 		}
 	}
+
 
 	// 2. Check Telegram API if cache was missing or stale
 	info, err := b.gbot.GetWebhookInfo(&gotgbot.GetWebhookInfoOpts{
