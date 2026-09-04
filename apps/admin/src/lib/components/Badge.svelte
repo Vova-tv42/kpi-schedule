@@ -11,12 +11,12 @@
 	let { variant = 'slate', size = 'sm', class: className = '', children }: Props = $props();
 
 	const variantStyles = {
-		lime: 'bg-[#d4ff32]/10 text-[#d4ff32] border-[#d4ff32]/30',
-		amber: 'bg-[#f59e0b]/10 text-[#f59e0b] border-[#f59e0b]/30',
-		emerald: 'bg-[#10b981]/10 text-[#10b981] border-[#10b981]/30',
-		crimson: 'bg-[#ef4444]/10 text-[#ef4444] border-[#ef4444]/30',
-		slate: 'bg-[#252b3b]/40 text-[#94a3b8] border-[#252b3b]',
-		cyan: 'bg-[#06b6d4]/10 text-[#06b6d4] border-[#06b6d4]/30'
+		lime: 'bg-[#ccf600]/25 text-[#2e5a08] border-[#a3e635] dark:bg-[#d4ff32]/10 dark:text-[#d4ff32] dark:border-[#d4ff32]/30',
+		amber: 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-[#f59e0b]/10 dark:text-[#f59e0b] dark:border-[#f59e0b]/30',
+		emerald: 'bg-emerald-100 text-emerald-900 border-emerald-300 dark:bg-[#10b981]/10 dark:text-[#10b981] dark:border-[#10b981]/30',
+		crimson: 'bg-red-100 text-red-900 border-red-300 dark:bg-[#ef4444]/10 dark:text-[#ef4444] dark:border-[#ef4444]/30',
+		slate: 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-[#252b3b]/40 dark:text-[#94a3b8] dark:border-[#252b3b]',
+		cyan: 'bg-cyan-100 text-cyan-900 border-cyan-300 dark:bg-[#06b6d4]/10 dark:text-[#06b6d4] dark:border-[#06b6d4]/30'
 	};
 
 	const sizeStyles = {

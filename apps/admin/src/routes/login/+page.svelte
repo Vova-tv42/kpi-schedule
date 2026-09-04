@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import { ShieldCheck, ShieldAlert, TerminalSquare, ArrowRight, Lock, KeyRound } from 'lucide-svelte';
 
 	const errorParam = $derived(page.url.searchParams.get('error'));
@@ -29,26 +30,31 @@
 	<title>KPI Schedule // Mission Control Sign In</title>
 </svelte:head>
 
-<div class="min-h-screen bg-[#0a0b0e] bg-tech-grid flex flex-col items-center justify-center p-6 relative">
+<div class="min-h-screen bg-[#f4f5f8] dark:bg-[#0a0b0e] bg-tech-grid flex flex-col items-center justify-center p-6 relative">
+	<!-- Top right theme toggle for public access -->
+	<div class="absolute top-4 right-4 sm:top-6 sm:right-6">
+		<ThemeToggle />
+	</div>
+
 	<!-- Main Login Card -->
-	<div class="w-full max-w-md bg-[#12151d] border border-[#252b3b] shadow-2xl rounded-xs p-8 relative overflow-hidden">
+	<div class="w-full max-w-md bg-white dark:bg-[#12151d] border border-slate-300 dark:border-[#252b3b] shadow-2xl rounded-xs p-8 relative overflow-hidden">
 		<!-- Accent corner marker -->
 		<div class="absolute top-0 right-0 w-16 h-16 pointer-events-none overflow-hidden">
-			<div class="absolute transform rotate-45 bg-[#d4ff32] text-black font-mono font-bold text-[10px] py-0.5 right-[-35px] top-[18px] w-[120px] text-center tracking-widest uppercase">
+			<div class="absolute transform rotate-45 bg-[#ccf600] dark:bg-[#d4ff32] text-black font-mono font-bold text-[10px] py-0.5 right-[-35px] top-[18px] w-[120px] text-center tracking-widest uppercase shadow-xs">
 				ADMIN ONLY
 			</div>
 		</div>
 
 		<!-- Branding -->
 		<div class="flex items-center gap-3 mb-6">
-			<div class="w-10 h-10 rounded-xs bg-[#d4ff32]/10 border border-[#d4ff32]/30 flex items-center justify-center text-[#d4ff32]">
+			<div class="w-10 h-10 rounded-xs bg-[#ccf600]/25 text-slate-950 border border-[#a3e635] dark:bg-[#d4ff32]/10 dark:border-[#d4ff32]/30 dark:text-[#d4ff32] flex items-center justify-center">
 				<TerminalSquare size={22} />
 			</div>
 			<div>
-				<h1 class="font-display font-extrabold text-2xl text-[#f1f5f9] tracking-tight">
+				<h1 class="font-display font-extrabold text-2xl text-slate-950 dark:text-[#f1f5f9] tracking-tight">
 					KPI SCHEDULE // CONSOLE
 				</h1>
-				<p class="font-mono text-xs text-[#94a3b8]">
+				<p class="font-mono text-xs text-slate-500 dark:text-[#94a3b8]">
 					Personalized Schedule Platform Administration
 				</p>
 			</div>
@@ -56,29 +62,32 @@
 
 		<!-- Error Banner -->
 		{#if errorParam}
-			<div class="mb-6 p-3.5 bg-[#ef4444]/10 border border-[#ef4444]/30 rounded-xs text-xs font-mono text-[#fca5a5] flex items-start gap-2.5 animate-in fade-in duration-200">
-				<ShieldAlert size={16} class="text-[#ef4444] shrink-0 mt-0.5" />
+			<div class="mb-6 p-3.5 bg-red-100 border border-red-300 rounded-xs text-xs font-mono text-red-900 dark:bg-[#ef4444]/10 dark:border-[#ef4444]/30 dark:text-[#fca5a5] flex items-start gap-2.5 animate-in fade-in duration-200">
+				<ShieldAlert size={16} class="text-red-600 dark:text-[#ef4444] shrink-0 mt-0.5" />
 				<div class="leading-relaxed">
 					{getErrorMessage(errorParam)}
 					{#if attemptedEmail}
-						<div class="text-[#94a3b8] mt-1">Identity: <span class="text-white underline">{attemptedEmail}</span></div>
+						<div class="text-slate-600 dark:text-[#94a3b8] mt-1">Identity: <span class="text-slate-950 dark:text-white underline">{attemptedEmail}</span></div>
 					{/if}
 				</div>
 			</div>
 		{/if}
 
 		<!-- Security Notice -->
-		<div class="mb-6 p-3.5 bg-[#181c26] border border-[#252b3b] rounded-xs text-xs font-mono text-[#94a3b8]">
-			<div class="flex items-center gap-2 text-[#f1f5f9] font-medium mb-1.5 text-sm">
-				<Lock size={14} class="text-[#d4ff32]" />
+		<div class="mb-6 p-3.5 bg-slate-50 border border-slate-300 dark:bg-[#181c26] dark:border-[#252b3b] rounded-xs text-xs font-mono text-slate-600 dark:text-[#94a3b8]">
+			<div class="flex items-center gap-2 text-slate-950 dark:text-[#f1f5f9] font-medium mb-1.5 text-sm">
+				<Lock size={14} class="text-emerald-700 dark:text-[#d4ff32]" />
 				<span>Single Sign-On Security Rule</span>
 			</div>
+			<p class="text-[11px] leading-relaxed">
+				Access is restricted to authorized administrative emails. Unrecognized accounts are blocked with zero database footprint.
+			</p>
 		</div>
 
 		<!-- Google OAuth Button -->
 		<a
 			href="/auth/google"
-			class="w-full py-3 px-4 bg-[#d4ff32] hover:bg-[#e2f952] text-black font-mono font-bold text-sm tracking-wider uppercase rounded-xs flex items-center justify-center gap-2.5 transition-all shadow-[0_0_20px_rgba(212,255,50,0.15)] hover:shadow-[0_0_25px_rgba(212,255,50,0.3)] active:scale-[0.99] cursor-pointer"
+			class="w-full py-3 px-4 border border-black dark:border-transparent bg-[#ccf600] hover:bg-[#bde800] dark:bg-[#d4ff32] dark:hover:bg-[#e2f952] text-black font-mono font-bold text-sm tracking-wider uppercase rounded-xs flex items-center justify-center gap-2.5 transition-all shadow-[2px_2px_0px_#090d16] dark:shadow-[0_0_20px_rgba(212,255,50,0.15)] dark:hover:shadow-[0_0_25px_rgba(212,255,50,0.3)] active:scale-[0.99] cursor-pointer"
 		>
 			<svg class="w-4 h-4" viewBox="0 0 24 24">
 				<path fill="#000000" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -91,13 +100,13 @@
 		</a>
 
 		<!-- Bottom Security Telemetry Notes -->
-		<div class="mt-8 pt-4 border-t border-[#252b3b]/60 flex items-center justify-between font-mono text-[11px] text-[#64748b]">
+		<div class="mt-8 pt-4 border-t border-slate-200 dark:border-[#252b3b]/60 flex items-center justify-between font-mono text-[11px] text-slate-500 dark:text-[#64748b]">
 			<div class="flex items-center gap-1.5">
-				<ShieldCheck size={13} class="text-[#10b981]" />
+				<ShieldCheck size={13} class="text-emerald-600 dark:text-[#10b981]" />
 				<span>HMAC-SHA256 JWT Signed</span>
 			</div>
 			<div class="flex items-center gap-1.5">
-				<KeyRound size={13} class="text-[#d4ff32]" />
+				<KeyRound size={13} class="text-emerald-700 dark:text-[#d4ff32]" />
 				<span>Role-Enforced RBAC</span>
 			</div>
 		</div>

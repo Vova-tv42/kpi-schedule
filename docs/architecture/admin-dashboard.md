@@ -89,7 +89,8 @@ The system defines three privilege tiers:
 - Standard HTTP calls to `kpi-schedule.fly.dev` route through Fly Proxy, which immediately triggers a microVM cold boot.
 - To monitor server health without waking it, the dashboard queries Fly.io's control plane:
   `GET https://api.machines.dev/v1/apps/{app_name}/machines` with `Authorization: Bearer <FLY_API_TOKEN>`.
-- The Machines API queries Fly's control plane directly and **never sends traffic through Fly Proxy or to the VM**, allowing real-time status checks (`awake`, `sleeping`, `down`) with **zero wake-ups**.
+- The Machines API queries Fly's control plane directly and **never sends traffic through Fly Proxy or to the VM**, allowing real-time status checks (`awake`, `sleeping`, `transitioning`, `down`, `unconfigured`) with **zero wake-ups**.
+- **Lifecycle & Initial Loading State**: The client status store (`server-status-store.svelte.ts`) initializes with status `'loading'`, displaying a neutral loading indicator (`LOADING...`) in the header rather than flashing false `VM OFFLINE` alerts while awaiting external signals. When Fly responds, the badge updates dynamically to `VM AWAKE`, `STANDBY (0/15m)`, `STARTING...`, or `UNCONFIGURED`. If Fly Machines API fails to respond within the 5-second timeout window or reports a down/failed state, it transitions cleanly to `VM OFFLINE`.
 
 ### 3.2 Server Sleep Interlock UX
 - If the server is in standby (`sleeping`), the Database Tables and Custom Query pages do **not** auto-fetch on mount.
@@ -125,35 +126,49 @@ The system defines three privilege tiers:
 
 ## 5. UI Architecture & Design System
 
-The Admin Dashboard follows a cyber-industrial mission control aesthetic with a persistent left-rail navigation layout and high-density telemetry displays.
+The Admin Dashboard is built with a dual-theme design system: **Cyber-Industrial Mission Control** (Dark) and **Tactical Blueprint / High-Precision Telemetry Lab** (Light). Both themes maintain high information density, strict typographic hierarchy, and tactile telemetry aesthetics without generic washed-out grays.
 
-### 5.1 Layout & Navigation Hierarchy
-- **Left Sidebar Rail (`Navbar.svelte`)**: Fixed 64-width navigation bar (`#0e1117`, border `#252b3b`) with operational pulse indicator and categorized links:
+### 5.1 Theme Engine & Mode Switching
+- **Mode Management (`mode-watcher`)**: Built with `mode-watcher` (official Svelte 5 theme manager from `@svecosystem`). Injected at the root in `src/routes/+layout.svelte` via `<ModeWatcher defaultMode="dark" track={true} />`.
+- **Zero-FOUC Guarantee**: Applies theme class directly to the document head before render, preventing flash of unstyled content. Persists admin preference in `localStorage` under `mode-watcher-mode`.
+- **Tailwind CSS v4 Compatibility**: Configured in `src/routes/layout.css` using the `@custom-variant dark (&:where(.dark, .dark *));` directive, synchronizing Tailwind v4 with `mode-watcher`'s HTML class toggling.
+- **Interactive Switcher (`ThemeToggle.svelte`)**: A segmented, tactile toggle button mounted in both the authenticated `TelemetryHeader` and the unauthenticated `/login` page. Uses CSS-driven visibility toggling (`:global(.dark)`) rather than client-side JS conditional rendering (`{#if mode.current === 'dark'}`), ensuring the active icon/label instantly matches the head-injected theme class on first paint without hydration flicker.
+
+### 5.2 Layout & Navigation Hierarchy
+- **Left Sidebar Rail (`Navbar.svelte`)**: Fixed 64-width navigation bar (`bg-white dark:bg-[#0e1117]`, border `border-[#d2d7e2] dark:border-[#252b3b]`) with operational pulse indicator and categorized links:
   - **Telemetry**: `Overview` (`/`), `Action Stream` (`/actions`).
   - **Storage Engine**: `Tables & Rows` (`/database`), `SQL Workspace` (`/database/query`).
   - **Governance**: `Admin Access` (`/admins`, locked for non-superadmins), `Settings` (`/settings`).
-  - **Mobile Support**: Off-canvas sliding drawer with dark backdrop overlay for viewports `< 1024px`.
-- **Top Diagnostics Header (`TelemetryHeader.svelte`)**: Sticky 14-height bar (`#0e1117`, border `#252b3b`):
-  - Safe Fly.io VM status indicator (`awake`, `sleeping`, `transitioning`) with non-waking Machines API refresh button.
+  - **Mobile Support**: Off-canvas sliding drawer with adaptive backdrop overlay for viewports `< 1024px`.
+- **Top Diagnostics Header (`TelemetryHeader.svelte`)**: Sticky 14-height bar (`bg-white/80 dark:bg-[#0e1117]/80 backdrop-blur-md`, border `border-[#d2d7e2] dark:border-[#252b3b]`):
+  - Safe Fly.io VM status indicator (`awake`, `sleeping`, `transitioning`, `loading`, `unconfigured`, `down`) with non-waking Machines API refresh button.
+  - Theme mode toggle button (`ThemeToggle.svelte`).
   - Authenticated user email and role badge (`SUPERADMIN` in lime, `READ & WRITE` in cyan, `READ ONLY` in amber).
   - Secure disconnect session termination action.
-- **Main Operations Viewport**: High-density workspace rendered inside an overflow scroll container with custom dark hairline scrollbars and technical background grids (`.bg-tech-grid`).
+- **Main Operations Viewport**: High-density workspace rendered inside an overflow scroll container with custom adaptive hairline scrollbars and technical background grids (`.bg-tech-grid`).
 
-### 5.2 Design Tokens & Component Library
-- **Typography**:
-  - Display Font: `Bricolage Grotesque` (bold uppercase headers and branding).
-  - Body Font: `Geist` (clean modern sans for general text).
-  - Monospace Font: `JetBrains Mono` (SQL editor, JSON payloads, metrics, timestamps, and data tables).
-- **Palette**:
-  - Canvas: `#0a0b0e`
-  - Panels & Cards: `#12151d`
-  - Inset Surfaces: `#181c26`
-  - Table & Dialog Headers: `#151922`
-  - Structural Borders: `#252b3b`
-  - Primary Accent: Neon Volt/Lime `#d4ff32` (selection bg, active nav markers, primary CTA buttons)
-  - Secondary Accents: Emerald `#10b981` (online), Cyan `#06b6d4` (telemetry), Amber `#f59e0b` (standby/sleep), Crimson `#ef4444` (critical errors)
-- **Reusable Primitives**:
-  - `Badge.svelte`: Semantic status badges supporting `lime`, `amber`, `emerald`, `crimson`, `slate`, and `cyan`.
-  - `Modal.svelte`: Accessible dialog overlay with Esc key handling, dark backdrop blur, and technical header with volt accent dot.
-  - `ServerInterlockModal.svelte`: Specialized Scale-to-Zero warning dialog preventing unintentional cold boots of the Fly.io microVM.
+### 5.3 Design Tokens & Aesthetic Modes
+
+| Token Category | Dark Mode ("Mission Control") | Light Mode ("Tactical Blueprint") |
+| :--- | :--- | :--- |
+| **Canvas Background** | Deep Cyber-Black (`#0a0b0e`) | Warm Drafting Paper (`#f4f5f8`) |
+| **Panels & Cards** | Deep Space (`#12151d`) | Surgical White (`#ffffff`) |
+| **Inset Surfaces** | Inset Well (`#181c26`) | Inset Tint (`#f0f2f6`) |
+| **Table & Modal Headers** | Header Dark (`#151922`) | Header Blueprint (`#f8fafc` / `#eef2f7`) |
+| **Structural Borders** | Slate Gridline (`#252b3b`) | Blueprint Border (`#d2d7e2`) |
+| **Primary Typography** | Crisp Off-White (`#f1f5f9` / `#ffffff`) | Deep Drafting Ink (`#090d16`) |
+| **Muted Typography** | Cool Gray (`#94a3b8` / `#64748b`) | Engineering Slate (`#475569` / `#64748b`) |
+| **Primary Accent (Volt)** | Neon Volt (`#d4ff32`) with `#090d16` text | Tactical Volt (`#ccf600`) with `#090d16` text, solid border & hard drafting shadow |
+| **Background Grid** | 24px Radar Grid (`rgba(255,255,255,0.02)`) | 24px Millimeter Drafting Grid (`rgba(0,0,0,0.035)`) |
+
+#### Typography Stack
+- Display Font: `Bricolage Grotesque` (bold uppercase headers, branding, section badges).
+- Body Font: `Geist` (clean modern sans for tabular data and general UI).
+- Monospace Font: `JetBrains Mono` (SQL editor, JSON payloads, metrics, timestamps, and row tables).
+
+### 5.4 Reusable Primitives
+- `Badge.svelte`: Semantic status badges supporting `lime`, `amber`, `emerald`, `crimson`, `slate`, and `cyan`. Colors are tuned with distinct light-mode washes and high-contrast ink text to guarantee WCAG AA readability.
+- `ThemeToggle.svelte`: Tactile toggle switch for changing between Dark and Light color schemes with smooth SVG icon transitions.
+- `Modal.svelte`: Accessible dialog overlay with Esc key handling, backdrop blur, adaptive card backgrounds, and technical header with volt accent dot.
+- `ServerInterlockModal.svelte`: Specialized Scale-to-Zero warning dialog preventing unintentional cold boots of the Fly.io microVM, styled with industrial hazard stripes and tactile confirmation buttons.
 

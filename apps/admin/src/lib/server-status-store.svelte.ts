@@ -18,7 +18,9 @@ class ServerStatusStore {
 	async checkStatus() {
 		this.isChecking = true;
 		try {
-			const res = await fetch('/api/server-status');
+			const res = await fetch('/api/server-status', {
+				signal: AbortSignal.timeout(6000)
+			});
 			if (res.ok) {
 				const json = await res.json();
 				this.data = json;

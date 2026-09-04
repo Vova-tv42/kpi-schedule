@@ -19,7 +19,8 @@ export const GET: RequestHandler = async () => {
 			headers: {
 				Authorization: `Bearer ${flyToken}`,
 				'Content-Type': 'application/json'
-			}
+			},
+			signal: AbortSignal.timeout(5000)
 		});
 
 		if (!res.ok) {
