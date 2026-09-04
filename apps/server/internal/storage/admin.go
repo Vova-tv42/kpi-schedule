@@ -33,6 +33,7 @@ type QueryResult struct {
 	Rows         []map[string]any `json:"rows,omitempty"`
 	RowsAffected int64            `json:"rows_affected"`
 	DurationMs   int64            `json:"duration_ms"`
+	Truncated    bool             `json:"truncated,omitempty"`
 }
 
 // GetTables returns user-defined SQLite tables with row counts.
@@ -45,21 +46,19 @@ func (db *DB) GetTables(ctx context.Context) ([]TableInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listing tables: %w", err)
 	}
+	defer rows.Close()
 
 	var names []string
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
-			rows.Close()
 			return nil, err
 		}
 		names = append(names, name)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
 		return nil, err
 	}
-	rows.Close()
 
 	tables := make([]TableInfo, 0, len(names))
 	for _, name := range names {
@@ -198,6 +197,14 @@ func (db *DB) GetTableRows(ctx context.Context, table string, limit, offset int,
 
 // UpdateTableRow updates a row matching pkCol = pkVal with updates.
 func (db *DB) UpdateTableRow(ctx context.Context, table, pkCol string, pkVal any, updates map[string]any) error {
+	var exists bool
+	err := db.SQL.QueryRowContext(ctx, `
+		SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?
+	`, table).Scan(&exists)
+	if err != nil || !exists {
+		return fmt.Errorf("table %q not found", table)
+	}
+
 	cols, err := db.getTableColumns(ctx, table)
 	if err != nil {
 		return err
@@ -246,6 +253,30 @@ func (db *DB) UpdateTableRow(ctx context.Context, table, pkCol string, pkVal any
 	return nil
 }
 
+func stripLeadingSQLComments(sql string) string {
+	s := strings.TrimSpace(sql)
+	for {
+		if strings.HasPrefix(s, "--") {
+			idx := strings.Index(s, "\n")
+			if idx == -1 {
+				return ""
+			}
+			s = strings.TrimSpace(s[idx+1:])
+			continue
+		}
+		if strings.HasPrefix(s, "/*") {
+			idx := strings.Index(s, "*/")
+			if idx == -1 {
+				return ""
+			}
+			s = strings.TrimSpace(s[idx+2:])
+			continue
+		}
+		break
+	}
+	return s
+}
+
 // ExecuteAdminQuery executes a raw SQL query.
 func (db *DB) ExecuteAdminQuery(ctx context.Context, query string) (*QueryResult, error) {
 	trimmed := strings.TrimSpace(query)
@@ -254,8 +285,9 @@ func (db *DB) ExecuteAdminQuery(ctx context.Context, query string) (*QueryResult
 	}
 
 	start := time.Now()
-	upper := strings.ToUpper(trimmed)
-	isSelect := strings.HasPrefix(upper, "SELECT") || strings.HasPrefix(upper, "PRAGMA") || strings.HasPrefix(upper, "EXPLAIN")
+	cleanQuery := stripLeadingSQLComments(trimmed)
+	upper := strings.ToUpper(cleanQuery)
+	isSelect := strings.HasPrefix(upper, "SELECT") || strings.HasPrefix(upper, "WITH") || strings.HasPrefix(upper, "PRAGMA") || strings.HasPrefix(upper, "EXPLAIN")
 
 	if isSelect {
 		rows, err := db.SQL.QueryContext(ctx, trimmed)
@@ -270,8 +302,15 @@ func (db *DB) ExecuteAdminQuery(ctx context.Context, query string) (*QueryResult
 			return nil, err
 		}
 
+		const maxQueryRows = 1000
 		var resultRows []map[string]any
+		var truncated bool
 		for rows.Next() {
+			if len(resultRows) >= maxQueryRows {
+				truncated = true
+				break
+			}
+
 			colValues := make([]any, len(colNames))
 			colPointers := make([]any, len(colNames))
 			for i := range colValues {
@@ -298,6 +337,7 @@ func (db *DB) ExecuteAdminQuery(ctx context.Context, query string) (*QueryResult
 			Rows:         resultRows,
 			RowsAffected: int64(len(resultRows)),
 			DurationMs:   duration,
+			Truncated:    truncated,
 		}, rows.Err()
 	}
 

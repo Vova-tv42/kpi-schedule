@@ -15,6 +15,7 @@
 	const user = $derived(page.data.user);
 
 	let query = $state<string>('SELECT * FROM users LIMIT 10;');
+	let lastExecutedQuery = $state<string>('');
 	let isExecuting = $state<boolean>(false);
 	let error = $state<string | null>(null);
 	let result = $state<{
@@ -22,9 +23,57 @@
 		rows?: Record<string, any>[];
 		rows_affected?: number;
 		duration_ms?: number;
+		truncated?: boolean;
 	} | null>(null);
 
 	let showInterlock = $state<boolean>(false);
+
+	const limitOffsetRegex = /\bLIMIT\s+(\d+)(?:\s+OFFSET\s+(\d+))?\s*;?\s*$/i;
+
+	const paginationInfo = $derived.by(() => {
+		if (!result?.columns || !result?.rows) return null;
+		const match = lastExecutedQuery.match(limitOffsetRegex);
+		const limit = match ? parseInt(match[1], 10) : 1000;
+		const offset = match && match[2] ? parseInt(match[2], 10) : 0;
+		const hasNext = !!result.truncated || result.rows.length === limit;
+		const hasPrev = offset > 0;
+		const page = Math.floor(offset / limit) + 1;
+		return { limit, offset, hasNext, hasPrev, page, hasExplicitLimit: !!match };
+	});
+
+	function goToNextPage() {
+		if (!paginationInfo || isExecuting) return;
+		const { limit, offset, hasExplicitLimit } = paginationInfo;
+		const nextOffset = offset + limit;
+		let nextQuery: string;
+
+		if (hasExplicitLimit) {
+			nextQuery = lastExecutedQuery.replace(limitOffsetRegex, `LIMIT ${limit} OFFSET ${nextOffset};`);
+		} else {
+			const clean = lastExecutedQuery.replace(/;\s*$/, '');
+			nextQuery = `${clean}\nLIMIT ${limit} OFFSET ${nextOffset};`;
+		}
+
+		query = nextQuery;
+		execute();
+	}
+
+	function goToPrevPage() {
+		if (!paginationInfo || isExecuting || paginationInfo.offset <= 0) return;
+		const { limit, offset } = paginationInfo;
+		const prevOffset = Math.max(0, offset - limit);
+		let prevQuery: string;
+
+		if (prevOffset === 0 && !paginationInfo.hasExplicitLimit) {
+			prevQuery = lastExecutedQuery.replace(limitOffsetRegex, '').trim();
+			if (!prevQuery.endsWith(';')) prevQuery += ';';
+		} else {
+			prevQuery = lastExecutedQuery.replace(limitOffsetRegex, `LIMIT ${limit} OFFSET ${prevOffset};`);
+		}
+
+		query = prevQuery;
+		execute();
+	}
 
 	const presets = [
 		{ label: 'Users Count', sql: 'SELECT COUNT(*) AS total_users FROM users;' },
@@ -49,6 +98,7 @@
 		isExecuting = true;
 		error = null;
 		result = null;
+		lastExecutedQuery = query.trim();
 
 		try {
 			const res = await fetch('/api/main-db/query', {
@@ -91,7 +141,7 @@
 </script>
 
 <svelte:head>
-	<title>KPI Schedule // SQL Workspace</title>
+	<title>KPI Schedule | SQL Workspace</title>
 </svelte:head>
 
 <div class="space-y-5">
@@ -214,6 +264,28 @@
 					{/if}
 				</div>
 
+				<!-- Truncation Alert Banner -->
+				{#if result.truncated}
+					<div class="mx-3 my-2 p-3 bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-300 text-xs font-mono rounded-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+						<div class="flex items-center gap-2">
+							<AlertTriangle size={15} class="text-amber-500 shrink-0" />
+							<span>
+								Results capped at 1,000 rows to protect server memory. Showing rows {paginationInfo ? paginationInfo.offset + 1 : 1}–{paginationInfo ? paginationInfo.offset + (result.rows?.length || 0) : (result.rows?.length || 0)}.
+							</span>
+						</div>
+						{#if paginationInfo?.hasNext}
+							<button
+								onclick={goToNextPage}
+								disabled={isExecuting}
+								class="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold rounded-xs transition-colors cursor-pointer self-start sm:self-auto shrink-0 shadow-xs"
+							>
+								<span>Load Next Page</span>
+								<span>&rarr;</span>
+							</button>
+						{/if}
+					</div>
+				{/if}
+
 				<!-- Table of Results (if SELECT) -->
 				{#if result.columns && result.rows}
 					<div class="overflow-x-auto">
@@ -250,6 +322,31 @@
 							</tbody>
 						</table>
 					</div>
+
+					<!-- Pagination Controls Footer -->
+					{#if paginationInfo && (paginationInfo.hasPrev || paginationInfo.hasNext)}
+						<div class="bg-slate-50 dark:bg-[#151922] border-t border-slate-300 dark:border-[#252b3b] px-4 py-2.5 flex items-center justify-between text-xs font-mono text-slate-600 dark:text-[#94a3b8]">
+							<span class="text-slate-500 dark:text-[#64748b]">
+								Page {paginationInfo.page} &bull; Showing rows {paginationInfo.offset + 1}–{paginationInfo.offset + (result.rows?.length || 0)}
+							</span>
+							<div class="flex items-center gap-2">
+								<button
+									onclick={goToPrevPage}
+									disabled={!paginationInfo.hasPrev || isExecuting}
+									class="px-2.5 py-1 border border-slate-300 dark:border-[#252b3b] bg-white dark:bg-[#181c26] text-slate-700 dark:text-[#94a3b8] hover:text-slate-950 dark:hover:text-white rounded-xs disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer font-medium"
+								>
+									&larr; Previous Page
+								</button>
+								<button
+									onclick={goToNextPage}
+									disabled={!paginationInfo.hasNext || isExecuting}
+									class="px-2.5 py-1 border border-slate-300 dark:border-[#252b3b] bg-white dark:bg-[#181c26] text-slate-700 dark:text-[#94a3b8] hover:text-slate-950 dark:hover:text-white rounded-xs disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer font-medium"
+								>
+									Next Page &rarr;
+								</button>
+							</div>
+						</div>
+					{/if}
 				{:else}
 					<!-- Non-SELECT result banner -->
 					<div class="p-6 text-center font-mono text-sm text-slate-900 dark:text-[#e6edf3]">

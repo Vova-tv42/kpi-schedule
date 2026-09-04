@@ -34,7 +34,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 	}
 
 	// Superadmin-only route guard
-	if (pathname.startsWith('/admins') && (!user || !user.isSuperadmin)) {
+	if ((pathname.startsWith('/admins') || pathname.startsWith('/api/admins')) && (!user || !user.isSuperadmin)) {
 		if (pathname.startsWith('/api/')) {
 			return json({ success: false, error: 'Forbidden: Superadmin access required' }, { status: 403 });
 		}

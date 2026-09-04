@@ -107,12 +107,12 @@ func TestUpdateTableRow(t *testing.T) {
 		t.Errorf("expected 'IA-99', got %q", updatedName)
 	}
 
-	// Updating invalid column
-	err = db.UpdateTableRow(ctx, "users", "id", "u1", map[string]any{
-		"fake_col": "val",
+	// Updating non-existent table
+	err = db.UpdateTableRow(ctx, "non_existent", "id", "u1", map[string]any{
+		"group_name": "IA-99",
 	})
 	if err == nil {
-		t.Error("expected error for fake column, got nil")
+		t.Error("expected error for non_existent table, got nil")
 	}
 }
 
@@ -134,6 +134,24 @@ func TestExecuteAdminQuery(t *testing.T) {
 		t.Errorf("expected 2 columns, got %d", len(selRes.Columns))
 	}
 
+	// Query with leading line comment
+	commentRes, err := db.ExecuteAdminQuery(ctx, "-- query comments\nSELECT id FROM users")
+	if err != nil {
+		t.Fatalf("ExecuteAdminQuery with comment failed: %v", err)
+	}
+	if len(commentRes.Rows) != 2 {
+		t.Errorf("expected 2 rows from commented query, got %d", len(commentRes.Rows))
+	}
+
+	// Query with WITH CTE
+	cteRes, err := db.ExecuteAdminQuery(ctx, "WITH active AS (SELECT id FROM users) SELECT id FROM active")
+	if err != nil {
+		t.Fatalf("ExecuteAdminQuery with WITH CTE failed: %v", err)
+	}
+	if len(cteRes.Rows) != 2 {
+		t.Errorf("expected 2 rows from CTE query, got %d", len(cteRes.Rows))
+	}
+
 	// Update query
 	updRes, err := db.ExecuteAdminQuery(ctx, "UPDATE users SET group_name = 'IA-XX' WHERE id = 'u2'")
 	if err != nil {
@@ -141,5 +159,27 @@ func TestExecuteAdminQuery(t *testing.T) {
 	}
 	if updRes.RowsAffected != 1 {
 		t.Errorf("expected 1 row affected, got %d", updRes.RowsAffected)
+	}
+
+	// Truncation test: seed > 1000 rows
+	_, err = db.SQL.Exec(`
+		CREATE TABLE bulk_test (n INTEGER);
+		WITH RECURSIVE cnt(x) AS (
+			SELECT 1 UNION ALL SELECT x+1 FROM cnt WHERE x < 1050
+		) INSERT INTO bulk_test SELECT x FROM cnt;
+	`)
+	if err != nil {
+		t.Fatalf("seeding bulk_test: %v", err)
+	}
+
+	bulkRes, err := db.ExecuteAdminQuery(ctx, "SELECT n FROM bulk_test")
+	if err != nil {
+		t.Fatalf("ExecuteAdminQuery bulk_test failed: %v", err)
+	}
+	if len(bulkRes.Rows) != 1000 {
+		t.Errorf("expected 1000 rows, got %d", len(bulkRes.Rows))
+	}
+	if !bulkRes.Truncated {
+		t.Errorf("expected bulkRes.Truncated to be true, got false")
 	}
 }

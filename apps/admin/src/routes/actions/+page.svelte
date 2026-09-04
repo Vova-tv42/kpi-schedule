@@ -135,7 +135,7 @@
 </script>
 
 <svelte:head>
-	<title>KPI Schedule // Action Telemetry Stream</title>
+	<title>KPI Schedule | Action Telemetry Stream</title>
 </svelte:head>
 
 <div class="space-y-6">
@@ -227,6 +227,14 @@
 						: 'border-slate-300 bg-slate-50 text-slate-600 hover:text-slate-950 hover:bg-slate-100 dark:border-[#252b3b] dark:bg-[#0a0b0e] dark:text-[#94a3b8] dark:hover:text-[#f1f5f9]'}"
 				>
 					CALLBACKS
+				</button>
+				<button
+					onclick={() => setFilterType('telegram_message')}
+					class="px-2.5 py-1 text-xs font-mono tracking-wider uppercase rounded-xs border transition-colors cursor-pointer whitespace-nowrap {filterType === 'telegram_message'
+						? 'bg-slate-900 text-white font-bold border-slate-950 shadow-xs dark:bg-[#d4ff32]/10 dark:text-[#d4ff32] dark:font-semibold dark:border-[#d4ff32]/30 dark:shadow-none'
+						: 'border-slate-300 bg-slate-50 text-slate-600 hover:text-slate-950 hover:bg-slate-100 dark:border-[#252b3b] dark:bg-[#0a0b0e] dark:text-[#94a3b8] dark:hover:text-[#f1f5f9]'}"
+				>
+					MESSAGES
 				</button>
 				<button
 					onclick={() => setFilterType('extension_sync')}

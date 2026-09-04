@@ -27,7 +27,7 @@
 </script>
 
 <svelte:head>
-	<title>KPI Schedule // Mission Control Sign In</title>
+	<title>KPI Schedule | Mission Control Sign In</title>
 </svelte:head>
 
 <div class="min-h-screen bg-[#f4f5f8] dark:bg-[#0a0b0e] bg-tech-grid flex flex-col items-center justify-center p-6 relative">

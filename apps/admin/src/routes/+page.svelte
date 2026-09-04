@@ -58,7 +58,7 @@
 		}
 
 		// Check if VM is awake or if user previously loaded tables
-		if (serverStatus.data.status !== 'sleeping' || tables.length > 0) {
+		if (serverStatus.data.status === 'awake' || tables.length > 0) {
 			await loadTablesData();
 		}
 
@@ -96,7 +96,7 @@
 </script>
 
 <svelte:head>
-	<title>KPI Schedule // Mission Control & Admin Telemetry</title>
+	<title>KPI Schedule | Mission Control & Admin Telemetry</title>
 </svelte:head>
 
 <div class="space-y-6">

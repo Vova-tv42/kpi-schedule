@@ -137,7 +137,7 @@
 </script>
 
 <svelte:head>
-	<title>KPI Schedule // Admin Access Governance</title>
+	<title>KPI Schedule | Admin Access Governance</title>
 </svelte:head>
 
 <div class="space-y-6">

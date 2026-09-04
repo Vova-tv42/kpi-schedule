@@ -44,6 +44,9 @@ export const GET: RequestHandler = async (event) => {
 	if (!email) {
 		throw redirect(303, '/login?error=no_email');
 	}
+	if (!profile.email_verified) {
+		throw redirect(303, '/login?error=unverified_email');
+	}
 
 	// Strict Whitelist Check
 	const authorizedUser = await authorizeUser(email);

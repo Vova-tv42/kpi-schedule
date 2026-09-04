@@ -11,7 +11,12 @@ function sanitizeMetadata(raw: any): Record<string, any> | null {
 
 	for (const [k, v] of Object.entries(raw)) {
 		const lowerKey = k.toLowerCase();
-		if (!forbiddenKeys.includes(lowerKey) && !lowerKey.includes('token') && !lowerKey.includes('id')) {
+		if (forbiddenKeys.includes(lowerKey) || lowerKey.includes('token') || lowerKey.includes('id')) {
+			continue;
+		}
+		if (v && typeof v === 'object' && !Array.isArray(v)) {
+			clean[k] = sanitizeMetadata(v);
+		} else {
 			clean[k] = v;
 		}
 	}
@@ -22,7 +27,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	const expectedKey = env.ADMIN_INGEST_KEY || process.env.ADMIN_INGEST_KEY;
 	const providedKey = request.headers.get('X-Ingest-Key') || request.headers.get('Authorization')?.replace('Bearer ', '');
 
-	if (expectedKey && providedKey !== expectedKey) {
+	if (!expectedKey || providedKey !== expectedKey) {
 		return json({ success: false, error: 'Unauthorized: Invalid ingest key' }, { status: 401 });
 	}
 
@@ -66,7 +71,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			if (!isNaN(hours) && hours > 0) {
 				await sql`
 					DELETE FROM recent_actions 
-					WHERE created_at < NOW() - (${hours} || ' hours')::INTERVAL;
+					WHERE created_at < NOW() - (${hours} * INTERVAL '1 hour');
 				`;
 			}
 		} catch (cleanupErr) {

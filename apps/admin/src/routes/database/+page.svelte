@@ -68,7 +68,7 @@
 </script>
 
 <svelte:head>
-	<title>KPI Schedule // Database Tables</title>
+	<title>KPI Schedule | Database Tables</title>
 </svelte:head>
 
 <div class="space-y-6">

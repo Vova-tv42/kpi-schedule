@@ -85,7 +85,7 @@
 </script>
 
 <svelte:head>
-	<title>KPI Schedule // System Settings</title>
+	<title>KPI Schedule | System Settings</title>
 </svelte:head>
 
 <div class="space-y-6">

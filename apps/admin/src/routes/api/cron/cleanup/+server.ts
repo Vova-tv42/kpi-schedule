@@ -4,27 +4,25 @@ import { ensureSchema, getSQL } from '$lib/server/db';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async (event) => {
-	return handleCleanup(event);
+	return handleCleanup(event, false);
 };
 
 export const GET: RequestHandler = async (event) => {
-	return handleCleanup(event);
+	return handleCleanup(event, true);
 };
 
-async function handleCleanup({ request, url, locals }: { request: Request; url: URL; locals: App.Locals }) {
+async function handleCleanup({ request, locals }: { request: Request; locals: App.Locals }, isGet: boolean) {
 	const expectedSecret = env.CRON_SECRET || process.env.CRON_SECRET;
 	const authHeader = request.headers.get('Authorization');
 	const secretHeader = request.headers.get('X-Cron-Secret');
-	const querySecret = url.searchParams.get('secret');
 
 	const providedSecret =
 		authHeader?.replace('Bearer ', '') ||
-		secretHeader ||
-		querySecret;
+		secretHeader;
 
-	// Allow if user is an authenticated admin OR provided the valid CRON_SECRET
+	// On GET, only allow header-based CRON_SECRET to prevent CSRF via ambient cookies
 	const isAuthorizedCron = expectedSecret && providedSecret === expectedSecret;
-	const isAuthorizedAdmin = !!locals.user;
+	const isAuthorizedAdmin = !isGet && !!locals.user;
 
 	if (!isAuthorizedCron && !isAuthorizedAdmin) {
 		return json({ success: false, error: 'Unauthorized: Invalid cron credentials' }, { status: 401 });
@@ -42,7 +40,7 @@ async function handleCleanup({ request, url, locals }: { request: Request; url: 
 
 	const deleteResult = await sql`
 		DELETE FROM recent_actions
-		WHERE created_at < NOW() - (${retentionHours} || ' hours')::INTERVAL;
+		WHERE created_at < NOW() - (${retentionHours} * INTERVAL '1 hour');
 	`;
 
 	return json({

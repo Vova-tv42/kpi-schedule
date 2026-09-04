@@ -108,10 +108,11 @@ If `X-Admin-Secret` is missing or invalid, the server responds with:
   "columns": ["total"],
   "rows": [{ "total": 42 }],
   "rows_affected": 1,
-  "duration_ms": 2
+  "duration_ms": 2,
+  "truncated": false
 }
 ```
-For non-SELECT queries (`UPDATE`, `INSERT`, `DELETE`), `columns` and `rows` are omitted and `rows_affected` indicates the number of affected rows.
+For SELECT/read queries, results are capped at a maximum of 1,000 rows to prevent microVM memory spikes. If more rows exist, `truncated` is set to `true` (and the admin dashboard provides pagination controls to query subsequent pages via `LIMIT` and `OFFSET`). For non-SELECT queries (`UPDATE`, `INSERT`, `DELETE`), `columns` and `rows` are omitted and `rows_affected` indicates the number of affected rows.
 
 ---
 

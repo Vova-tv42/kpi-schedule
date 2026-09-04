@@ -2,16 +2,16 @@
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import Modal from '$lib/components/Modal.svelte';
-	import { 
-		ArrowLeft, 
-		RefreshCw, 
-		Edit2, 
-		ChevronLeft, 
-		ChevronRight, 
-		Save, 
-		Key, 
-		Database, 
-		AlertCircle 
+	import {
+		ArrowLeft,
+		RefreshCw,
+		Edit2,
+		ChevronLeft,
+		ChevronRight,
+		Save,
+		Key,
+		Database,
+		AlertCircle
 	} from 'lucide-svelte';
 
 	interface ColumnInfo {
@@ -102,7 +102,12 @@
 		isSaving = true;
 		saveError = null;
 
-		const pkCol = data.columns.find((c) => c.primary_key)?.name || 'id';
+		const pkCol = data.columns.find((c) => c.primary_key)?.name || (data.columns.some((c) => c.name === 'id') ? 'id' : null);
+		if (!pkCol) {
+			saveError = 'Table has no primary key or "id" column defined. Rows cannot be updated directly.';
+			isSaving = false;
+			return;
+		}
 		const pkVal = editingRow[pkCol];
 
 		// Only include changed fields
@@ -150,7 +155,7 @@
 </script>
 
 <svelte:head>
-	<title>KPI Schedule // Table: {tableName}</title>
+	<title>KPI Schedule | Table: {tableName}</title>
 </svelte:head>
 
 <div class="space-y-5">

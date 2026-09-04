@@ -72,6 +72,9 @@ export async function ensureSchema() {
 	await sql`
 		CREATE INDEX IF NOT EXISTS idx_recent_actions_created ON recent_actions (created_at DESC);
 	`;
+	await sql`
+		CREATE INDEX IF NOT EXISTS idx_recent_actions_type ON recent_actions (action_type);
+	`;
 
 	await sql`
 		CREATE TABLE IF NOT EXISTS admin_settings (

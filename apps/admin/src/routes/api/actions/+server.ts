@@ -13,7 +13,9 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 	const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '50', 10), 1), 200);
 	const offset = Math.max(parseInt(url.searchParams.get('offset') || '0', 10), 0);
 	const actionType = url.searchParams.get('action_type') || '';
-	const status = url.searchParams.get('status') ? parseInt(url.searchParams.get('status')!, 10) : null;
+	const rawStatus = url.searchParams.get('status');
+	const parsedStatus = rawStatus ? parseInt(rawStatus, 10) : null;
+	const status = parsedStatus !== null && Number.isInteger(parsedStatus) ? parsedStatus : null;
 	const search = url.searchParams.get('search')?.trim() || '';
 
 	let rows;
