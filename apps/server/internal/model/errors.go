@@ -12,6 +12,7 @@ const (
 	ErrCampusAPIUnavailable = "ERR_CAMPUS_API_UNAVAILABLE"
 	ErrGroupNotFound        = "ERR_GROUP_NOT_FOUND"
 	ErrUserNotFound         = "ERR_USER_NOT_FOUND"
+	ErrIssueNotFound        = "ERR_ISSUE_NOT_FOUND"
 	ErrInvalidRequest       = "ERR_INVALID_REQUEST"
 	ErrInternal             = "ERR_INTERNAL"
 	ErrUnauthorized         = "ERR_UNAUTHORIZED"

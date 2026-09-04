@@ -101,12 +101,29 @@ Payloads stay well inside Telegram's 64-byte `callback_data` limit (`iss:view:0:
 
 ## 6. Discussion Threads
 
-Threads are **admin-initiated**. `issues.thread_open` starts false and flips true the first time an admin comments from the dashboard; only then does the user see a `💬 Discussion (N)` button on the issue.
+Threads are **admin-initiated**, per the feature's spec. `issues.thread_open` starts false and flips true the first time an admin comments from the dashboard; only then does the user see a `💬 Discussion (N)` button on the issue view. A user cannot open a thread unilaterally — `iss:thr:` silently no-ops while `thread_open` is false, so a guessed callback cannot conjure one either.
 
-- When an admin posts a reply, the bot DMs the reporter with the quoted message and a `💬 Open discussion` button that jumps straight to `iss:thr:<uuid>`.
-- The thread screen shows the full history, oldest first, attributing each message to `👤 You` or `🛠 Team`.
-- `✍️ Reply` opens the same delete-the-message-and-edit-in-place prompt used by the wizard, storing a `reply` draft (with `issue_id` set) under the same 10-minute TTL.
-- Status changes are also pushed to the reporter as a short DM.
+| Screen | Buttons |
+| :--- | :--- |
+| Thread (`iss:thr:<uuid>`) | `✍️ Reply`, `🔄 Refresh`, `◀️ Back` (→ issue view) |
+| Reply prompt (`iss:reply:<uuid>`) | `◀️ Back` (→ thread), `✖️ Cancel` |
+
+The thread renders the full history oldest-first, each message in a `<blockquote>`, attributed `👤 You` or `🛠 Team` — the admin's email is never shown to the user. Replies obey the same 3000-rune limit as issue bodies (`model.IssueCommentMaxLen`).
+
+`✍️ Reply` writes a draft with `step = "reply"` and `issue_id` set, under the same 10-minute TTL as the creation wizard (§4), and reuses the identical mechanics: the user's message is deleted, the bot's single message is edited in place, and the thread re-renders with the new comment appended. `✖️ Cancel` deletes the bot's message, exactly as in the wizard.
+
+### Notification DMs
+
+Both notifications are sent by [`issues_notify.go`](../../apps/server/internal/bot/issues_notify.go), which implements the `api.IssueNotifier` interface. The interface is declared in `internal/api` and satisfied by `*bot.Bot` because `internal/bot` already imports `internal/api` — wiring it the other way round would be an import cycle. It is injected in `cmd/server/main.go` (`svc.SetIssueNotifier(tgBot)`) and left nil when the bot is disabled, in which case the notify helpers are no-ops.
+
+Delivery is **best-effort**: a Telegram failure is logged and the admin's HTTP request still succeeds, because the comment or status change is already committed. A blocked bot or a deleted chat must not break the dashboard.
+
+| Trigger | DM |
+| :--- | :--- |
+| Admin posts a comment | *💬 New reply on your issue*, the headline, and the quoted message; button `💬 Open discussion` → `iss:thr:<uuid>` |
+| Admin changes the status | *🔄 Issue status changed*, the headline, and `🕓 On review → 🔨 In development`; button `📄 Open issue` → `iss:view:0:<uuid>` |
+
+Re-applying a status an issue already has sends nothing — the endpoint short-circuits before notifying (see [admin-endpoints.md §2.7](../api/admin-endpoints.md)).
 
 Both sides see the same transcript: the user in the bot, admins on the dashboard's issue page. See [admin-endpoints.md](../api/admin-endpoints.md) for the endpoints behind it.
 

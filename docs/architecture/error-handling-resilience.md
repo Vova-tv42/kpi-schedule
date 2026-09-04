@@ -80,6 +80,7 @@ Standard Error Codes:
 - `ERR_CAMPUS_API_UNAVAILABLE`: Public group API unreachable.
 - `ERR_GROUP_NOT_FOUND`: Specified group ID does not exist in catalog.
 - `ERR_USER_NOT_FOUND`: No user exists for the given `telegram_id`.
+- `ERR_ISSUE_NOT_FOUND`: No issue exists for the given id (admin issue endpoints).
 - `ERR_INVALID_REQUEST`: Malformed request (bad date format, missing required field, etc).
 - `ERR_INTERNAL`: Unexpected server-side failure.
 - `ERR_UNAUTHORIZED`: Missing or invalid `X-Internal-Token`.

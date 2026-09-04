@@ -74,6 +74,12 @@ func (b *Bot) onIssues(bot *gotgbot.Bot, ctx *ext.Context) error {
 	case strings.HasPrefix(action, "view:"):
 		return b.editToIssueView(bot, cq, strings.TrimPrefix(action, "view:"))
 
+	case strings.HasPrefix(action, "thr:"):
+		return b.editToIssueThread(bot, cq, strings.TrimPrefix(action, "thr:"))
+
+	case strings.HasPrefix(action, "reply:"):
+		return b.startIssueReplyDraft(bot, cq, strings.TrimPrefix(action, "reply:"))
+
 	default:
 		return answerSilently(bot, cq)
 	}
@@ -195,34 +201,102 @@ func (b *Bot) editToIssueView(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, arg s
 		idStr = right
 	}
 
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		return answerSilently(bot, cq)
-	}
-
-	reqCtx := context.Background()
-	issue, err := b.db.GetIssueByID(reqCtx, id)
-	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			return answerSilently(bot, cq)
-		}
-		slog.Error("loading issue", "error", err, "issue_id", id)
-		return answerIssueError(bot, cq)
-	}
-	// An issue is only ever visible to the user who filed it.
-	if issue.AuthorTelegramID != cq.From.Id {
-		return answerSilently(bot, cq)
+	issue, ok, err := b.authoredIssue(bot, cq, idStr)
+	if !ok {
+		return err
 	}
 
 	count := 0
 	if issue.ThreadOpen {
-		if count, err = b.db.CountIssueComments(reqCtx, issue.ID); err != nil {
+		if count, err = b.db.CountIssueComments(context.Background(), issue.ID); err != nil {
 			slog.Error("counting issue comments", "error", err, "issue_id", issue.ID)
 			count = 0
 		}
 	}
 
 	return b.applyScreen(bot, cq, formatIssueView(issue, count), issueViewKeyboard(issue, count, page), true)
+}
+
+// authoredIssue loads the issue named by idStr and confirms the caller filed
+// it. It answers the callback itself and returns ok=false when it cannot.
+func (b *Bot) authoredIssue(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, idStr string) (model.Issue, bool, error) {
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		return model.Issue{}, false, answerSilently(bot, cq)
+	}
+
+	issue, err := b.db.GetIssueByID(context.Background(), id)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return model.Issue{}, false, answerSilently(bot, cq)
+		}
+		slog.Error("loading issue", "error", err, "issue_id", id)
+		return model.Issue{}, false, answerIssueError(bot, cq)
+	}
+	if issue.AuthorTelegramID != cq.From.Id {
+		return model.Issue{}, false, answerSilently(bot, cq)
+	}
+	return issue, true, nil
+}
+
+// editToIssueThread shows the discussion transcript. Threads are opened by
+// admins, so a closed one has nothing to show.
+func (b *Bot) editToIssueThread(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, idStr string) error {
+	_ = b.db.ClearIssueDraft(context.Background(), cq.From.Id)
+
+	issue, ok, err := b.authoredIssue(bot, cq, idStr)
+	if !ok {
+		return err
+	}
+	if !issue.ThreadOpen {
+		return answerSilently(bot, cq)
+	}
+
+	comments, err := b.db.ListIssueComments(context.Background(), issue.ID)
+	if err != nil {
+		slog.Error("loading issue thread", "error", err, "issue_id", issue.ID)
+		return answerIssueError(bot, cq)
+	}
+
+	return b.applyScreen(bot, cq, formatIssueThread(issue, comments), issueThreadKeyboard(issue), true)
+}
+
+// startIssueReplyDraft asks the user for a thread reply, reusing the wizard's
+// draft row (and its 10-minute TTL) with the issue attached.
+func (b *Bot) startIssueReplyDraft(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, idStr string) error {
+	issue, ok, err := b.authoredIssue(bot, cq, idStr)
+	if !ok {
+		return err
+	}
+	if !issue.ThreadOpen {
+		return answerSilently(bot, cq)
+	}
+
+	msg := cq.Message
+	if msg == nil {
+		return answerSilently(bot, cq)
+	}
+
+	reqCtx := context.Background()
+	_ = b.db.ClearURLPrompt(reqCtx, cq.From.Id)
+	_ = b.db.ClearGroupPrompt(reqCtx, cq.From.Id)
+
+	issueID := issue.ID
+	if err := b.db.SetIssueDraft(reqCtx, model.IssueDraft{
+		TelegramID:      cq.From.Id,
+		ChatID:          msg.GetChat().Id,
+		PromptMessageID: msg.GetMessageId(),
+		Step:            model.IssueStepReply,
+		IssueType:       issue.Type,
+		Title:           issue.Title,
+		IssueID:         &issueID,
+	}); err != nil {
+		slog.Error("starting issue reply draft", "error", err, "issue_id", issue.ID)
+		return answerIssueError(bot, cq)
+	}
+
+	return b.applyScreen(bot, cq, formatIssueReplyPrompt(issue, ""),
+		issueWizardKeyboard(issuesCallbackPrefix+"thr:"+issue.ID.String()), true)
 }
 
 // handleIssueInput consumes the user's typed answer for the current wizard
@@ -234,6 +308,8 @@ func (b *Bot) handleIssueInput(bot *gotgbot.Bot, ctx *ext.Context, draft *model.
 		return b.handleIssueTitleInput(bot, ctx, draft, input)
 	case model.IssueStepBody:
 		return b.handleIssueBodyInput(bot, ctx, draft, input)
+	case model.IssueStepReply:
+		return b.handleIssueReplyInput(bot, ctx, draft, input)
 	default:
 		return nil
 	}
@@ -285,6 +361,55 @@ func (b *Bot) handleIssueBodyInput(bot *gotgbot.Bot, ctx *ext.Context, draft *mo
 	_ = b.db.ClearIssueDraft(reqCtx, draft.TelegramID)
 
 	return b.editIssuePrompt(bot, draft, formatIssueCreated(issue), issueCreatedKeyboard())
+}
+
+func (b *Bot) handleIssueReplyInput(bot *gotgbot.Bot, ctx *ext.Context, draft *model.IssueDraft, input string) error {
+	reqCtx := context.Background()
+	if draft.IssueID == nil {
+		_ = b.db.ClearIssueDraft(reqCtx, draft.TelegramID)
+		return nil
+	}
+
+	issue, err := b.db.GetIssueByID(reqCtx, *draft.IssueID)
+	if err != nil {
+		slog.Error("loading issue for reply", "error", err, "issue_id", draft.IssueID)
+		_ = b.db.ClearIssueDraft(reqCtx, draft.TelegramID)
+		return nil
+	}
+	if issue.AuthorTelegramID != draft.TelegramID {
+		_ = b.db.ClearIssueDraft(reqCtx, draft.TelegramID)
+		return nil
+	}
+
+	if msg := validateIssueText(input, model.IssueCommentMaxLen, "reply"); msg != "" {
+		return b.editIssuePrompt(bot, draft, formatIssueReplyPrompt(issue, msg),
+			issueWizardKeyboard(issuesCallbackPrefix+"thr:"+issue.ID.String()))
+	}
+
+	label := ctx.EffectiveUser.FirstName
+	if ctx.EffectiveUser.Username != "" {
+		label = "@" + ctx.EffectiveUser.Username
+	}
+	if _, err := b.db.AddIssueComment(reqCtx, model.IssueComment{
+		IssueID:     issue.ID,
+		AuthorRole:  model.IssueCommentUser,
+		AuthorLabel: label,
+		Body:        input,
+	}); err != nil {
+		slog.Error("saving issue reply", "error", err, "issue_id", issue.ID)
+		return b.editIssuePrompt(bot, draft, formatIssueReplyPrompt(issue, "Could not send the reply. Please try again."),
+			issueWizardKeyboard(issuesCallbackPrefix+"thr:"+issue.ID.String()))
+	}
+
+	_ = b.db.ClearIssueDraft(reqCtx, draft.TelegramID)
+
+	comments, err := b.db.ListIssueComments(reqCtx, issue.ID)
+	if err != nil {
+		slog.Error("reloading issue thread", "error", err, "issue_id", issue.ID)
+		return nil
+	}
+
+	return b.editIssuePrompt(bot, draft, formatIssueThread(issue, comments), issueThreadKeyboard(issue))
 }
 
 // validateIssueText returns an empty string when input is acceptable, or the

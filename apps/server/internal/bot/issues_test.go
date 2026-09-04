@@ -243,3 +243,70 @@ func containsString(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+func TestFormatIssueThreadAttributesBothSides(t *testing.T) {
+	issue := model.Issue{
+		ID:     uuid.New(),
+		Number: 12,
+		Title:  "Add calendar export",
+		Status: model.IssueInDevelopment,
+	}
+	comments := []model.IssueComment{
+		{AuthorRole: model.IssueCommentAdmin, AuthorLabel: "admin@example.com", Body: "Which calendar app?"},
+		{AuthorRole: model.IssueCommentUser, AuthorLabel: "@student", Body: "Google Calendar <3"},
+	}
+
+	out := formatIssueThread(issue, comments)
+
+	if !strings.Contains(out, "🛠 Team") || !strings.Contains(out, "👤 You") {
+		t.Errorf("expected both sides attributed, got:\n%s", out)
+	}
+	// The admin's identity stays inside the dashboard.
+	if strings.Contains(out, "admin@example.com") {
+		t.Errorf("admin email must not leak to the reporter, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Google Calendar &lt;3") {
+		t.Errorf("expected comment bodies to be HTML-escaped, got:\n%s", out)
+	}
+	if !strings.Contains(out, issueHeadline(issue)) {
+		t.Errorf("expected the issue headline, got:\n%s", out)
+	}
+}
+
+func TestFormatIssueThreadEmptyState(t *testing.T) {
+	out := formatIssueThread(model.Issue{ID: uuid.New(), Number: 3, Title: "Dark mode"}, nil)
+	if !strings.Contains(out, "No messages yet.") {
+		t.Errorf("expected an empty-thread notice, got:\n%s", out)
+	}
+}
+
+func TestIssueNotificationsDeepLinkToTheRightScreen(t *testing.T) {
+	issue := model.Issue{ID: uuid.New(), Number: 12, Title: "Add calendar export", Status: model.IssueInDevelopment}
+	id := issue.ID.String()
+
+	comment := model.IssueComment{AuthorRole: model.IssueCommentAdmin, Body: "Which calendar app?"}
+	commentText := formatIssueCommentNotification(issue, comment)
+	if !strings.Contains(commentText, issueHeadline(issue)) || !strings.Contains(commentText, "Which calendar app?") {
+		t.Errorf("expected the headline and the quoted reply, got:\n%s", commentText)
+	}
+	commentBtn := issueCommentNotificationKeyboard(issue).InlineKeyboard[0][0]
+	if commentBtn.CallbackData != issuesCallbackPrefix+"thr:"+id {
+		t.Errorf("expected the comment DM to open the thread, got %q", commentBtn.CallbackData)
+	}
+
+	statusText := formatIssueStatusNotification(issue, model.IssueOnReview)
+	if !strings.Contains(statusText, issueStatusLabel(model.IssueOnReview)) ||
+		!strings.Contains(statusText, issueStatusLabel(model.IssueInDevelopment)) {
+		t.Errorf("expected both the old and the new status, got:\n%s", statusText)
+	}
+	statusBtn := issueStatusNotificationKeyboard(issue).InlineKeyboard[0][0]
+	if statusBtn.CallbackData != issuesCallbackPrefix+"view:0:"+id {
+		t.Errorf("expected the status DM to open the issue, got %q", statusBtn.CallbackData)
+	}
+	// Telegram caps callback_data at 64 bytes.
+	for _, data := range []string{commentBtn.CallbackData, statusBtn.CallbackData} {
+		if len(data) > 64 {
+			t.Errorf("callback_data %q exceeds Telegram's 64-byte limit", data)
+		}
+	}
+}

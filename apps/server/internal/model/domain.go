@@ -286,6 +286,10 @@ type IssueDraft struct {
 	UpdatedAt       time.Time
 }
 
+// IssueCommentMaxLen bounds a single message in a discussion thread, on both
+// sides, so a thread stays readable in a Telegram screen.
+const IssueCommentMaxLen = 3000
+
 // Draft steps: which input the bot is currently waiting for.
 const (
 	IssueStepTitle = "title"

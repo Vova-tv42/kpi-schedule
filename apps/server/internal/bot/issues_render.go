@@ -264,3 +264,87 @@ func pluralEN(n int, one, many string) string {
 	}
 	return many
 }
+
+// formatIssueThread renders the full admin↔user transcript, oldest first.
+func formatIssueThread(issue model.Issue, comments []model.IssueComment) string {
+	var b strings.Builder
+	b.WriteString("💬 <b>Discussion</b>\n")
+	b.WriteString(issueHeadline(issue))
+	fmt.Fprintf(&b, "\n%s\n\n", issueStatusLabel(issue.Status))
+
+	if len(comments) == 0 {
+		b.WriteString("No messages yet.")
+		return b.String()
+	}
+
+	for _, c := range comments {
+		author := "🛠 Team"
+		if c.AuthorRole == model.IssueCommentUser {
+			author = "👤 You"
+		}
+		fmt.Fprintf(&b, "%s · <i>%s</i>\n<blockquote>%s</blockquote>\n\n",
+			author, c.CreatedAt.Format("02.01.2006 15:04"), html.EscapeString(c.Body))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func issueThreadKeyboard(issue model.Issue) gotgbot.InlineKeyboardMarkup {
+	id := issue.ID.String()
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{Text: "✍️ Reply", CallbackData: issuesCallbackPrefix + "reply:" + id},
+				{Text: "🔄 Refresh", CallbackData: issuesCallbackPrefix + "thr:" + id},
+			},
+			{{Text: "◀️ Back", CallbackData: issuesCallbackPrefix + "view:0:" + id}},
+		},
+	}
+}
+
+func formatIssueReplyPrompt(issue model.Issue, errorMsg string) string {
+	var b strings.Builder
+	b.WriteString("✍️ <b>Reply</b>\n")
+	b.WriteString(issueHeadline(issue))
+	b.WriteString("\n\n")
+	if errorMsg != "" {
+		fmt.Fprintf(&b, "❌ <b>%s</b>\n\n", html.EscapeString(errorMsg))
+	}
+	fmt.Fprintf(&b, "Send your reply as a message (up to %d characters). The team will see it on this issue.", model.IssueCommentMaxLen)
+	return b.String()
+}
+
+// formatIssueCommentNotification is the DM the reporter gets when an admin
+// replies. It quotes the reply so the message is useful on its own.
+func formatIssueCommentNotification(issue model.Issue, comment model.IssueComment) string {
+	var b strings.Builder
+	b.WriteString("💬 <b>New reply on your issue</b>\n")
+	b.WriteString(issueHeadline(issue))
+	fmt.Fprintf(&b, "\n\n<blockquote>%s</blockquote>", html.EscapeString(comment.Body))
+	return b.String()
+}
+
+func issueCommentNotificationKeyboard(issue model.Issue) gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{{Text: "💬 Open discussion", CallbackData: issuesCallbackPrefix + "thr:" + issue.ID.String()}},
+		},
+	}
+}
+
+// formatIssueStatusNotification is the DM the reporter gets when triage moves
+// their issue along.
+func formatIssueStatusNotification(issue model.Issue, previous model.IssueStatus) string {
+	var b strings.Builder
+	b.WriteString("🔄 <b>Issue status changed</b>\n")
+	b.WriteString(issueHeadline(issue))
+	fmt.Fprintf(&b, "\n\n%s → <b>%s</b>", issueStatusLabel(previous), issueStatusLabel(issue.Status))
+	return b.String()
+}
+
+func issueStatusNotificationKeyboard(issue model.Issue) gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{{Text: "📄 Open issue", CallbackData: issuesCallbackPrefix + "view:0:" + issue.ID.String()}},
+		},
+	}
+}
