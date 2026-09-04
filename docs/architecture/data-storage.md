@@ -46,6 +46,12 @@ user_group_prompts   (telegram_id PK, prompt_message_id, action, group_id, bind_
 campus_cache         (key PK, value /* JSON */, fetched_at)
 pairing_codes        (code PK, telegram_id, expires_at)
 user_tokens          (token PK, user_id FK, created_at)
+issues               (id PK, number UNIQUE, author_telegram_id, author_username,
+                       author_first_name, type, title, body, status, status_by,
+                       status_note, thread_state, created_at, updated_at)
+issue_comments       (id PK, issue_id FK, author_role, author_label, body, created_at)
+user_issue_drafts    (telegram_id PK, chat_id, prompt_message_id, step, issue_type,
+                       title, issue_id, expires_at, updated_at)
 ```
 
 Migrations live in `apps/server/internal/storage/migrations/` (embedded, applied on startup
@@ -54,7 +60,10 @@ introduces `user_lesson_urls` and `user_url_prompts`; `00003_groups.sql` introdu
 (persisting user-configured academic group bindings for Telegram group chats) and `user_group_prompts`
 (tracking interactive prompt states for group creation and academic group updates with zero chat pollution);
 `00004_group_lesson_urls.sql` introduces `bot_group_lesson_urls`; `00005_notifications.sql` adds notifications;
-and `00006_group_admins.sql` introduces `bot_group_admins` for multi-admin co-management.
+`00006_group_admins.sql` introduces `bot_group_admins` for multi-admin co-management;
+`00007_issues.sql` introduces `issues`, `issue_comments` and `user_issue_drafts` for the
+`/issues` feedback channel (§2.3); and `00008_issue_thread_state.sql` widens the status vocabulary,
+replaces `thread_open` with the three-state `thread_state`, and adds `status_note` (§2.3).
 
 
 **Engine: SQLite, not PostgreSQL** (`modernc.org/sqlite`, pure Go — no CGO, so it stays
@@ -195,6 +204,89 @@ Tracks co-administrators invited by the group creator (`00006_group_admins.sql`)
 
 **Ownership transfer on deletion**: when the creator leaves or deletes the group, ownership is automatically transferred to the earliest accepted administrator in `bot_group_admins`. If no accepted administrators remain, the group configuration, associated URLs, prompts, and admin records are deleted in a cascade.
 
+
+### 2.3 User-Filed Issues (`issues`, `issue_comments`, `user_issue_drafts`)
+
+Backing store for the bot's `/issues` command and the dashboard's issue queue. Flow and screen
+behaviour are documented in [`docs/bot/issues.md`](../bot/issues.md); the endpoints admins reach
+them through are in [`docs/api/admin-endpoints.md`](../api/admin-endpoints.md).
+
+#### Table `issues`
+One row per bug report or feature request (`00007_issues.sql`):
+- `id TEXT PRIMARY KEY` — app-generated UUID, used everywhere internally.
+- `number INTEGER NOT NULL UNIQUE` — the public, human-facing `#12`. A single **global** sequence
+  (not per user), assigned inside the insert transaction as `COALESCE(MAX(number), 0) + 1`. This is
+  safe rather than racy because the pool is capped at one connection (`SetMaxOpenConns(1)`), and the
+  `UNIQUE` constraint is the backstop. Deliberately not `AUTOINCREMENT`: every other table here uses
+  a UUID primary key, and the public number is a separate concern from row identity.
+- `author_telegram_id INTEGER NOT NULL` — the reporter. Stored directly rather than as a
+  `users(id)` foreign key, matching `bot_groups.creator_telegram_id`: filing an issue does not
+  require a linked account, so there may be no `users` row to point at.
+- `author_username TEXT`, `author_first_name TEXT` — captured at creation so the dashboard can
+  identify the reporter without a second lookup.
+- `type TEXT NOT NULL CHECK (type IN ('feature','bug','other'))` — fixed at creation.
+- `title TEXT NOT NULL`, `body TEXT NOT NULL` — capped by the bot at 120 / 3000 runes.
+- `status TEXT NOT NULL DEFAULT 'on_review' CHECK (status IN ('on_review','ready','in_development','implemented','duplicate','rejected','cancelled'))`
+  — changed only by admins, from the dashboard. `duplicate` and `rejected` were added by
+  `00008_issue_thread_state.sql`.
+- `status_by TEXT NOT NULL DEFAULT ''` — email of the admin who last changed the status, taken
+  from the `X-Admin-Email` header the dashboard already forwards. This is the feature's audit
+  trail: the shared telemetry pipeline anonymises identifiers and cannot carry it.
+- `status_note TEXT NOT NULL DEFAULT ''` — the optional explanation an admin attaches to a status
+  change ("rejected because…"). Delivered to the reporter with the status DM and kept on their issue
+  screen so it can be re-read. Only ever written together with a status change, and cleared when a
+  later change carries no note, so a stale explanation never outlives the status it explained. It
+  deliberately does **not** open a discussion — that is what `issue_comments` is for.
+- `thread_state TEXT NOT NULL DEFAULT 'none' CHECK (thread_state IN ('none','open','closed'))` —
+  the discussion lifecycle. Threads are admin-initiated: `none` until the first admin comment flips
+  it to `open`, and an admin can `close` it, which keeps the transcript readable to the reporter but
+  stops them replying (and can be reopened). Modelled as a single enum rather than two booleans so
+  "closed but never started" is unrepresentable. Note that the Go zero value of the corresponding
+  type is `""`, not `"none"`, so code tests it via `IssueThreadState.Started()`.
+- `created_at TIMESTAMP NOT NULL`, `updated_at TIMESTAMP NOT NULL` — `updated_at` also moves on
+  thread activity, so the dashboard can sort by recency.
+- Indexes: `idx_issues_author (author_telegram_id, created_at)`, `idx_issues_status (status, created_at)`.
+
+**Deletion.** Both sides can delete an issue: the reporter from the bot (behind a confirmation
+screen) and a read-write admin from the dashboard. The row is removed outright — `issue_comments`
+follows via `ON DELETE CASCADE`, and any `user_issue_drafts` row pointing at it is cleared in the
+same transaction so the bot never prompts for a reply to an issue that no longer exists.
+
+Because `00008_issue_thread_state.sql` has to rebuild this table to widen the `status` CHECK
+constraint, and foreign keys are enabled on the connection (`storage.dsn`), a plain
+`DROP TABLE issues` there would **cascade-delete every comment**. The migration therefore parks
+`issue_comments` in an FK-free table first and restores it last, all inside goose's transaction;
+`TestIssueThreadStateMigrationRoundTrip` walks up→down→up with real data to keep that honest.
+
+#### Table `issue_comments`
+The discussion transcript between an admin and the reporter:
+- `id TEXT PRIMARY KEY`, `issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE`
+- `author_role TEXT NOT NULL CHECK (author_role IN ('user','admin'))`
+- `author_label TEXT NOT NULL DEFAULT ''` — the admin's email, or the reporter's `@username`.
+- `body TEXT NOT NULL`, `created_at TIMESTAMP NOT NULL`
+- Index: `idx_issue_comments_issue (issue_id, created_at)` — threads are always read oldest-first.
+
+#### Table `user_issue_drafts`
+In-flight `/issues` wizard state — one row per user, replaced when a new flow starts:
+- `telegram_id INTEGER PRIMARY KEY`, `chat_id INTEGER NOT NULL`, `prompt_message_id INTEGER NOT NULL`
+  — which bot message the wizard keeps editing.
+- `step TEXT NOT NULL` (`title` | `body` | `reply`), `issue_type TEXT`, `title TEXT`,
+  `issue_id TEXT` (set only for `reply` drafts).
+- `expires_at TIMESTAMP NOT NULL` — 10 minutes out, per `storage.IssueDraftTTL`.
+  Index: `idx_user_issue_drafts_expiry (expires_at)`.
+
+**Why this is persisted and not held in memory.** The request was for ten minutes of in-memory
+state, but the server sleeps after 15 minutes idle on Fly.io
+([fly-scale-to-zero.md](fly-scale-to-zero.md)). A process-local map would lose drafts whenever the
+machine slept mid-flow, and — worse — lose the `prompt_message_id` needed to clean up the bot's own
+message afterwards. A row costs nothing and survives sleep, restarts and deploys.
+
+**Expiry is two-sided**, following the `pairing_codes` idiom (`expires_at` + purge-on-read):
+`GetIssueDraft` deletes and reports an expired row exactly once (`ErrIssueDraftExpired`), so the
+next interaction can tell the user the flow was interrupted; and a per-minute sweep
+(`(*bot.Bot).SweepExpiredIssueDrafts`, driven by the cron tick that already survives
+scale-to-zero) deletes the abandoned wizard message before clearing the row — something lazy
+expiry cannot do, since an abandoned draft is never read again.
 
 ## 3. No Credential Storage, No Encryption
 

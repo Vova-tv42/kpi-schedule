@@ -115,6 +115,7 @@ func New(token string, svc *api.Service, db *storage.DB, botOpts ...*gotgbot.Bot
 	dispatcher.AddHandler(handlers.NewCommand("group_tomorrow", b.wrap("telegram_command", "/group_tomorrow", b.cmdGroupTomorrow)))
 	dispatcher.AddHandler(handlers.NewCommand("group_week", b.wrap("telegram_command", "/group_week", b.cmdGroupWeek)))
 	dispatcher.AddHandler(handlers.NewCommand("settings", b.wrap("telegram_command", "/settings", b.cmdSettings)))
+	dispatcher.AddHandler(handlers.NewCommand("issues", b.wrap("telegram_command", "/issues", b.cmdIssues)))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(navCallbackPrefix), b.wrap("telegram_callback", "nav", b.onNav)))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(weekCallbackPrefix), b.wrap("telegram_callback", "week", b.onWeek)))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(menuCallbackPrefix), b.wrap("telegram_callback", "menu", b.onMenu)))
@@ -123,6 +124,7 @@ func New(token string, svc *api.Service, db *storage.DB, botOpts ...*gotgbot.Bot
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupNavCallbackPrefix), b.wrap("telegram_callback", "group_nav", b.onGroupNav)))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupWeekCallbackPrefix), b.wrap("telegram_callback", "group_week", b.onGroupWeek)))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix("settings:"), b.wrap("telegram_callback", "settings", b.onSettings)))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(issuesCallbackPrefix), b.wrap("telegram_callback", "issues", b.onIssues)))
 	dispatcher.AddHandler(handlers.NewMessage(message.All, b.wrap("telegram_message", "text", b.onTextMessage)))
 
 	b.dispatcher = dispatcher
@@ -140,6 +142,7 @@ func (b *Bot) SetupCommands() error {
 		{Command: "urls", Description: "Посилання на онлайн-заняття"},
 		{Command: "group", Description: "Керування академічними групами"},
 		{Command: "settings", Description: "Налаштування сповіщень"},
+		{Command: "issues", Description: "Report a bug or request a feature"},
 		{Command: "install", Description: "Інструкція та завантаження розширення"},
 		{Command: "link", Description: "Отримати код прив'язки браузерного розширення"},
 		{Command: "start", Description: "Знайомство та головне меню"},
@@ -215,7 +218,7 @@ func (b *Bot) RegisterWebhook(webhookURL, secretToken string) error {
 	defer cancel()
 
 	// 0. Ensure commands are updated when commands configuration version changes
-	const currentCommandsVersion = "v2_admin_scope"
+	const currentCommandsVersion = "v3_issues"
 	if b.db != nil {
 		var cachedVer string
 		if ok, _ := b.db.CacheGet(ctx, "telegram_commands_version", 365*24*time.Hour, &cachedVer); !ok || cachedVer != currentCommandsVersion {

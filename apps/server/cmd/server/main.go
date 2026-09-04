@@ -55,6 +55,10 @@ func main() {
 			log.Fatalf("bot: %v", err)
 		}
 		tgBot.SetTelemetry(telemetryClient)
+		// Lets the admin issue endpoints push replies and status changes back
+		// to reporters over Telegram. Set here rather than in NewService
+		// because the bot needs the service, not the other way round.
+		svc.SetIssueNotifier(tgBot)
 		if cfg.ExtensionInstallURL != "" {
 			tgBot.SetExtensionInstallURL(cfg.ExtensionInstallURL)
 		}
@@ -70,6 +74,9 @@ func main() {
 
 	cronHandler := api.NewCronHandler(alertDispatcher, cfg.CronSecret)
 	cronHandler.SetTelemetry(telemetryClient)
+	if tgBot != nil {
+		cronHandler.SetDraftSweeper(tgBot.SweepExpiredIssueDrafts)
+	}
 
 	idleWatcher := idle.New(cfg.IdleTimeout, "/healthz")
 	defer idleWatcher.Stop()
@@ -91,6 +98,9 @@ func main() {
 				select {
 				case <-ticker.C:
 					_, _ = alertDispatcher.Dispatch(appCtx, time.Now())
+					if tgBot != nil {
+						_ = tgBot.SweepExpiredIssueDrafts(appCtx, time.Now())
+					}
 				case <-appCtx.Done():
 					return
 				}

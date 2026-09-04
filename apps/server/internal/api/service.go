@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"kpi-schedule-bot/server/internal/campus"
@@ -22,13 +23,65 @@ const staleAfter = 14 * 24 * time.Hour
 // pushed for them by the browser extension.
 var ErrNoScheduleData = errors.New("no schedule data stored for this user yet")
 
+// IssueNotifier pushes issue activity back to the reporter over Telegram.
+// Declared here rather than imported because internal/bot already depends on
+// internal/api; *bot.Bot satisfies it and is injected in cmd/server/main.go.
+type IssueNotifier interface {
+	NotifyIssueComment(ctx context.Context, issue model.Issue, comment model.IssueComment) error
+	NotifyIssueStatus(ctx context.Context, issue model.Issue, previous model.IssueStatus) error
+	NotifyIssueThreadState(ctx context.Context, issue model.Issue, previous model.IssueThreadState) error
+}
+
 type Service struct {
-	db     *storage.DB
-	campus *campus.Client
+	db            *storage.DB
+	campus        *campus.Client
+	issueNotifier IssueNotifier
 }
 
 func NewService(db *storage.DB, campusClient *campus.Client) *Service {
 	return &Service{db: db, campus: campusClient}
+}
+
+// SetIssueNotifier wires up reporter notifications for the admin issue
+// endpoints. Left nil when the Telegram bot is disabled, in which case the
+// Notify* helpers are no-ops.
+func (s *Service) SetIssueNotifier(n IssueNotifier) {
+	s.issueNotifier = n
+}
+
+// NotifyIssueComment tells the reporter an admin replied. Delivery is
+// best-effort: a Telegram failure is logged, never surfaced to the admin whose
+// comment was already saved.
+func (s *Service) NotifyIssueComment(ctx context.Context, issue model.Issue, comment model.IssueComment) {
+	if s.issueNotifier == nil {
+		return
+	}
+	if err := s.issueNotifier.NotifyIssueComment(ctx, issue, comment); err != nil {
+		slog.Warn("notifying issue comment", "error", err, "issue_number", issue.Number)
+	}
+}
+
+// NotifyIssueStatus tells the reporter their issue moved through triage.
+// Best-effort, for the same reason as NotifyIssueComment.
+func (s *Service) NotifyIssueStatus(ctx context.Context, issue model.Issue, previous model.IssueStatus) {
+	if s.issueNotifier == nil {
+		return
+	}
+	if err := s.issueNotifier.NotifyIssueStatus(ctx, issue, previous); err != nil {
+		slog.Warn("notifying issue status change", "error", err, "issue_number", issue.Number)
+	}
+}
+
+// NotifyIssueThreadState tells the reporter their discussion was closed or
+// reopened, so a silently disabled Reply button never looks like a bug.
+// Best-effort, for the same reason as NotifyIssueComment.
+func (s *Service) NotifyIssueThreadState(ctx context.Context, issue model.Issue, previous model.IssueThreadState) {
+	if s.issueNotifier == nil {
+		return
+	}
+	if err := s.issueNotifier.NotifyIssueThreadState(ctx, issue, previous); err != nil {
+		slog.Warn("notifying issue thread state change", "error", err, "issue_number", issue.Number)
+	}
 }
 
 // Campus returns the underlying Campus API client.

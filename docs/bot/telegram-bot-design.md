@@ -17,7 +17,7 @@ The Telegram Bot provides students with quick, frictionless access to their veri
 
 ## 2. Command Reference
 
-Commands are scoped via Telegram's `setMyCommands` API (`BotCommandScopeAllPrivateChats` and `BotCommandScopeAllGroupChats`). If a scoped command is invoked in the wrong chat type, a clear Ukrainian error notice is returned.
+Commands are scoped via Telegram's `setMyCommands` API (`BotCommandScopeAllPrivateChats` and `BotCommandScopeAllGroupChats`). If a scoped command is invoked in the wrong chat type, a clear Ukrainian error notice is returned — except under `/issues`, whose screens are English throughout (see [issues.md](issues.md)).
 
 | Command | Scope | Menu Description | Status | Action Description |
 | :--- | :--- | :--- | :--- | :--- |
@@ -33,6 +33,7 @@ Commands are scoped via Telegram's `setMyCommands` API (`BotCommandScopeAllPriva
 | `/group_tomorrow` (`/group-tomorrow`) | Groups only | `Показати розклад групи на завтра` | ✅ Implemented | Shows tomorrow's overall group schedule fetched directly from the secondary Campus API (`api.campus.kpi.ua`). |
 | `/group_week` (`/group-week`) | Groups only | `Показати розклад групи на тиждень` | ✅ Implemented | Shows one academic week of the overall group schedule from the secondary Campus API. |
 | `/settings` | DM only | `Налаштування сповіщень` | ✅ Implemented | Manage lesson reminders (10m before and at start) with in-place toggle. |
+| `/issues` | DM only | `Report a bug or request a feature` | ✅ Implemented | Files bug reports and feature requests through a guided type → title → description wizard, and lists the caller's own issues with their triage status. The only English-language screens in the bot. See [issues.md](issues.md). |
 | `/help` | Both | `Довідка та інструкції` | Not yet built | FAQ, troubleshooting, and links to web extension. |
 
 

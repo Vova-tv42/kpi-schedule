@@ -211,3 +211,142 @@ type GroupAdmin struct {
 	UpdatedAt  time.Time
 }
 
+// IssueType classifies what a user is reporting through the bot's /issues flow.
+type IssueType string
+
+const (
+	IssueTypeFeature IssueType = "feature"
+	IssueTypeBug     IssueType = "bug"
+	IssueTypeOther   IssueType = "other"
+)
+
+// IssueStatus is the triage lifecycle an issue moves through. Only admins
+// change it, from the dashboard; users only ever read it.
+type IssueStatus string
+
+const (
+	IssueOnReview      IssueStatus = "on_review"
+	IssueReady         IssueStatus = "ready"
+	IssueInDevelopment IssueStatus = "in_development"
+	IssueImplemented   IssueStatus = "implemented"
+	IssueDuplicate     IssueStatus = "duplicate"
+	IssueRejected      IssueStatus = "rejected"
+	IssueCancelled     IssueStatus = "cancelled"
+)
+
+// IssueThreadState is the discussion lifecycle. Threads are admin-initiated,
+// so an issue starts at IssueThreadNone; an admin's first comment opens it and
+// an admin can close it again, which leaves the transcript readable to the
+// reporter but stops them replying.
+type IssueThreadState string
+
+const (
+	IssueThreadNone   IssueThreadState = "none"
+	IssueThreadOpen   IssueThreadState = "open"
+	IssueThreadClosed IssueThreadState = "closed"
+)
+
+// Started reports whether a discussion exists at all — open or closed. Written
+// as a positive test rather than "!= IssueThreadNone" because the zero value of
+// IssueThreadState is the empty string, not "none": an Issue built in Go
+// without going through the database would otherwise look like it had a thread.
+func (s IssueThreadState) Started() bool {
+	return s == IssueThreadOpen || s == IssueThreadClosed
+}
+
+// IssueCommentRole marks which side of a discussion thread wrote a comment.
+type IssueCommentRole string
+
+const (
+	IssueCommentUser  IssueCommentRole = "user"
+	IssueCommentAdmin IssueCommentRole = "admin"
+)
+
+// Issue is a bug report or feature request filed by a user through /issues.
+// Number is the public, human-facing "#12" identifier: a single global
+// sequence, assigned at creation, never reused.
+type Issue struct {
+	ID               uuid.UUID
+	Number           int
+	AuthorTelegramID int64
+	AuthorUsername   string
+	AuthorFirstName  string
+	Type             IssueType
+	Title            string
+	Body             string
+	Status           IssueStatus
+	StatusBy         string
+	StatusNote       string
+	ThreadState      IssueThreadState
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// IssueComment is one message in an issue's discussion thread. Threads are
+// admin-initiated: ThreadState only leaves IssueThreadNone once an admin has
+// commented.
+type IssueComment struct {
+	ID          uuid.UUID
+	IssueID     uuid.UUID
+	AuthorRole  IssueCommentRole
+	AuthorLabel string
+	Body        string
+	CreatedAt   time.Time
+}
+
+// IssueDraft tracks an in-flight /issues wizard: which step the user is on and
+// which bot message is being edited in place. Persisted rather than held in
+// memory so a draft survives the Fly.io scale-to-zero idle shutdown, and so the
+// bot's own message can still be cleaned up after a restart.
+type IssueDraft struct {
+	TelegramID      int64
+	ChatID          int64
+	PromptMessageID int64
+	Step            string
+	IssueType       IssueType
+	Title           string
+	IssueID         *uuid.UUID
+	ExpiresAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// IssueCommentMaxLen bounds a single message in a discussion thread, on both
+// sides, so a thread stays readable in a Telegram screen. The optional note an
+// admin attaches to a status change is delivered the same way, so it shares
+// the limit.
+const IssueCommentMaxLen = 3000
+
+// Draft steps: which input the bot is currently waiting for.
+const (
+	IssueStepTitle = "title"
+	IssueStepBody  = "body"
+	IssueStepReply = "reply"
+)
+
+// ValidIssueStatus reports whether s is one of the triage statuses.
+func ValidIssueStatus(s string) bool {
+	switch IssueStatus(s) {
+	case IssueOnReview, IssueReady, IssueInDevelopment, IssueImplemented,
+		IssueDuplicate, IssueRejected, IssueCancelled:
+		return true
+	}
+	return false
+}
+
+// ValidIssueThreadState reports whether s is one of the three thread states.
+func ValidIssueThreadState(s string) bool {
+	switch IssueThreadState(s) {
+	case IssueThreadNone, IssueThreadOpen, IssueThreadClosed:
+		return true
+	}
+	return false
+}
+
+// ValidIssueType reports whether s is one of the three issue types.
+func ValidIssueType(s string) bool {
+	switch IssueType(s) {
+	case IssueTypeFeature, IssueTypeBug, IssueTypeOther:
+		return true
+	}
+	return false
+}

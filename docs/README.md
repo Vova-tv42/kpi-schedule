@@ -17,7 +17,7 @@ Welcome to the technical documentation for the **KPI Personalized Schedule Platf
 - [Fly.io Scale-to-Zero & 15m Idle](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/fly-scale-to-zero.md): Firecracker microVM scale-to-zero, in-app 15m idle shutdown, wake-on-request proxy, and volume persistence.
 - [CI/CD Deployment via GitHub Actions](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/ci-cd-deployment.md): Automated tests, flyctl deployment on main branch pushes, and deploy token configuration.
 - [Notifications & Scheduled Cron](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/notifications-and-cron.md): Automated lesson alerts (10m before and at start), idempotency, and cron-job.org setup.
-- [Admin Web Dashboard Architecture](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/admin-dashboard.md): Vercel hosting, NeonDB telemetry storage, Google OAuth security, and Fly scale-to-zero interlock.
+- [Admin Web Dashboard Architecture](file:///home/volodymyr/apps/kpi-schedule-bot/docs/architecture/admin-dashboard.md): Vercel hosting, NeonDB telemetry storage, Google OAuth security, the issue triage queue, and Fly scale-to-zero interlock.
 
 
 ### 📁 Schedule Sources
@@ -41,3 +41,4 @@ Welcome to the technical documentation for the **KPI Personalized Schedule Platf
 ### 📁 Client Applications
 - [Browser Extension (Manifest V3)](file:///home/volodymyr/apps/kpi-schedule-bot/docs/extension/browser-extension-design.md): Extension design, permissions, and security.
 - [Telegram Bot](file:///home/volodymyr/apps/kpi-schedule-bot/docs/bot/telegram-bot-design.md): Bot commands, UI formatters, inline keyboards, and reminders.
+- [Issues (`/issues`)](file:///home/volodymyr/apps/kpi-schedule-bot/docs/bot/issues.md): User-filed bug reports and feature requests — wizard flow, statuses, 10-minute draft TTL, and admin↔user discussion threads.

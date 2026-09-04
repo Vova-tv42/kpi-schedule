@@ -83,10 +83,19 @@ func NewRouterWithOpts(svc *Service, internalToken string, opts RouterOpts) http
 			r.Get("/tables", h.getAdminTables)
 			r.Get("/tables/{table}", h.getAdminTableRows)
 
+			// Reading the issue queue and its threads is available to every
+			// admin role; only writes are gated below.
+			r.Get("/issues", h.getAdminIssues)
+			r.Get("/issues/{id}", h.getAdminIssue)
+
 			r.Group(func(r chi.Router) {
 				r.Use(adminWritePermissionMiddleware())
 				r.Put("/tables/{table}/row", h.putAdminTableRow)
 				r.Post("/query", h.postAdminQuery)
+				r.Patch("/issues/{id}/status", h.patchAdminIssueStatus)
+				r.Patch("/issues/{id}/thread", h.patchAdminIssueThread)
+				r.Post("/issues/{id}/comments", h.postAdminIssueComment)
+				r.Delete("/issues/{id}", h.deleteAdminIssue)
 			})
 		})
 
