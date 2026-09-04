@@ -76,7 +76,7 @@ The system defines three privilege tiers:
 | Run Custom SQL Queries | ✅ | ✅ | ❌ |
 | Add / Update / Delete Admins | ✅ | ❌ | ❌ |
 | Adjust Retention Settings | ✅ | ✅ | ❌ |
-| Trigger Manual Cleanup | ✅ | ✅ | ✅ |
+| Trigger Manual Cleanup | ✅ | ✅ | ❌ |
 
 - **Protection of Custom Queries**: For `read-only` users, the Custom Query console is completely disabled in the UI and blocked at the API layer with `403 Forbidden`.
 - **Immediate Session Revocation**: When an admin's role is updated or their account is deleted by the superadmin, all their active sessions in `admin_sessions` are immediately purged.
@@ -104,7 +104,7 @@ The system defines three privilege tiers:
 
 ### 4.1 Non-Blocking Event Reporting
 - Whenever the Go main server processes a Telegram command, callback, browser extension schedule sync, scheduled lesson alert, or mutating admin operation (table row updates, custom queries executed via the dashboard), it is already awake.
-- An asynchronous background goroutine dispatches an anonymous event payload to `POST /api/ingest/action` on the admin dashboard with header `X-Ingest-Key`.
+- An asynchronous telemetry client enqueues an anonymous event payload into a bounded in-memory channel drained by a dedicated background worker, which dispatches to `POST /api/ingest/action` on the admin dashboard with header `X-Ingest-Key`.
 - **Supported Event Types**:
   - `telegram_command`: Bot command invocations (e.g. `/today`, `/week`, `/settings`).
   - `telegram_callback`: Inline button interactions.
@@ -112,7 +112,7 @@ The system defines three privilege tiers:
   - `cron_alert`: Periodic lesson reminder dispatches.
   - `admin_action`: Dashboard-initiated SQLite mutations (`update_row:<table_name>`) and console executions (`custom_query`).
 - **Anonymity Guarantee**: All user-identifying attributes (Telegram IDs, user IDs, chat IDs, names, phone numbers, tokens) are strictly scrubbed before persistence.
-- **Resilience**: The telemetry call has a 2s timeout and executes in a detached goroutine (`go func() { ... }()`). If the ingestion endpoint is unreachable, the main server silently drops the event and continues normal operations without delay.
+- **Resilience**: Telemetry dispatches via a bounded channel (100 capacity) with non-blocking drop and a 2s HTTP timeout. If the queue is full or the dashboard is unreachable, metrics are dropped without leaking goroutines or delaying server requests.
 
 ### 4.2 Retention Window & Free Tier Cleanup
 - Telemetry events are stored in NeonDB's `recent_actions` table.
@@ -120,7 +120,7 @@ The system defines three privilege tiers:
 - **Cleanup Triggers**:
   1. **Opportunistic Pruning**: During normal telemetry ingestion, a small percentage of requests automatically execute a quick `DELETE` of expired rows.
   2. **External Free Cron**: `POST /api/cron/cleanup` can be scheduled via `cron-jobs.com` or `cron-job.org` using `Authorization: Bearer <CRON_SECRET>` on an hourly, 6-hour, or daily basis.
-  3. **Manual Trigger**: Administrators can trigger cleanup on demand from the Settings tab.
+  3. **Manual Trigger**: Administrators with `read-write` or `superadmin` role can trigger cleanup on demand from the Settings tab (`read-only` is blocked with `403 Forbidden`).
 
 ---
 

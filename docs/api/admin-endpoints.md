@@ -15,6 +15,8 @@ All `/api/v1/admin/*` routes are protected by the `adminTokenMiddleware`.
   - `read-write`: Full database privileges (read, write, custom query).
   - `read-only`: Read-only access (`PUT /tables/{table}/row` and `POST /query` return `403 Forbidden`).
 
+Protected `/api/v1/admin/*` routes are excluded from the public 20 req/min IP rate limiter since requests proxy through the admin dashboard's server IP.
+
 If `X-Admin-Secret` is missing or invalid, the server responds with:
 ```json
 {
@@ -73,6 +75,7 @@ If `X-Admin-Secret` is missing or invalid, the server responds with:
 - **Method**: `PUT`
 - **Path**: `/api/v1/admin/tables/{table}/row`
 - **Access**: `read-write`, `superadmin` (`read-only` receives `403 Forbidden`)
+- **Validation**: `primary_key_column` must specify a valid primary key column on the table. Tables with composite primary keys cannot be updated in-place via this endpoint.
 - **Body**:
 ```json
 {
@@ -95,6 +98,7 @@ If `X-Admin-Secret` is missing or invalid, the server responds with:
 - **Method**: `POST`
 - **Path**: `/api/v1/admin/query`
 - **Access**: `read-write`, `superadmin` (`read-only` receives `403 Forbidden`)
+- **Timeout**: Enforces a strict 10-second context timeout to protect SQLite single-connection serial access.
 - **Telemetry**: Reports an anonymous `admin_action` event (`custom_query`) with query snippet and rows metadata to the admin dashboard ingest endpoint.
 - **Body**:
 ```json
@@ -112,7 +116,7 @@ If `X-Admin-Secret` is missing or invalid, the server responds with:
   "truncated": false
 }
 ```
-For SELECT/read queries, results are capped at a maximum of 1,000 rows to prevent microVM memory spikes. If more rows exist, `truncated` is set to `true` (and the admin dashboard provides pagination controls to query subsequent pages via `LIMIT` and `OFFSET`). For non-SELECT queries (`UPDATE`, `INSERT`, `DELETE`), `columns` and `rows` are omitted and `rows_affected` indicates the number of affected rows.
+For SELECT/read queries (including `WITH`, `PRAGMA`, `EXPLAIN`, `VALUES`, and `RETURNING` queries), results are capped at a maximum of 1,000 rows to prevent microVM memory spikes. If more rows exist, `truncated` is set to `true` (and the admin dashboard provides pagination controls to query subsequent pages via `LIMIT` and `OFFSET`). For non-SELECT queries (`UPDATE`, `INSERT`, `DELETE`), `columns` and `rows` are omitted and `rows_affected` indicates the number of affected rows.
 
 ---
 

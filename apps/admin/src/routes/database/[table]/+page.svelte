@@ -46,28 +46,37 @@
 	let isSaving = $state<boolean>(false);
 	let saveError = $state<string | null>(null);
 
+	const pkCols = $derived(data?.columns?.filter((c) => c.primary_key) || []);
+	const hasCompositePk = $derived(pkCols.length > 1);
+	const primaryKeyCol = $derived.by(() => {
+		if (hasCompositePk) return null;
+		if (pkCols.length === 1) return pkCols[0].name;
+		if (data?.columns?.some((c) => c.name === 'id')) return 'id';
+		return null;
+	});
+
 	async function loadTable() {
 		isLoading = true;
 		error = null;
 		try {
-			const params = new URLSearchParams({
-				limit: String(limit),
-				offset: String(offset)
+			const queryParams = new URLSearchParams({
+				limit: limit.toString(),
+				offset: offset.toString()
 			});
 			if (sortBy) {
-				params.set('sort_by', sortBy);
-				params.set('sort_order', sortOrder);
+				queryParams.set('sort_by', sortBy);
+				queryParams.set('sort_order', sortOrder);
 			}
 
-			const res = await fetch(`/api/main-db/tables/${tableName}?${params.toString()}`);
+			const res = await fetch(`/api/main-db/tables/${tableName}?${queryParams.toString()}`);
 			if (res.ok) {
 				data = await res.json();
 			} else {
-				const errData = await res.json().catch(() => null);
-				error = errData?.message || `HTTP ${res.status}`;
+				const err = await res.json().catch(() => null);
+				error = err?.error || `HTTP ${res.status}`;
 			}
 		} catch (err: any) {
-			error = err?.message || 'Failed to query table rows';
+			error = err?.message || 'Failed to fetch table records';
 		} finally {
 			isLoading = false;
 		}
@@ -85,7 +94,7 @@
 	}
 
 	function startEdit(row: Record<string, any>) {
-		if (user?.role === 'read-only') return;
+		if (user?.role === 'read-only' || hasCompositePk || !primaryKeyCol) return;
 		editingRow = row;
 		editUpdates = { ...row };
 		saveError = null;
@@ -98,23 +107,28 @@
 	}
 
 	async function saveEdit() {
-		if (!editingRow || !data) return;
+		if (!editingRow || !data || !primaryKeyCol) return;
 		isSaving = true;
 		saveError = null;
 
-		const pkCol = data.columns.find((c) => c.primary_key)?.name || (data.columns.some((c) => c.name === 'id') ? 'id' : null);
-		if (!pkCol) {
-			saveError = 'Table has no primary key or "id" column defined. Rows cannot be updated directly.';
-			isSaving = false;
-			return;
-		}
+		const pkCol = primaryKeyCol;
 		const pkVal = editingRow[pkCol];
 
 		// Only include changed fields
 		const updates: Record<string, any> = {};
 		for (const col of data.columns) {
-			if (col.name !== pkCol && editUpdates[col.name] !== editingRow[col.name]) {
-				updates[col.name] = editUpdates[col.name];
+			if (col.name === pkCol) continue;
+
+			const originalVal = editingRow[col.name];
+			const currentVal = editUpdates[col.name];
+
+			// If original was null and input is empty string, keep null (prevent unintended overwrite)
+			if (originalVal === null && (currentVal === '' || currentVal === null || currentVal === undefined)) {
+				continue;
+			}
+
+			if (currentVal !== originalVal) {
+				updates[col.name] = currentVal;
 			}
 		}
 
@@ -256,13 +270,17 @@
 								<tr class="hover:bg-slate-50 dark:hover:bg-[#181c26]/60 transition-colors">
 									<td class="py-2.5 px-3 text-center whitespace-nowrap">
 										{#if user?.role !== 'read-only'}
-											<button
-												onclick={() => startEdit(row)}
-												class="p-1 border border-slate-300 hover:border-slate-500 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-950 dark:border-[#252b3b] dark:hover:border-[#d4ff32] dark:bg-[#0a0b0e] dark:text-[#94a3b8] dark:hover:text-[#d4ff32] rounded-xs transition-colors cursor-pointer"
-												title="Edit Row"
-											>
-												<Edit2 size={13} />
-											</button>
+											{#if hasCompositePk || !primaryKeyCol}
+												<span class="text-[10px] text-slate-400 dark:text-[#64748b]" title={hasCompositePk ? "Composite primary key: edit via query console" : "No primary key: cannot edit row directly"}>—</span>
+											{:else}
+												<button
+													onclick={() => startEdit(row)}
+													class="p-1 border border-slate-300 hover:border-slate-500 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-950 dark:border-[#252b3b] dark:hover:border-[#d4ff32] dark:bg-[#0a0b0e] dark:text-[#94a3b8] dark:hover:text-[#d4ff32] rounded-xs transition-colors cursor-pointer"
+													title="Edit Row"
+												>
+													<Edit2 size={13} />
+												</button>
+											{/if}
 										{:else}
 											<span class="text-[10px] text-slate-400 dark:text-[#64748b]" title="Read-only role">LOCK</span>
 										{/if}

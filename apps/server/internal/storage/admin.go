@@ -211,12 +211,23 @@ func (db *DB) UpdateTableRow(ctx context.Context, table, pkCol string, pkVal any
 	}
 
 	colMap := make(map[string]bool, len(cols))
+	var pkCount int
+	var isPk bool
 	for _, c := range cols {
 		colMap[c.Name] = true
+		if c.PrimaryKey {
+			pkCount++
+			if c.Name == pkCol {
+				isPk = true
+			}
+		}
 	}
 
-	if !colMap[pkCol] {
-		return fmt.Errorf("invalid primary key column %q", pkCol)
+	if !isPk {
+		return fmt.Errorf("column %q is not a primary key in table %q", pkCol, table)
+	}
+	if pkCount > 1 {
+		return fmt.Errorf("table %q has a composite primary key and cannot be updated via single column", table)
 	}
 
 	var setClauses []string
@@ -287,7 +298,7 @@ func (db *DB) ExecuteAdminQuery(ctx context.Context, query string) (*QueryResult
 	start := time.Now()
 	cleanQuery := stripLeadingSQLComments(trimmed)
 	upper := strings.ToUpper(cleanQuery)
-	isSelect := strings.HasPrefix(upper, "SELECT") || strings.HasPrefix(upper, "WITH") || strings.HasPrefix(upper, "PRAGMA") || strings.HasPrefix(upper, "EXPLAIN")
+	isSelect := strings.HasPrefix(upper, "SELECT") || strings.HasPrefix(upper, "WITH") || strings.HasPrefix(upper, "PRAGMA") || strings.HasPrefix(upper, "EXPLAIN") || strings.HasPrefix(upper, "VALUES") || strings.Contains(upper, "RETURNING")
 
 	if isSelect {
 		rows, err := db.SQL.QueryContext(ctx, trimmed)

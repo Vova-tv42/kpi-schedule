@@ -3,9 +3,10 @@ import postgres from 'postgres';
 import { env } from '$env/dynamic/private';
 
 let isInitialized = false;
-let localSql: ReturnType<typeof postgres> | null = null;
+let localSql: any = null;
+let neonSql: any = null;
 
-export function getSQL() {
+export function getSQL(): any {
 	const connectionString = env.DATABASE_URL || process.env.DATABASE_URL;
 	if (!connectionString) {
 		throw new Error('DATABASE_URL environment variable is missing');
@@ -23,7 +24,10 @@ export function getSQL() {
 		return localSql;
 	}
 
-	return neon(connectionString);
+	if (!neonSql) {
+		neonSql = neon(connectionString);
+	}
+	return neonSql;
 }
 
 export async function ensureSchema() {

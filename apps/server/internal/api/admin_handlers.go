@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"time"
@@ -115,7 +116,10 @@ func (h *handlers) postAdminQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.svc.DB().ExecuteAdminQuery(r.Context(), req.Query)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	result, err := h.svc.DB().ExecuteAdminQuery(ctx, req.Query)
 	if err != nil {
 		if h.telemetry != nil {
 			h.telemetry.ReportAction("admin_action", "custom_query", http.StatusBadRequest, time.Since(start).Milliseconds(), nil)

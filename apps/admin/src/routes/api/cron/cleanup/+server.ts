@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import crypto from 'node:crypto';
 import { env } from '$env/dynamic/private';
 import { ensureSchema, getSQL } from '$lib/server/db';
 import type { RequestHandler } from './$types';
@@ -20,9 +21,18 @@ async function handleCleanup({ request, locals }: { request: Request; locals: Ap
 		authHeader?.replace('Bearer ', '') ||
 		secretHeader;
 
-	// On GET, only allow header-based CRON_SECRET to prevent CSRF via ambient cookies
-	const isAuthorizedCron = expectedSecret && providedSecret === expectedSecret;
-	const isAuthorizedAdmin = !isGet && !!locals.user;
+	let isAuthorizedCron = false;
+	if (expectedSecret && providedSecret) {
+		const hashA = crypto.createHash('sha256').update(providedSecret).digest();
+		const hashB = crypto.createHash('sha256').update(expectedSecret).digest();
+		isAuthorizedCron = crypto.timingSafeEqual(hashA, hashB);
+	}
+
+	if (!isGet && locals.user && locals.user.role === 'read-only') {
+		return json({ success: false, error: 'Forbidden: Read-only admins cannot trigger manual cleanup' }, { status: 403 });
+	}
+
+	const isAuthorizedAdmin = !isGet && !!locals.user && locals.user.role !== 'read-only';
 
 	if (!isAuthorizedCron && !isAuthorizedAdmin) {
 		return json({ success: false, error: 'Unauthorized: Invalid cron credentials' }, { status: 401 });
@@ -40,13 +50,16 @@ async function handleCleanup({ request, locals }: { request: Request; locals: Ap
 
 	const deleteResult = await sql`
 		DELETE FROM recent_actions
-		WHERE created_at < NOW() - (${retentionHours} * INTERVAL '1 hour');
+		WHERE created_at < NOW() - (${retentionHours} * INTERVAL '1 hour')
+		RETURNING id;
 	`;
+
+	const deletedCount = (deleteResult as any).count ?? deleteResult.length ?? 0;
 
 	return json({
 		success: true,
 		retention_hours: retentionHours,
-		deleted_count: (deleteResult as any).count || 0,
+		deleted_count: deletedCount,
 		timestamp: new Date().toISOString()
 	});
 }

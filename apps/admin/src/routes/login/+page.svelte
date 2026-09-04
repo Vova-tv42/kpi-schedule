@@ -103,7 +103,7 @@
 		<div class="mt-8 pt-4 border-t border-slate-200 dark:border-[#252b3b]/60 flex items-center justify-between font-mono text-[11px] text-slate-500 dark:text-[#64748b]">
 			<div class="flex items-center gap-1.5">
 				<ShieldCheck size={13} class="text-emerald-600 dark:text-[#10b981]" />
-				<span>HMAC-SHA256 JWT Signed</span>
+				<span>Database Session Auth</span>
 			</div>
 			<div class="flex items-center gap-1.5">
 				<KeyRound size={13} class="text-emerald-700 dark:text-[#d4ff32]" />

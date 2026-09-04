@@ -114,6 +114,14 @@ func TestUpdateTableRow(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for non_existent table, got nil")
 	}
+
+	// Updating using non-primary key column should fail
+	err = db.UpdateTableRow(ctx, "users", "group_name", "IA-99", map[string]any{
+		"telegram_id": 999999,
+	})
+	if err == nil {
+		t.Error("expected error when pkCol is not a primary key, got nil")
+	}
 }
 
 func TestExecuteAdminQuery(t *testing.T) {
@@ -132,6 +140,15 @@ func TestExecuteAdminQuery(t *testing.T) {
 	}
 	if len(selRes.Columns) != 2 {
 		t.Errorf("expected 2 columns, got %d", len(selRes.Columns))
+	}
+
+	// RETURNING query
+	retRes, err := db.ExecuteAdminQuery(ctx, "UPDATE users SET group_name = 'RET' WHERE id = 'u1' RETURNING id, group_name")
+	if err != nil {
+		t.Fatalf("ExecuteAdminQuery RETURNING failed: %v", err)
+	}
+	if len(retRes.Rows) != 1 {
+		t.Errorf("expected 1 row returned from RETURNING query, got %d", len(retRes.Rows))
 	}
 
 	// Query with leading line comment

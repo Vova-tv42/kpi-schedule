@@ -58,7 +58,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			${String(action_name)},
 			${statusCode},
 			${duration},
-			${sanitized ? JSON.stringify(sanitized) : null},
+			${sanitized ? JSON.stringify(sanitized) : null}::jsonb,
 			NOW()
 		);
 	`;

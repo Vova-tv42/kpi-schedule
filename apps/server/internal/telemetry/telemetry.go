@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -23,23 +24,72 @@ type Client struct {
 	ingestURL  string
 	ingestKey  string
 	httpClient *http.Client
+	queue      chan IngestPayload
 }
 
 // NewClient constructs a new telemetry Client. If ingestURL is empty, reporting is disabled.
 func NewClient(ingestURL, ingestKey string) *Client {
-	return &Client{
+	if ingestURL == "" {
+		return &Client{}
+	}
+
+	c := &Client{
 		ingestURL: ingestURL,
 		ingestKey: ingestKey,
 		httpClient: &http.Client{
 			Timeout: 2 * time.Second,
 		},
+		queue: make(chan IngestPayload, 100),
+	}
+
+	go c.worker()
+
+	return c
+}
+
+func (c *Client) worker() {
+	for payload := range c.queue {
+		c.send(payload)
 	}
 }
 
-// ReportAction dispatches an action metric in an asynchronous background goroutine.
-// It never blocks the caller and never fails the request lifecycle.
+func (c *Client) send(payload IngestPayload) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Debug("telemetry panic recovered", "panic", r)
+		}
+	}()
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.ingestURL, bytes.NewReader(data))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.ingestKey != "" {
+		req.Header.Set("X-Ingest-Key", c.ingestKey)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		slog.Debug("telemetry ingest request failed", "error", err)
+		return
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+	_ = resp.Body.Close()
+}
+
+// ReportAction enqueues an action metric to the background worker.
+// It never blocks the caller and drops the event if the queue is full.
 func (c *Client) ReportAction(actionType, actionName string, statusCode int, durationMs int64, metadata map[string]any) {
-	if c == nil || c.ingestURL == "" {
+	if c == nil || c.ingestURL == "" || c.queue == nil {
 		return
 	}
 
@@ -51,35 +101,9 @@ func (c *Client) ReportAction(actionType, actionName string, statusCode int, dur
 		Metadata:   metadata,
 	}
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				slog.Debug("telemetry panic recovered", "panic", r)
-			}
-		}()
-
-		data, err := json.Marshal(payload)
-		if err != nil {
-			return
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.ingestURL, bytes.NewReader(data))
-		if err != nil {
-			return
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if c.ingestKey != "" {
-			req.Header.Set("X-Ingest-Key", c.ingestKey)
-		}
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			slog.Debug("telemetry ingest request failed", "error", err)
-			return
-		}
-		_ = resp.Body.Close()
-	}()
+	select {
+	case c.queue <- payload:
+	default:
+		slog.Debug("telemetry queue full, dropping event", "action", actionName)
+	}
 }

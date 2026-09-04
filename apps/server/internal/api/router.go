@@ -71,6 +71,25 @@ func NewRouterWithOpts(svc *Service, internalToken string, opts RouterOpts) http
 			r.HandleFunc("/cron/lesson-alerts", opts.CronHandler.HandleLessonAlerts)
 		}
 
+		// Protected admin dashboard routes (require X-Admin-Secret).
+		// Must NOT be wrapped by ipRateLimitMiddleware — dashboard requests proxy from single server IP.
+		r.Route("/admin", func(r chi.Router) {
+			adminSecret := opts.AdminSecret
+			if adminSecret == "" {
+				adminSecret = internalToken
+			}
+			r.Use(adminTokenMiddleware(adminSecret))
+
+			r.Get("/tables", h.getAdminTables)
+			r.Get("/tables/{table}", h.getAdminTableRows)
+
+			r.Group(func(r chi.Router) {
+				r.Use(adminWritePermissionMiddleware())
+				r.Put("/tables/{table}/row", h.putAdminTableRow)
+				r.Post("/query", h.postAdminQuery)
+			})
+		})
+
 		// Rate-limit incoming requests
 		r.Group(func(r chi.Router) {
 			r.Use(ipRateLimitMiddleware())
@@ -98,24 +117,6 @@ func NewRouterWithOpts(svc *Service, internalToken string, opts RouterOpts) http
 
 				r.Get("/groups", h.getGroups)
 				r.Get("/time/current", h.getTimeCurrent)
-			})
-
-			// Protected admin dashboard routes (require X-Admin-Secret)
-			r.Route("/admin", func(r chi.Router) {
-				adminSecret := opts.AdminSecret
-				if adminSecret == "" {
-					adminSecret = internalToken
-				}
-				r.Use(adminTokenMiddleware(adminSecret))
-
-				r.Get("/tables", h.getAdminTables)
-				r.Get("/tables/{table}", h.getAdminTableRows)
-
-				r.Group(func(r chi.Router) {
-					r.Use(adminWritePermissionMiddleware())
-					r.Put("/tables/{table}/row", h.putAdminTableRow)
-					r.Post("/query", h.postAdminQuery)
-				})
 			})
 		})
 	})
