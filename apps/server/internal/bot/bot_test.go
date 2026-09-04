@@ -191,3 +191,83 @@ func TestDayKeyboard(t *testing.T) {
 		t.Errorf("expected next button text '▶️', got %q", kb.InlineKeyboard[0][2].Text)
 	}
 }
+
+func TestTomorrowDayKeyboard(t *testing.T) {
+	tomorrow := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	kb := dayKeyboard(tomorrow)
+	if len(kb.InlineKeyboard) != 1 || len(kb.InlineKeyboard[0]) != 3 {
+		t.Fatalf("unexpected keyboard shape: %+v", kb)
+	}
+	if kb.InlineKeyboard[0][0].Text != "◀️" {
+		t.Errorf("expected prev button text '◀️', got %q", kb.InlineKeyboard[0][0].Text)
+	}
+	if kb.InlineKeyboard[0][0].CallbackData != "nav:prev:2026-09-03" {
+		t.Errorf("expected prev callback data 'nav:prev:2026-09-03', got %q", kb.InlineKeyboard[0][0].CallbackData)
+	}
+	if kb.InlineKeyboard[0][1].Text != "📅 Сьогодні" {
+		t.Errorf("expected today button text '📅 Сьогодні', got %q", kb.InlineKeyboard[0][1].Text)
+	}
+	if kb.InlineKeyboard[0][1].CallbackData != "nav:today:2026-09-03" {
+		t.Errorf("expected today callback data 'nav:today:2026-09-03', got %q", kb.InlineKeyboard[0][1].CallbackData)
+	}
+	if kb.InlineKeyboard[0][2].Text != "▶️" {
+		t.Errorf("expected next button text '▶️', got %q", kb.InlineKeyboard[0][2].Text)
+	}
+	if kb.InlineKeyboard[0][2].CallbackData != "nav:next:2026-09-03" {
+		t.Errorf("expected next callback data 'nav:next:2026-09-03', got %q", kb.InlineKeyboard[0][2].CallbackData)
+	}
+}
+
+func TestTomorrowGroupDayKeyboard(t *testing.T) {
+	tomorrow := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	kb := groupDayKeyboard(tomorrow, 4402)
+	if len(kb.InlineKeyboard) != 1 || len(kb.InlineKeyboard[0]) != 3 {
+		t.Fatalf("unexpected keyboard shape: %+v", kb)
+	}
+	if kb.InlineKeyboard[0][0].Text != "◀️" {
+		t.Errorf("expected prev button text '◀️', got %q", kb.InlineKeyboard[0][0].Text)
+	}
+	if kb.InlineKeyboard[0][0].CallbackData != "gnav:prev:2026-09-03:4402" {
+		t.Errorf("expected prev callback data 'gnav:prev:2026-09-03:4402', got %q", kb.InlineKeyboard[0][0].CallbackData)
+	}
+	if kb.InlineKeyboard[0][1].Text != "📅 Сьогодні" {
+		t.Errorf("expected today button text '📅 Сьогодні', got %q", kb.InlineKeyboard[0][1].Text)
+	}
+	if kb.InlineKeyboard[0][1].CallbackData != "gnav:today:2026-09-03:4402" {
+		t.Errorf("expected today callback data 'gnav:today:2026-09-03:4402', got %q", kb.InlineKeyboard[0][1].CallbackData)
+	}
+	if kb.InlineKeyboard[0][2].Text != "▶️" {
+		t.Errorf("expected next button text '▶️', got %q", kb.InlineKeyboard[0][2].Text)
+	}
+	if kb.InlineKeyboard[0][2].CallbackData != "gnav:next:2026-09-03:4402" {
+		t.Errorf("expected next callback data 'gnav:next:2026-09-03:4402', got %q", kb.InlineKeyboard[0][2].CallbackData)
+	}
+}
+
+func TestSetupCommandsIncludesTomorrow(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	if err := storage.Migrate(dbPath); err != nil {
+		t.Fatalf("migrating db: %v", err)
+	}
+	db, err := storage.Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatalf("opening db: %v", err)
+	}
+	defer db.Close()
+
+	svc := api.NewService(db, campus.NewClient(db))
+	b, err := New("123456789:AAFakeTokenForTestingWebhookHandler", svc, db, &gotgbot.BotOpts{
+		DisableTokenCheck: true,
+	})
+	if err != nil {
+		t.Fatalf("creating bot: %v", err)
+	}
+	defer b.Stop()
+
+	// SetupCommands won't crash even if network calls fail (it logs warnings)
+	if err := b.SetupCommands(); err != nil {
+		t.Errorf("SetupCommands returned error: %v", err)
+	}
+}
+

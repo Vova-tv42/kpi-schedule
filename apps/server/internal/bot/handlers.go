@@ -264,8 +264,10 @@ func (b *Bot) cmdStart(bot *gotgbot.Bot, ctx *ext.Context) error {
 		welcome := "👋 <b>Вітаю! Я бот розкладу КПІ.</b>\n\n" +
 			"У цьому чаті доступні команди:\n" +
 			"• /today — твій персональний розклад на сьогодні\n" +
+			"• /tomorrow — твій персональний розклад на завтра\n" +
 			"• /week — твій персональний розклад на тиждень\n" +
 			"• /group_today — загальний розклад групи на сьогодні\n" +
+			"• /group_tomorrow — загальний розклад групи на завтра\n" +
 			"• /group_week — загальний розклад групи на тиждень\n\n" +
 			"⚙️ <b>Адміністраторам:</b> надішліть /group, щоб налаштувати академічну групу для цього чату."
 		_, err := bot.SendMessage(ctx.EffectiveChat.Id, welcome, &gotgbot.SendMessageOpts{ParseMode: "HTML"})
@@ -458,6 +460,38 @@ func (b *Bot) cmdToday(bot *gotgbot.Bot, ctx *ext.Context) error {
 	return sendScreen(bot, ctx.EffectiveChat.Id, text, kb, hasKeyboard)
 }
 
+func (b *Bot) cmdTomorrow(bot *gotgbot.Bot, ctx *ext.Context) error {
+	callerName := ""
+	if isGroupChat(ctx.EffectiveChat) {
+		callerName = formatUserName(ctx.EffectiveUser)
+	}
+
+	tomorrow := time.Now().AddDate(0, 0, 1)
+	text, kb, hasKeyboard, err := b.renderDay(context.Background(), ctx.EffectiveUser.Id, tomorrow, callerName)
+	if err != nil {
+		if errors.Is(err, ErrNotLinked) {
+			msg := notLinkedText
+			if isGroupChat(ctx.EffectiveChat) {
+				msg = fmt.Sprintf("🔒 <b>%s</b>, твій акаунт ще не прив'язано до бота. Напиши боту в особисті повідомлення /start, щоб підключити розклад.", html.EscapeString(callerName))
+			}
+			_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, msg, &gotgbot.SendMessageOpts{ParseMode: "HTML"})
+			return sendErr
+		}
+		if errors.Is(err, api.ErrNoScheduleData) {
+			msg := noScheduleText
+			if isGroupChat(ctx.EffectiveChat) {
+				msg = fmt.Sprintf("📭 <b>%s</b>, твій розклад ще не синхронізовано з браузерного розширення.", html.EscapeString(callerName))
+			}
+			_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, msg, &gotgbot.SendMessageOpts{ParseMode: "HTML"})
+			return sendErr
+		}
+		slog.Error("rendering /tomorrow", "error", err, "telegram_id", ctx.EffectiveUser.Id)
+		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, genericErrorText, nil)
+		return sendErr
+	}
+	return sendScreen(bot, ctx.EffectiveChat.Id, text, kb, hasKeyboard)
+}
+
 func (b *Bot) cmdWeek(bot *gotgbot.Bot, ctx *ext.Context) error {
 	callerName := ""
 	if isGroupChat(ctx.EffectiveChat) {
@@ -630,6 +664,34 @@ func (b *Bot) cmdGroupToday(bot *gotgbot.Bot, ctx *ext.Context) error {
 	text, kb, hasKeyboard, rErr := b.renderGroupDay(reqCtx, group, time.Now())
 	if rErr != nil {
 		slog.Error("rendering group day", "error", rErr, "group", group.AcademicGroupName)
+		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, genericErrorText, nil)
+		return sendErr
+	}
+	return sendScreen(bot, ctx.EffectiveChat.Id, text, kb, hasKeyboard)
+}
+
+func (b *Bot) cmdGroupTomorrow(bot *gotgbot.Bot, ctx *ext.Context) error {
+	if !isGroupChat(ctx.EffectiveChat) {
+		_, err := bot.SendMessage(ctx.EffectiveChat.Id, "⚠️ Ця команда доступна лише у групових чатах.", nil)
+		return err
+	}
+
+	reqCtx := context.Background()
+	group, err := b.db.GetBotGroupByChatID(reqCtx, ctx.EffectiveChat.Id)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, "⚙️ Для цього чату ще не налаштовано академічну групу. Адміністратор може налаштувати її за допомогою команди /group.", nil)
+			return sendErr
+		}
+		slog.Error("fetching group for /group_tomorrow", "error", err, "chat_id", ctx.EffectiveChat.Id)
+		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, genericErrorText, nil)
+		return sendErr
+	}
+
+	tomorrow := time.Now().AddDate(0, 0, 1)
+	text, kb, hasKeyboard, rErr := b.renderGroupDay(reqCtx, group, tomorrow)
+	if rErr != nil {
+		slog.Error("rendering group day for /group_tomorrow", "error", rErr, "group", group.AcademicGroupName)
 		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, genericErrorText, nil)
 		return sendErr
 	}
@@ -828,6 +890,9 @@ func (b *Bot) onTextMessage(bot *gotgbot.Bot, ctx *ext.Context) error {
 	if isGroupChat(ctx.EffectiveChat) {
 		if strings.HasPrefix(msg.Text, "/group-today") {
 			return b.cmdGroupToday(bot, ctx)
+		}
+		if strings.HasPrefix(msg.Text, "/group-tomorrow") {
+			return b.cmdGroupTomorrow(bot, ctx)
 		}
 		if strings.HasPrefix(msg.Text, "/group-week") {
 			return b.cmdGroupWeek(bot, ctx)

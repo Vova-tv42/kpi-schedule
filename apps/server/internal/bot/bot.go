@@ -107,10 +107,12 @@ func New(token string, svc *api.Service, db *storage.DB, botOpts ...*gotgbot.Bot
 	dispatcher.AddHandler(handlers.NewCommand("install", b.wrap("telegram_command", "/install", b.cmdInstall)))
 	dispatcher.AddHandler(handlers.NewCommand("link", b.wrap("telegram_command", "/link", b.cmdLink)))
 	dispatcher.AddHandler(handlers.NewCommand("today", b.wrap("telegram_command", "/today", b.cmdToday)))
+	dispatcher.AddHandler(handlers.NewCommand("tomorrow", b.wrap("telegram_command", "/tomorrow", b.cmdTomorrow)))
 	dispatcher.AddHandler(handlers.NewCommand("week", b.wrap("telegram_command", "/week", b.cmdWeek)))
 	dispatcher.AddHandler(handlers.NewCommand("urls", b.wrap("telegram_command", "/urls", b.cmdURLs)))
 	dispatcher.AddHandler(handlers.NewCommand("group", b.wrap("telegram_command", "/group", b.cmdGroup)))
 	dispatcher.AddHandler(handlers.NewCommand("group_today", b.wrap("telegram_command", "/group_today", b.cmdGroupToday)))
+	dispatcher.AddHandler(handlers.NewCommand("group_tomorrow", b.wrap("telegram_command", "/group_tomorrow", b.cmdGroupTomorrow)))
 	dispatcher.AddHandler(handlers.NewCommand("group_week", b.wrap("telegram_command", "/group_week", b.cmdGroupWeek)))
 	dispatcher.AddHandler(handlers.NewCommand("settings", b.wrap("telegram_command", "/settings", b.cmdSettings)))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(navCallbackPrefix), b.wrap("telegram_callback", "nav", b.onNav)))
@@ -133,6 +135,7 @@ func New(token string, svc *api.Service, db *storage.DB, botOpts ...*gotgbot.Bot
 func (b *Bot) SetupCommands() error {
 	privateCommands := []gotgbot.BotCommand{
 		{Command: "today", Description: "Показати розклад на сьогодні"},
+		{Command: "tomorrow", Description: "Показати розклад на завтра"},
 		{Command: "week", Description: "Показати розклад на тиждень"},
 		{Command: "urls", Description: "Посилання на онлайн-заняття"},
 		{Command: "group", Description: "Керування академічними групами"},
@@ -149,8 +152,10 @@ func (b *Bot) SetupCommands() error {
 
 	groupCommands := []gotgbot.BotCommand{
 		{Command: "today", Description: "Показати персональний розклад на сьогодні"},
+		{Command: "tomorrow", Description: "Показати персональний розклад на завтра"},
 		{Command: "week", Description: "Показати персональний розклад на тиждень"},
 		{Command: "group_today", Description: "Показати розклад групи на сьогодні"},
+		{Command: "group_tomorrow", Description: "Показати розклад групи на завтра"},
 		{Command: "group_week", Description: "Показати розклад групи на тиждень"},
 	}
 	if _, err := b.gbot.SetMyCommands(groupCommands, &gotgbot.SetMyCommandsOpts{
@@ -161,8 +166,10 @@ func (b *Bot) SetupCommands() error {
 
 	adminCommands := []gotgbot.BotCommand{
 		{Command: "today", Description: "Показати персональний розклад на сьогодні"},
+		{Command: "tomorrow", Description: "Показати персональний розклад на завтра"},
 		{Command: "week", Description: "Показати персональний розклад на тиждень"},
 		{Command: "group_today", Description: "Показати розклад групи на сьогодні"},
+		{Command: "group_tomorrow", Description: "Показати розклад групи на завтра"},
 		{Command: "group_week", Description: "Показати розклад групи на тиждень"},
 		{Command: "group", Description: "Керування академічною групою"},
 	}
