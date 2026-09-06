@@ -100,19 +100,10 @@ func setupTestBot(t *testing.T) (*Bot, *storage.DB, *api.Service) {
 }
 
 func TestGroupURLSyncCommandScope(t *testing.T) {
-	b, _, _ := setupTestBot(t)
-
-	// Verify SetupCommands registers /group_url_sync in groupCommands and adminCommands,
-	// but NOT in privateCommands.
+	// Verify /group_url_sync is in GroupCommands and AdminCommands,
+	// but NOT in PrivateCommands.
 	privateFound := false
-	groupFound := false
-	adminFound := false
-
-	for _, cmd := range []gotgbot.BotCommand{
-		{Command: "today"}, {Command: "tomorrow"}, {Command: "week"}, {Command: "urls"},
-		{Command: "group"}, {Command: "settings"}, {Command: "issues"}, {Command: "install"},
-		{Command: "link"}, {Command: "start"},
-	} {
+	for _, cmd := range PrivateCommands() {
 		if cmd.Command == "group_url_sync" {
 			privateFound = true
 		}
@@ -121,13 +112,8 @@ func TestGroupURLSyncCommandScope(t *testing.T) {
 		t.Errorf("/group_url_sync should not be in private commands")
 	}
 
-	// Check group commands registered
-	groupCommands := []gotgbot.BotCommand{
-		{Command: "today"}, {Command: "tomorrow"}, {Command: "week"},
-		{Command: "group_today"}, {Command: "group_tomorrow"}, {Command: "group_week"},
-		{Command: "group_url_sync"},
-	}
-	for _, cmd := range groupCommands {
+	groupFound := false
+	for _, cmd := range GroupCommands() {
 		if cmd.Command == "group_url_sync" {
 			groupFound = true
 		}
@@ -136,12 +122,8 @@ func TestGroupURLSyncCommandScope(t *testing.T) {
 		t.Errorf("/group_url_sync should be in group commands")
 	}
 
-	adminCommands := []gotgbot.BotCommand{
-		{Command: "today"}, {Command: "tomorrow"}, {Command: "week"},
-		{Command: "group_today"}, {Command: "group_tomorrow"}, {Command: "group_week"},
-		{Command: "group_url_sync"}, {Command: "group"},
-	}
-	for _, cmd := range adminCommands {
+	adminFound := false
+	for _, cmd := range AdminCommands() {
 		if cmd.Command == "group_url_sync" {
 			adminFound = true
 		}
@@ -149,8 +131,6 @@ func TestGroupURLSyncCommandScope(t *testing.T) {
 	if !adminFound {
 		t.Errorf("/group_url_sync should be in admin commands")
 	}
-
-	_ = b
 }
 
 func TestGroupURLSyncFlow(t *testing.T) {

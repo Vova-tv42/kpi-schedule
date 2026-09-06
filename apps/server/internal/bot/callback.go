@@ -199,7 +199,7 @@ func (b *Bot) editToURLPrompt(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, hash 
 		return answerWithError(bot, cq)
 	}
 
-	text := formatURLPrompt(target.Subject, target.Tag, target.URL, "")
+	text := formatURLPrompt(target.Subject, target.Tag, target.LocationKind, target.URL, "")
 	kb := urlPromptKeyboard(target.URL != "", hash)
 	return b.applyScreen(bot, cq, text, kb, true)
 }
@@ -869,7 +869,7 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		} else {
 			promptNotice = "Надішли посилання (Zoom, Meet тощо) у відповідь на це повідомлення:"
 		}
-		text := formatURLPrompt(target.Subject, target.Tag, target.URL, promptNotice)
+		text := formatURLPrompt(target.Subject, target.Tag, target.LocationKind, target.URL, promptNotice)
 		kb := groupURLPromptKeyboard(parts[0], target.URL != "", hash)
 		return b.applyScreen(bot, cq, text, kb, true)
 
@@ -1136,6 +1136,12 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 // onGroupSync handles callbacks from the /group_url_sync confirmation prompt (gsync:...).
 func (b *Bot) onGroupSync(bot *gotgbot.Bot, ctx *ext.Context) error {
 	cq := ctx.CallbackQuery
+	if cq == nil || cq.Message == nil {
+		if cq != nil {
+			return answerSilently(bot, cq)
+		}
+		return nil
+	}
 	action := strings.TrimPrefix(cq.Data, groupSyncCallbackPrefix)
 
 	parts := strings.SplitN(action, ":", 2)

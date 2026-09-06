@@ -395,9 +395,10 @@ func (s *Service) GetUniqueGroupLessons(ctx context.Context, botGroupID uuid.UUI
 	}
 
 	type groupData struct {
-		subject     string
-		subjectNorm string
-		tag         string
+		subject      string
+		subjectNorm  string
+		tag          string
+		locationKind string
 	}
 	groups := make(map[string]*groupData)
 	var groupKeys []string
@@ -408,18 +409,29 @@ func (s *Service) GetUniqueGroupLessons(ctx context.Context, botGroupID uuid.UUI
 				tag := engine.NormalizeTag(p.Tag)
 				norm := engine.NormalizeSubject(p.Name)
 				key := norm + "|" + tag
+				locStr := ""
+				if p.Location != nil {
+					locStr = p.Location.Title
+				}
+				kind := model.LocationKind(locStr)
 
 				g, exists := groups[key]
 				if !exists {
 					g = &groupData{
-						subject:     p.Name,
-						subjectNorm: norm,
-						tag:         tag,
+						subject:      p.Name,
+						subjectNorm:  norm,
+						tag:          tag,
+						locationKind: kind,
 					}
 					groups[key] = g
 					groupKeys = append(groupKeys, key)
-				} else if g.subject == "" && p.Name != "" {
-					g.subject = p.Name
+				} else {
+					if g.subject == "" && p.Name != "" {
+						g.subject = p.Name
+					}
+					if g.locationKind != "Онлайн" && kind == "Онлайн" {
+						g.locationKind = "Онлайн"
+					}
 				}
 			}
 		}
@@ -432,10 +444,11 @@ func (s *Service) GetUniqueGroupLessons(ctx context.Context, botGroupID uuid.UUI
 	for _, key := range groupKeys {
 		g := groups[key]
 		unique = append(unique, model.UniqueLesson{
-			Subject:     g.subject,
-			SubjectNorm: g.subjectNorm,
-			Tag:         g.tag,
-			URL:         urls[key],
+			Subject:      g.subject,
+			SubjectNorm:  g.subjectNorm,
+			Tag:          g.tag,
+			LocationKind: g.locationKind,
+			URL:          urls[key],
 		})
 	}
 
@@ -455,6 +468,7 @@ func (s *Service) GetUniqueGroupLessons(ctx context.Context, botGroupID uuid.UUI
 // 1. The lesson must appear in the user's personal schedule.
 // 2. The lesson must appear in the group's schedule.
 // 3. The lesson must have a non-empty URL configured in the group settings.
+// 4. The configured group URL must differ from the user's current URL.
 // Lessons without group URLs or not in group schedule are left untouched.
 // Lessons not in user's personal schedule are not added.
 // Returns the number of synced/replaced URLs.
@@ -467,9 +481,12 @@ func (s *Service) SyncUserLessonURLsWithGroup(ctx context.Context, userID uuid.U
 		return 0, nil
 	}
 
-	userLessonKeys := make(map[string]bool, len(userLessons))
+	userLessonExists := make(map[string]bool, len(userLessons))
+	userLessonURLs := make(map[string]string, len(userLessons))
 	for _, ul := range userLessons {
-		userLessonKeys[ul.SubjectNorm+"|"+ul.Tag] = true
+		key := ul.SubjectNorm + "|" + ul.Tag
+		userLessonExists[key] = true
+		userLessonURLs[key] = ul.URL
 	}
 
 	groupLessons, err := s.GetUniqueGroupLessons(ctx, botGroupID, academicGroupID)
@@ -480,7 +497,7 @@ func (s *Service) SyncUserLessonURLsWithGroup(ctx context.Context, userID uuid.U
 	urlsToSet := make(map[string]string)
 	for _, gl := range groupLessons {
 		key := gl.SubjectNorm + "|" + gl.Tag
-		if gl.URL != "" && userLessonKeys[key] {
+		if gl.URL != "" && userLessonExists[key] && userLessonURLs[key] != gl.URL {
 			urlsToSet[key] = gl.URL
 		}
 	}

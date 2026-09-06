@@ -261,10 +261,10 @@ func (db *DB) ClearURLPrompt(ctx context.Context, telegramID int64) error {
 }
 
 // GetUniqueScheduleLessons returns deduplicated lessons from user_lessons,
-// populated with existing custom URLs.
+// populated with existing custom URLs and detected location kind.
 func (db *DB) GetUniqueScheduleLessons(ctx context.Context, userID uuid.UUID) ([]model.UniqueLesson, error) {
 	rows, err := db.SQL.QueryContext(ctx, `
-		SELECT subject, subject_norm, tag
+		SELECT subject, subject_norm, tag, location_raw, location_title
 		FROM user_lessons
 		WHERE user_id = ?
 		ORDER BY subject, tag
@@ -275,31 +275,45 @@ func (db *DB) GetUniqueScheduleLessons(ctx context.Context, userID uuid.UUID) ([
 	defer rows.Close()
 
 	type groupData struct {
-		subject     string
-		subjectNorm string
-		tag         string
+		subject      string
+		subjectNorm  string
+		tag          string
+		locationKind string
 	}
 	groups := make(map[string]*groupData)
 	var groupKeys []string
 
 	for rows.Next() {
-		var subject, subjectNorm, tag string
-		if err := rows.Scan(&subject, &subjectNorm, &tag); err != nil {
+		var subject, subjectNorm, tag, locRaw string
+		var locTitle *string
+		if err := rows.Scan(&subject, &subjectNorm, &tag, &locRaw, &locTitle); err != nil {
 			return nil, fmt.Errorf("scanning unique lesson row: %w", err)
 		}
 		key := subjectNorm + "|" + tag
 
+		loc := locRaw
+		if locTitle != nil && *locTitle != "" {
+			loc = *locTitle
+		}
+		kind := model.LocationKind(loc)
+
 		g, exists := groups[key]
 		if !exists {
 			g = &groupData{
-				subject:     subject,
-				subjectNorm: subjectNorm,
-				tag:         tag,
+				subject:      subject,
+				subjectNorm:  subjectNorm,
+				tag:          tag,
+				locationKind: kind,
 			}
 			groups[key] = g
 			groupKeys = append(groupKeys, key)
-		} else if g.subject == "" && subject != "" {
-			g.subject = subject
+		} else {
+			if g.subject == "" && subject != "" {
+				g.subject = subject
+			}
+			if g.locationKind != "Онлайн" && kind == "Онлайн" {
+				g.locationKind = "Онлайн"
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -315,10 +329,11 @@ func (db *DB) GetUniqueScheduleLessons(ctx context.Context, userID uuid.UUID) ([
 	for _, key := range groupKeys {
 		g := groups[key]
 		unique = append(unique, model.UniqueLesson{
-			Subject:     g.subject,
-			SubjectNorm: g.subjectNorm,
-			Tag:         g.tag,
-			URL:         urls[key],
+			Subject:      g.subject,
+			SubjectNorm:  g.subjectNorm,
+			Tag:          g.tag,
+			LocationKind: g.locationKind,
+			URL:          urls[key],
 		})
 	}
 

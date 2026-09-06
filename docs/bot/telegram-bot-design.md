@@ -264,8 +264,9 @@ To prevent chat flooding, unauthorized modifications, and permission leaks:
 - **Selective Synchronization**:
   - Replaces only **identical lessons**: the lesson `(subject_norm, tag)` must appear in both the student's personal schedule and the group's schedule.
   - Replaces only lessons that have a configured URL in the group settings (`bot_group_lesson_urls`). Lessons without a group URL are left untouched.
+  - Updates only URLs that are new or different from the student's personal configuration. If all URLs are already identical, reports that no new URLs were found.
   - Personal elective courses or courses outside the group schedule are never altered.
-  - Upon selecting `Proceed`, sends a confirmation message to the group: `✅ <Користувач>, посилання на онлайн-заняття успішно синхронізовано з налаштуваннями групи <Група>!`.
+  - Upon selecting `Proceed`, sends a confirmation message to the group: `✅ <Користувач>, посилання на онлайн-заняття успішно синхронізовано з налаштуваннями групи <Група>! (Оновлено занять: <N>)` (or `ℹ️ ... Нових посилань для твоїх занять у групі не знайдено.` when 0 were changed).
 
 ---
 

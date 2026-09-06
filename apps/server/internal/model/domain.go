@@ -106,10 +106,11 @@ type ParsedLesson struct {
 // UniqueLesson represents a distinct course session (grouped by subject and tag)
 // for managing online links.
 type UniqueLesson struct {
-	Subject     string
-	SubjectNorm string
-	Tag         string
-	URL         string
+	Subject      string
+	SubjectNorm  string
+	Tag          string
+	LocationKind string
+	URL          string
 }
 
 // URLPrompt tracks an in-flight prompt asking the user to send a URL for a lesson.

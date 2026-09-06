@@ -731,6 +731,11 @@ func (b *Bot) cmdGroupURLSync(bot *gotgbot.Bot, ctx *ext.Context) error {
 		return err
 	}
 
+	if ctx.EffectiveUser == nil {
+		_, err := bot.SendMessage(ctx.EffectiveChat.Id, "⚠️ Ця команда недоступна для анонімних адміністраторів або каналів.", nil)
+		return err
+	}
+
 	reqCtx := context.Background()
 	group, err := b.db.GetBotGroupByChatID(reqCtx, ctx.EffectiveChat.Id)
 	if err != nil {
@@ -757,7 +762,12 @@ func (b *Bot) cmdGroupURLSync(bot *gotgbot.Bot, ctx *ext.Context) error {
 	}
 
 	hasData, _, _, sErr := b.svc.ScheduleFreshness(reqCtx, user)
-	if sErr != nil || !hasData {
+	if sErr != nil {
+		slog.Error("checking schedule freshness for /group_url_sync", "error", sErr, "telegram_id", ctx.EffectiveUser.Id)
+		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, genericErrorText, nil)
+		return sendErr
+	}
+	if !hasData {
 		msg := fmt.Sprintf("📭 <b>%s</b>, твій розклад ще не синхронізовано з браузерного розширення.", html.EscapeString(callerName))
 		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, msg, &gotgbot.SendMessageOpts{ParseMode: "HTML"})
 		return sendErr
@@ -781,7 +791,7 @@ func (b *Bot) handleGroupInput(bot *gotgbot.Bot, ctx *ext.Context, prompt *model
 		hash := lessonHash(prompt.SubjectNorm, prompt.Tag)
 		groupIDStr := prompt.GroupID.String()
 		if !isValidURL(rawInput) {
-			text := formatURLPrompt(prompt.SubjectName, prompt.Tag, "", "Некоректне посилання. Будь ласка, надішли дійсне посилання (наприклад: https://zoom.us/j/...):")
+			text := formatURLPrompt(prompt.SubjectName, prompt.Tag, "", "", "Некоректне посилання. Будь ласка, надішли дійсне посилання (наприклад: https://zoom.us/j/...):")
 			kb := groupURLPromptKeyboard(groupIDStr, false, hash)
 			opts := &gotgbot.EditMessageTextOpts{
 				ChatId:             ctx.EffectiveChat.Id,
@@ -1048,7 +1058,7 @@ func (b *Bot) onTextMessage(bot *gotgbot.Bot, ctx *ext.Context) error {
 	rawURL := strings.TrimSpace(msg.Text)
 	hash := lessonHash(prompt.SubjectNorm, prompt.Tag)
 	if !isValidURL(rawURL) {
-		text := formatURLPrompt(prompt.SubjectName, prompt.Tag, "", "Некоректне посилання. Будь ласка, надішли дійсне посилання (наприклад: https://zoom.us/j/...):")
+		text := formatURLPrompt(prompt.SubjectName, prompt.Tag, "", "", "Некоректне посилання. Будь ласка, надішли дійсне посилання (наприклад: https://zoom.us/j/...):")
 		kb := urlPromptKeyboard(false, hash)
 		opts := &gotgbot.EditMessageTextOpts{
 			ChatId:             ctx.EffectiveChat.Id,

@@ -186,6 +186,13 @@ func TestFormatLessonsMenu(t *testing.T) {
 			Tag:         "prac",
 			URL:         "",
 		},
+		{
+			Subject:      "Фізика",
+			SubjectNorm:  "фізика",
+			Tag:          "lab",
+			LocationKind: "Оффлайн",
+			URL:          "https://meet.google.com/xyz",
+		},
 	}
 
 	out := formatLessonsMenu(lessons, "✅ Збережено!")
@@ -197,5 +204,8 @@ func TestFormatLessonsMenu(t *testing.T) {
 	}
 	if !strings.Contains(out, "[Практ., Онлайн]") {
 		t.Errorf("expected plain badge for unlinked practice in menu output:\n%s", out)
+	}
+	if !strings.Contains(out, `<a href="https://meet.google.com/xyz">[Лаб., Оффлайн]</a>`) {
+		t.Errorf("expected link for offline lab in menu output:\n%s", out)
 	}
 }

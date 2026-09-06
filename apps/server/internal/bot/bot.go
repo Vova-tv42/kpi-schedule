@@ -135,9 +135,9 @@ func New(token string, svc *api.Service, db *storage.DB, botOpts ...*gotgbot.Bot
 	return b, nil
 }
 
-// SetupCommands registers command menus separately for private and group chats.
-func (b *Bot) SetupCommands() error {
-	privateCommands := []gotgbot.BotCommand{
+// PrivateCommands returns the bot commands scoped to all private chats.
+func PrivateCommands() []gotgbot.BotCommand {
+	return []gotgbot.BotCommand{
 		{Command: "today", Description: "Показати розклад на сьогодні"},
 		{Command: "tomorrow", Description: "Показати розклад на завтра"},
 		{Command: "week", Description: "Показати розклад на тиждень"},
@@ -149,13 +149,11 @@ func (b *Bot) SetupCommands() error {
 		{Command: "link", Description: "Отримати код прив'язки браузерного розширення"},
 		{Command: "start", Description: "Знайомство та головне меню"},
 	}
-	if _, err := b.gbot.SetMyCommands(privateCommands, &gotgbot.SetMyCommandsOpts{
-		Scope: gotgbot.BotCommandScopeAllPrivateChats{},
-	}); err != nil {
-		slog.Warn("setting private chat commands", "error", err)
-	}
+}
 
-	groupCommands := []gotgbot.BotCommand{
+// GroupCommands returns the bot commands scoped to all group chats.
+func GroupCommands() []gotgbot.BotCommand {
+	return []gotgbot.BotCommand{
 		{Command: "today", Description: "Показати персональний розклад на сьогодні"},
 		{Command: "tomorrow", Description: "Показати персональний розклад на завтра"},
 		{Command: "week", Description: "Показати персональний розклад на тиждень"},
@@ -164,13 +162,11 @@ func (b *Bot) SetupCommands() error {
 		{Command: "group_week", Description: "Показати розклад групи на тиждень"},
 		{Command: "group_url_sync", Description: "Синхронізувати посилання з розкладу групи"},
 	}
-	if _, err := b.gbot.SetMyCommands(groupCommands, &gotgbot.SetMyCommandsOpts{
-		Scope: gotgbot.BotCommandScopeAllGroupChats{},
-	}); err != nil {
-		slog.Warn("setting group chat commands", "error", err)
-	}
+}
 
-	adminCommands := []gotgbot.BotCommand{
+// AdminCommands returns the bot commands scoped to chat administrators.
+func AdminCommands() []gotgbot.BotCommand {
+	return []gotgbot.BotCommand{
 		{Command: "today", Description: "Показати персональний розклад на сьогодні"},
 		{Command: "tomorrow", Description: "Показати персональний розклад на завтра"},
 		{Command: "week", Description: "Показати персональний розклад на тиждень"},
@@ -180,7 +176,23 @@ func (b *Bot) SetupCommands() error {
 		{Command: "group_url_sync", Description: "Синхронізувати посилання з розкладу групи"},
 		{Command: "group", Description: "Керування академічною групою"},
 	}
-	if _, err := b.gbot.SetMyCommands(adminCommands, &gotgbot.SetMyCommandsOpts{
+}
+
+// SetupCommands registers command menus separately for private and group chats.
+func (b *Bot) SetupCommands() error {
+	if _, err := b.gbot.SetMyCommands(PrivateCommands(), &gotgbot.SetMyCommandsOpts{
+		Scope: gotgbot.BotCommandScopeAllPrivateChats{},
+	}); err != nil {
+		slog.Warn("setting private chat commands", "error", err)
+	}
+
+	if _, err := b.gbot.SetMyCommands(GroupCommands(), &gotgbot.SetMyCommandsOpts{
+		Scope: gotgbot.BotCommandScopeAllGroupChats{},
+	}); err != nil {
+		slog.Warn("setting group chat commands", "error", err)
+	}
+
+	if _, err := b.gbot.SetMyCommands(AdminCommands(), &gotgbot.SetMyCommandsOpts{
 		Scope: gotgbot.BotCommandScopeAllChatAdministrators{},
 	}); err != nil {
 		slog.Warn("setting chat administrators commands", "error", err)

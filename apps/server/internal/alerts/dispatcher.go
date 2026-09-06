@@ -91,7 +91,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, now time.Time) (DispatchResul
 					url = urls[l.SubjectNorm+"|"+l.Tag]
 				}
 
-				msg := formatAlertMessage(alertType, minsBefore, l.StartTime, l.Subject, l.Tag)
+				location := l.LocationRaw
+				if l.Location != nil && l.Location.Title != "" {
+					location = l.Location.Title
+				}
+
+				msg := formatAlertMessage(alertType, minsBefore, l.StartTime, l.Subject, l.Tag, location, url)
 				opts := &gotgbot.SendMessageOpts{
 					ParseMode:          "HTML",
 					LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
@@ -178,7 +183,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, now time.Time) (DispatchResul
 						url = urls[norm+"|"+tag]
 					}
 
-					msg := formatAlertMessage(alertType, minsBefore, p.Time, p.Name, p.Tag)
+					location := ""
+					if p.Location != nil {
+						location = p.Location.Title
+					}
+
+					msg := formatAlertMessage(alertType, minsBefore, p.Time, p.Name, p.Tag, location, url)
 					opts := &gotgbot.SendMessageOpts{
 						ParseMode:          "HTML",
 						LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
@@ -259,20 +269,29 @@ var dayShortUA = map[int]string{
 	1: "Пн", 2: "Вв", 3: "Ср", 4: "Чт", 5: "Пт", 6: "Сб", 7: "Нд",
 }
 
-func tagLabelUA(tag string) string {
+func tagAbbr(tag string) string {
 	switch strings.ToLower(tag) {
 	case "lec", "лек":
-		return "лек."
+		return "Лек."
 	case "prac", "прак":
-		return "прак."
+		return "Практ."
 	case "lab", "лаб":
-		return "лаб."
+		return "Лаб."
 	default:
 		if tag != "" {
 			return tag
 		}
-		return ""
+		return "Пара"
 	}
+}
+
+func formatLessonMode(tag, location, rawURL string) string {
+	kind := model.LocationKind(location)
+	text := fmt.Sprintf("[%s, %s]", tagAbbr(tag), kind)
+	if rawURL != "" {
+		return fmt.Sprintf(`<a href="%s">%s</a>`, html.EscapeString(rawURL), html.EscapeString(text))
+	}
+	return html.EscapeString(text)
 }
 
 func hhmm(t string) string {
@@ -317,7 +336,7 @@ func platformLabel(rawURL string) string {
 	return "Онлайн"
 }
 
-func formatAlertMessage(alertType model.AlertType, minutesBefore int, startTime, subject, tag string) string {
+func formatAlertMessage(alertType model.AlertType, minutesBefore int, startTime, subject, tag, location, rawURL string) string {
 	var header string
 	if alertType == model.AlertBefore10m {
 		header = fmt.Sprintf("<blockquote>🔔 Пара почнеться через %d %s</blockquote>", minutesBefore, minutesPluralUA(minutesBefore))
@@ -326,13 +345,9 @@ func formatAlertMessage(alertType model.AlertType, minutesBefore int, startTime,
 	}
 
 	timeStr := hhmm(startTime)
-	tagLabel := tagLabelUA(tag)
-	var tagStr string
-	if tagLabel != "" {
-		tagStr = fmt.Sprintf(" <i>(%s)</i>", html.EscapeString(tagLabel))
-	}
+	mode := formatLessonMode(tag, location, rawURL)
 
-	return fmt.Sprintf("%s\n\n<code>%s</code>  %s%s", header, html.EscapeString(timeStr), html.EscapeString(subject), tagStr)
+	return fmt.Sprintf("%s\n\n<code>%s</code>  %s <i>%s</i>", header, html.EscapeString(timeStr), html.EscapeString(subject), mode)
 }
 
 func buildAlertKeyboard(subject, rawURL string) *gotgbot.InlineKeyboardMarkup {

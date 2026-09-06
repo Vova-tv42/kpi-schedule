@@ -289,6 +289,15 @@ func TestSyncUserLessonURLsWithGroup(t *testing.T) {
 		t.Errorf("expected no physics url for user, got %q", got)
 	}
 
+	// Repeat sync when URLs are already identical should return count 0
+	repeatCount, err := svc.SyncUserLessonURLsWithGroup(ctx, user.ID, botGroup.ID, botGroup.AcademicGroupID)
+	if err != nil {
+		t.Fatalf("repeat SyncUserLessonURLsWithGroup failed: %v", err)
+	}
+	if repeatCount != 0 {
+		t.Errorf("expected repeat count 0, got %d", repeatCount)
+	}
+
 	// Edge case 1: User with no lessons
 	emptyUser, err := db.UpsertUser(ctx, 999222, nil, nil)
 	if err != nil {

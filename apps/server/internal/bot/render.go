@@ -268,7 +268,11 @@ func formatLessonsMenu(lessons []model.UniqueLesson, notice string) string {
 	}
 
 	for _, l := range lessons {
-		mode := formatLessonMode(l.Tag, "Онлайн", l.URL)
+		locKind := l.LocationKind
+		if locKind == "" {
+			locKind = "Онлайн"
+		}
+		mode := formatLessonMode(l.Tag, locKind, l.URL)
 		fmt.Fprintf(&b, "• %s <i>%s</i>\n", html.EscapeString(l.Subject), mode)
 	}
 
@@ -299,9 +303,12 @@ func urlsKeyboard(lessons []model.UniqueLesson) gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-func formatURLPrompt(subjectName, tag, currentURL, errorMsg string) string {
+func formatURLPrompt(subjectName, tag, locationKind, currentURL, errorMsg string) string {
 	var b strings.Builder
-	mode := formatLessonMode(tag, "Онлайн", currentURL)
+	if locationKind == "" {
+		locationKind = "Онлайн"
+	}
+	mode := formatLessonMode(tag, locationKind, currentURL)
 	fmt.Fprintf(&b, "🔗 <b>%s</b> <i>%s</i>\n\n", html.EscapeString(subjectName), mode)
 
 	if errorMsg != "" {
@@ -913,7 +920,11 @@ func formatGroupLessonsMenu(groupName string, lessons []model.UniqueLesson, noti
 	}
 
 	for _, l := range lessons {
-		mode := formatLessonMode(l.Tag, "Онлайн", l.URL)
+		locKind := l.LocationKind
+		if locKind == "" {
+			locKind = "Онлайн"
+		}
+		mode := formatLessonMode(l.Tag, locKind, l.URL)
 		fmt.Fprintf(&b, "• %s <i>%s</i>\n", html.EscapeString(l.Subject), mode)
 	}
 
@@ -984,7 +995,7 @@ func userSettingsKeyboard(notificationsEnabled bool) gotgbot.InlineKeyboardMarku
 func formatGroupSyncConfirm(callerName, groupName string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "🔄 <b>Синхронізація посилань з групою %s</b>\n\n", html.EscapeString(groupName))
-	fmt.Fprintf(&b, "👤 <b>%s</b>, ця дія перезапише встановлені тобою посилання у персональному розкладі посиланнями з налаштувань групи <b>%s</b> (якщо вони були тобою встановлені).\n\n", html.EscapeString(callerName), html.EscapeString(groupName))
+	fmt.Fprintf(&b, "👤 <b>%s</b>, ця дія перезапише встановлені у твоєму персональному розкладі посилання посиланнями з налаштувань групи <b>%s</b> (якщо такі налаштовані).\n\n", html.EscapeString(callerName), html.EscapeString(groupName))
 	b.WriteString("Будуть замінені лише посилання для спільних занять, які налаштовані в конфігурації цієї групи. Посилання для інших занять залишаться без змін.\n\n")
 	b.WriteString("Продовжити?")
 	return b.String()
