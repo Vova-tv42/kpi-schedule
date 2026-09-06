@@ -113,8 +113,8 @@ func TestDispatcherPersonalAlerts(t *testing.T) {
 	if !strings.Contains(msg1.Text, "<blockquote>🔔 Пара почнеться через 10 хвилин</blockquote>") {
 		t.Errorf("expected 10m alert header in blockquote, got: %s", msg1.Text)
 	}
-	if !strings.Contains(msg1.Text, "<code>10:25</code>  Операційні системи <i>(лек.)</i>") {
-		t.Errorf("expected monospace time and subject, got: %s", msg1.Text)
+	if !strings.Contains(msg1.Text, `<code>10:25</code>  Операційні системи <i><a href="https://zoom.us/j/987654321">[Лек., Онлайн]</a></i>`) {
+		t.Errorf("expected monospace time, subject and clickable link mode, got: %s", msg1.Text)
 	}
 	kb, ok := msg1.Opts.ReplyMarkup.(gotgbot.InlineKeyboardMarkup)
 	if !ok || len(kb.InlineKeyboard) == 0 {
@@ -148,7 +148,7 @@ func TestDispatcherPersonalAlerts(t *testing.T) {
 	if !strings.Contains(msg2.Text, "<blockquote>🔔 Почалась пара</blockquote>") {
 		t.Errorf("expected start alert header in blockquote, got: %s", msg2.Text)
 	}
-	if !strings.Contains(msg2.Text, "<code>10:25</code>  Операційні системи <i>(лек.)</i>") {
+	if !strings.Contains(msg2.Text, `<code>10:25</code>  Операційні системи <i><a href="https://zoom.us/j/987654321">[Лек., Онлайн]</a></i>`) {
 		t.Errorf("expected monospace time and subject, got: %s", msg2.Text)
 	}
 
@@ -265,7 +265,7 @@ func TestDispatcherGroupAlerts(t *testing.T) {
 	if !strings.Contains(msg1.Text, "<blockquote>🔔 Пара почнеться через 10 хвилин</blockquote>") {
 		t.Errorf("unexpected group alert text: %s", msg1.Text)
 	}
-	if !strings.Contains(msg1.Text, "<code>08:30</code>  Архітектура комп&#39;ютерів <i>(лек.)</i>") {
+	if !strings.Contains(msg1.Text, `<code>08:30</code>  Архітектура комп&#39;ютерів <i><a href="https://meet.google.com/abc-def-ghi">[Лек., Онлайн]</a></i>`) {
 		t.Errorf("unexpected group alert content: %s", msg1.Text)
 	}
 	groupKb, ok := msg1.Opts.ReplyMarkup.(gotgbot.InlineKeyboardMarkup)
@@ -359,7 +359,7 @@ func TestMatchAlertWindowsAndMessages(t *testing.T) {
 	if !strings.Contains(sender.sentMessages[0].Text, "<blockquote>🔔 Пара почнеться через 8 хвилин</blockquote>") {
 		t.Errorf("expected 'через 8 хвилин', got: %s", sender.sentMessages[0].Text)
 	}
-	if !strings.Contains(sender.sentMessages[0].Text, "<code>10:25</code>  Математичний аналіз <i>(прак.)</i>") {
+	if !strings.Contains(sender.sentMessages[0].Text, "<code>10:25</code>  Математичний аналіз <i>[Практ., Онлайн]</i>") {
 		t.Errorf("expected exact lesson line, got: %s", sender.sentMessages[0].Text)
 	}
 	// No URL was set -> reply markup must be nil
@@ -375,7 +375,7 @@ func TestMatchAlertWindowsAndMessages(t *testing.T) {
 	if !strings.Contains(sender.sentMessages[1].Text, "<blockquote>🔔 Почалась пара</blockquote>") {
 		t.Errorf("expected 'Почалась пара', got: %s", sender.sentMessages[1].Text)
 	}
-	if !strings.Contains(sender.sentMessages[1].Text, "<code>10:25</code>  Математичний аналіз <i>(прак.)</i>") {
+	if !strings.Contains(sender.sentMessages[1].Text, "<code>10:25</code>  Математичний аналіз <i>[Практ., Онлайн]</i>") {
 		t.Errorf("expected exact lesson line with start time 10:25, got: %s", sender.sentMessages[1].Text)
 	}
 
@@ -383,5 +383,71 @@ func TestMatchAlertWindowsAndMessages(t *testing.T) {
 	res, _ = d.Dispatch(ctx, time.Date(2026, 9, 4, 10, 32, 0, 0, loc))
 	if res.PersonalAlertsSent != 0 {
 		t.Errorf("expected 0 alerts at 10:32, got %d", res.PersonalAlertsSent)
+	}
+}
+
+func TestDispatcherOfflineLessonWithURL(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "test_alerts_offline.db")
+	if err := storage.Migrate(dbPath); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	db, err := storage.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	user, err := db.UpsertUser(ctx, 999333, nil, nil)
+	if err != nil {
+		t.Fatalf("upsert user: %v", err)
+	}
+
+	sender := &mockSender{}
+	d := alerts.NewDispatcher(db, nil, sender)
+
+	loc, _ := time.LoadLocation("Europe/Kyiv")
+	if loc == nil {
+		loc = time.FixedZone("EEST", 3*3600)
+	}
+
+	lessonDate := time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC)
+	err = db.ReplaceLessons(ctx, user.ID, []model.Lesson{
+		{
+			ID:          uuid.New(),
+			UserID:      user.ID,
+			Date:        lessonDate,
+			Week:        1,
+			Day:         5,
+			StartTime:   "10:25:00",
+			EndTime:     "12:00:00",
+			Subject:     "Фізика",
+			SubjectNorm: "фізика",
+			Tag:         "lec",
+			LocationRaw: "18-402",
+			TeacherRaw:  "Доц. Петренко",
+			IsRecurring: true,
+		},
+	}, model.EnrichmentFull, nil)
+	if err != nil {
+		t.Fatalf("replace lessons: %v", err)
+	}
+
+	// Set URL for offline lesson
+	_ = db.SetLessonURL(ctx, user.ID, "фізика", "lec", "https://zoom.us/j/123456789")
+
+	// Dispatch at 10:15 (10 mins before start)
+	_, err = d.Dispatch(ctx, time.Date(2026, 9, 4, 10, 15, 0, 0, loc))
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if len(sender.sentMessages) != 1 {
+		t.Fatalf("expected 1 alert, got %d", len(sender.sentMessages))
+	}
+	msg := sender.sentMessages[0]
+	expected := `<code>10:25</code>  Фізика <i><a href="https://zoom.us/j/123456789">[Лек., Оффлайн]</a></i>`
+	if !strings.Contains(msg.Text, expected) {
+		t.Errorf("expected %q in text, got: %s", expected, msg.Text)
 	}
 }

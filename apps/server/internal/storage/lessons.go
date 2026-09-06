@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -145,6 +146,44 @@ func (db *DB) SetLessonURL(ctx context.Context, userID uuid.UUID, subjectNorm, t
 	return nil
 }
 
+// SetLessonURLs atomically saves or updates multiple custom URLs for a user.
+// The urls map is keyed by "subject_norm|tag".
+func (db *DB) SetLessonURLs(ctx context.Context, userID uuid.UUID, urls map[string]string) error {
+	if len(urls) == 0 {
+		return nil
+	}
+	tx, err := db.SQL.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("beginning tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO user_lesson_urls (id, user_id, subject_norm, tag, url, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (user_id, subject_norm, tag) DO UPDATE
+		SET url = excluded.url, updated_at = excluded.updated_at
+	`)
+	if err != nil {
+		return fmt.Errorf("preparing insert: %w", err)
+	}
+	defer stmt.Close()
+
+	for key, u := range urls {
+		parts := strings.SplitN(key, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		subjectNorm, tag := parts[0], parts[1]
+		if _, err := stmt.ExecContext(ctx, uuid.New(), userID, subjectNorm, tag, u, now, now); err != nil {
+			return fmt.Errorf("saving lesson url for %s: %w", key, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
 // GetLessonURLs returns all stored custom URLs for user's lessons as a map keyed by "subject_norm|tag".
 func (db *DB) GetLessonURLs(ctx context.Context, userID uuid.UUID) (map[string]string, error) {
 	rows, err := db.SQL.QueryContext(ctx, `
@@ -221,8 +260,8 @@ func (db *DB) ClearURLPrompt(ctx context.Context, telegramID int64) error {
 	return nil
 }
 
-// GetUniqueScheduleLessons returns deduplicated online lessons from user_lessons,
-// excluding offline classes, and populated with existing custom URLs.
+// GetUniqueScheduleLessons returns deduplicated lessons from user_lessons,
+// populated with existing custom URLs and detected location kind.
 func (db *DB) GetUniqueScheduleLessons(ctx context.Context, userID uuid.UUID) ([]model.UniqueLesson, error) {
 	rows, err := db.SQL.QueryContext(ctx, `
 		SELECT subject, subject_norm, tag, location_raw, location_title
@@ -236,10 +275,10 @@ func (db *DB) GetUniqueScheduleLessons(ctx context.Context, userID uuid.UUID) ([
 	defer rows.Close()
 
 	type groupData struct {
-		subject     string
-		subjectNorm string
-		tag         string
-		hasOnline   bool
+		subject      string
+		subjectNorm  string
+		tag          string
+		locationKind string
 	}
 	groups := make(map[string]*groupData)
 	var groupKeys []string
@@ -251,28 +290,29 @@ func (db *DB) GetUniqueScheduleLessons(ctx context.Context, userID uuid.UUID) ([
 			return nil, fmt.Errorf("scanning unique lesson row: %w", err)
 		}
 		key := subjectNorm + "|" + tag
+
 		loc := locRaw
 		if locTitle != nil && *locTitle != "" {
 			loc = *locTitle
 		}
-		isOnline := model.IsOnline(loc)
+		kind := model.LocationKind(loc)
 
 		g, exists := groups[key]
 		if !exists {
 			g = &groupData{
-				subject:     subject,
-				subjectNorm: subjectNorm,
-				tag:         tag,
-				hasOnline:   isOnline,
+				subject:      subject,
+				subjectNorm:  subjectNorm,
+				tag:          tag,
+				locationKind: kind,
 			}
 			groups[key] = g
 			groupKeys = append(groupKeys, key)
 		} else {
-			if isOnline {
-				g.hasOnline = true
-			}
 			if g.subject == "" && subject != "" {
 				g.subject = subject
+			}
+			if g.locationKind != "Онлайн" && kind == "Онлайн" {
+				g.locationKind = "Онлайн"
 			}
 		}
 	}
@@ -288,15 +328,12 @@ func (db *DB) GetUniqueScheduleLessons(ctx context.Context, userID uuid.UUID) ([
 	var unique []model.UniqueLesson
 	for _, key := range groupKeys {
 		g := groups[key]
-		if !g.hasOnline {
-			continue
-		}
 		unique = append(unique, model.UniqueLesson{
-			Subject:     g.subject,
-			SubjectNorm: g.subjectNorm,
-			Tag:         g.tag,
-			IsOnline:    true,
-			URL:         urls[key],
+			Subject:      g.subject,
+			SubjectNorm:  g.subjectNorm,
+			Tag:          g.tag,
+			LocationKind: g.locationKind,
+			URL:          urls[key],
 		})
 	}
 

@@ -395,10 +395,10 @@ func (s *Service) GetUniqueGroupLessons(ctx context.Context, botGroupID uuid.UUI
 	}
 
 	type groupData struct {
-		subject     string
-		subjectNorm string
-		tag         string
-		hasOnline   bool
+		subject      string
+		subjectNorm  string
+		tag          string
+		locationKind string
 	}
 	groups := make(map[string]*groupData)
 	var groupKeys []string
@@ -409,29 +409,28 @@ func (s *Service) GetUniqueGroupLessons(ctx context.Context, botGroupID uuid.UUI
 				tag := engine.NormalizeTag(p.Tag)
 				norm := engine.NormalizeSubject(p.Name)
 				key := norm + "|" + tag
-
-				loc := ""
+				locStr := ""
 				if p.Location != nil {
-					loc = p.Location.Title
+					locStr = p.Location.Title
 				}
-				isOnline := model.IsOnline(loc)
+				kind := model.LocationKind(locStr)
 
 				g, exists := groups[key]
 				if !exists {
 					g = &groupData{
-						subject:     p.Name,
-						subjectNorm: norm,
-						tag:         tag,
-						hasOnline:   isOnline,
+						subject:      p.Name,
+						subjectNorm:  norm,
+						tag:          tag,
+						locationKind: kind,
 					}
 					groups[key] = g
 					groupKeys = append(groupKeys, key)
 				} else {
-					if isOnline {
-						g.hasOnline = true
-					}
 					if g.subject == "" && p.Name != "" {
 						g.subject = p.Name
+					}
+					if g.locationKind != "Онлайн" && kind == "Онлайн" {
+						g.locationKind = "Онлайн"
 					}
 				}
 			}
@@ -444,15 +443,12 @@ func (s *Service) GetUniqueGroupLessons(ctx context.Context, botGroupID uuid.UUI
 	var unique []model.UniqueLesson
 	for _, key := range groupKeys {
 		g := groups[key]
-		if !g.hasOnline {
-			continue
-		}
 		unique = append(unique, model.UniqueLesson{
-			Subject:     g.subject,
-			SubjectNorm: g.subjectNorm,
-			Tag:         g.tag,
-			IsOnline:    true,
-			URL:         urls[key],
+			Subject:      g.subject,
+			SubjectNorm:  g.subjectNorm,
+			Tag:          g.tag,
+			LocationKind: g.locationKind,
+			URL:          urls[key],
 		})
 	}
 
@@ -465,3 +461,55 @@ func (s *Service) GetUniqueGroupLessons(ctx context.Context, botGroupID uuid.UUI
 
 	return unique, nil
 }
+
+// SyncUserLessonURLsWithGroup synchronizes personal schedule lesson URLs with the URLs configured
+// for the given academic group.
+// It matches identical lessons:
+// 1. The lesson must appear in the user's personal schedule.
+// 2. The lesson must appear in the group's schedule.
+// 3. The lesson must have a non-empty URL configured in the group settings.
+// 4. The configured group URL must differ from the user's current URL.
+// Lessons without group URLs or not in group schedule are left untouched.
+// Lessons not in user's personal schedule are not added.
+// Returns the number of synced/replaced URLs.
+func (s *Service) SyncUserLessonURLsWithGroup(ctx context.Context, userID uuid.UUID, botGroupID uuid.UUID, academicGroupID int) (int, error) {
+	userLessons, err := s.db.GetUniqueScheduleLessons(ctx, userID)
+	if err != nil {
+		return 0, fmt.Errorf("fetching user lessons: %w", err)
+	}
+	if len(userLessons) == 0 {
+		return 0, nil
+	}
+
+	userLessonExists := make(map[string]bool, len(userLessons))
+	userLessonURLs := make(map[string]string, len(userLessons))
+	for _, ul := range userLessons {
+		key := ul.SubjectNorm + "|" + ul.Tag
+		userLessonExists[key] = true
+		userLessonURLs[key] = ul.URL
+	}
+
+	groupLessons, err := s.GetUniqueGroupLessons(ctx, botGroupID, academicGroupID)
+	if err != nil {
+		return 0, fmt.Errorf("fetching group lessons: %w", err)
+	}
+
+	urlsToSet := make(map[string]string)
+	for _, gl := range groupLessons {
+		key := gl.SubjectNorm + "|" + gl.Tag
+		if gl.URL != "" && userLessonExists[key] && userLessonURLs[key] != gl.URL {
+			urlsToSet[key] = gl.URL
+		}
+	}
+
+	if len(urlsToSet) == 0 {
+		return 0, nil
+	}
+
+	if err := s.db.SetLessonURLs(ctx, userID, urlsToSet); err != nil {
+		return 0, fmt.Errorf("updating user lesson urls: %w", err)
+	}
+
+	return len(urlsToSet), nil
+}
+

@@ -178,15 +178,20 @@ func TestFormatLessonsMenu(t *testing.T) {
 			Subject:     "Технології DevOps",
 			SubjectNorm: "технології devops",
 			Tag:         "lec",
-			IsOnline:    true,
 			URL:         "https://zoom.us/j/123",
 		},
 		{
 			Subject:     "Технології DevOps",
 			SubjectNorm: "технології devops",
 			Tag:         "prac",
-			IsOnline:    true,
 			URL:         "",
+		},
+		{
+			Subject:      "Фізика",
+			SubjectNorm:  "фізика",
+			Tag:          "lab",
+			LocationKind: "Оффлайн",
+			URL:          "https://meet.google.com/xyz",
 		},
 	}
 
@@ -199,5 +204,8 @@ func TestFormatLessonsMenu(t *testing.T) {
 	}
 	if !strings.Contains(out, "[Практ., Онлайн]") {
 		t.Errorf("expected plain badge for unlinked practice in menu output:\n%s", out)
+	}
+	if !strings.Contains(out, `<a href="https://meet.google.com/xyz">[Лаб., Оффлайн]</a>`) {
+		t.Errorf("expected link for offline lab in menu output:\n%s", out)
 	}
 }
