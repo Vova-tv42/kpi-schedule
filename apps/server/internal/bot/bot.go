@@ -114,6 +114,7 @@ func New(token string, svc *api.Service, db *storage.DB, botOpts ...*gotgbot.Bot
 	dispatcher.AddHandler(handlers.NewCommand("group_today", b.wrap("telegram_command", "/group_today", b.cmdGroupToday)))
 	dispatcher.AddHandler(handlers.NewCommand("group_tomorrow", b.wrap("telegram_command", "/group_tomorrow", b.cmdGroupTomorrow)))
 	dispatcher.AddHandler(handlers.NewCommand("group_week", b.wrap("telegram_command", "/group_week", b.cmdGroupWeek)))
+	dispatcher.AddHandler(handlers.NewCommand("group_url_sync", b.wrap("telegram_command", "/group_url_sync", b.cmdGroupURLSync)))
 	dispatcher.AddHandler(handlers.NewCommand("settings", b.wrap("telegram_command", "/settings", b.cmdSettings)))
 	dispatcher.AddHandler(handlers.NewCommand("issues", b.wrap("telegram_command", "/issues", b.cmdIssues)))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(navCallbackPrefix), b.wrap("telegram_callback", "nav", b.onNav)))
@@ -123,6 +124,7 @@ func New(token string, svc *api.Service, db *storage.DB, botOpts ...*gotgbot.Bot
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupCallbackPrefix), b.wrap("telegram_callback", "group", b.onGroup)))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupNavCallbackPrefix), b.wrap("telegram_callback", "group_nav", b.onGroupNav)))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupWeekCallbackPrefix), b.wrap("telegram_callback", "group_week", b.onGroupWeek)))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(groupSyncCallbackPrefix), b.wrap("telegram_callback", "group_sync", b.onGroupSync)))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix("settings:"), b.wrap("telegram_callback", "settings", b.onSettings)))
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(issuesCallbackPrefix), b.wrap("telegram_callback", "issues", b.onIssues)))
 	dispatcher.AddHandler(handlers.NewMessage(message.All, b.wrap("telegram_message", "text", b.onTextMessage)))
@@ -160,6 +162,7 @@ func (b *Bot) SetupCommands() error {
 		{Command: "group_today", Description: "Показати розклад групи на сьогодні"},
 		{Command: "group_tomorrow", Description: "Показати розклад групи на завтра"},
 		{Command: "group_week", Description: "Показати розклад групи на тиждень"},
+		{Command: "group_url_sync", Description: "Синхронізувати посилання з розкладу групи"},
 	}
 	if _, err := b.gbot.SetMyCommands(groupCommands, &gotgbot.SetMyCommandsOpts{
 		Scope: gotgbot.BotCommandScopeAllGroupChats{},
@@ -174,6 +177,7 @@ func (b *Bot) SetupCommands() error {
 		{Command: "group_today", Description: "Показати розклад групи на сьогодні"},
 		{Command: "group_tomorrow", Description: "Показати розклад групи на завтра"},
 		{Command: "group_week", Description: "Показати розклад групи на тиждень"},
+		{Command: "group_url_sync", Description: "Синхронізувати посилання з розкладу групи"},
 		{Command: "group", Description: "Керування академічною групою"},
 	}
 	if _, err := b.gbot.SetMyCommands(adminCommands, &gotgbot.SetMyCommandsOpts{
@@ -218,7 +222,7 @@ func (b *Bot) RegisterWebhook(webhookURL, secretToken string) error {
 	defer cancel()
 
 	// 0. Ensure commands are updated when commands configuration version changes
-	const currentCommandsVersion = "v4_issues_ua"
+	const currentCommandsVersion = "v5_group_url_sync"
 	if b.db != nil {
 		var cachedVer string
 		if ok, _ := b.db.CacheGet(ctx, "telegram_commands_version", 365*24*time.Hour, &cachedVer); !ok || cachedVer != currentCommandsVersion {

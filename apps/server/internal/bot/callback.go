@@ -30,6 +30,7 @@ const (
 	groupCallbackPrefix     = "grp:"   // group admin screens: list / new / view / edit / unbind / delete / bind
 	groupNavCallbackPrefix  = "gnav:"  // group schedule day screen: prev / today / next
 	groupWeekCallbackPrefix = "gweek:" // group schedule week screen: slots / today
+	groupSyncCallbackPrefix = "gsync:" // group URL sync: confirm / cancel
 	issuesCallbackPrefix    = "iss:"   // issues screens: menu / new / type / list / view / thread
 )
 
@@ -1131,4 +1132,77 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		return answerSilently(bot, cq)
 	}
 }
+
+// onGroupSync handles callbacks from the /group_url_sync confirmation prompt (gsync:...).
+func (b *Bot) onGroupSync(bot *gotgbot.Bot, ctx *ext.Context) error {
+	cq := ctx.CallbackQuery
+	action := strings.TrimPrefix(cq.Data, groupSyncCallbackPrefix)
+
+	parts := strings.SplitN(action, ":", 2)
+	if len(parts) != 2 {
+		return answerSilently(bot, cq)
+	}
+	act, callerIDStr := parts[0], parts[1]
+	callerID, err := strconv.ParseInt(callerIDStr, 10, 64)
+	if err != nil {
+		return answerSilently(bot, cq)
+	}
+
+	// Verify that the person who clicked the button is the one who initiated the sync
+	if cq.From.Id != callerID {
+		_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+			Text:      "⚠️ Ця дія призначена для іншого користувача. Щоб синхронізувати свої посилання, надішли /group_url_sync.",
+			ShowAlert: true,
+		})
+		return ansErr
+	}
+
+	// Always delete the confirmation prompt message from the group chat
+	if cq.Message != nil {
+		if _, delErr := bot.DeleteMessage(cq.Message.GetChat().Id, cq.Message.GetMessageId(), nil); delErr != nil {
+			slog.Warn("could not delete group sync confirm message", "error", delErr, "chat_id", cq.Message.GetChat().Id)
+		}
+	}
+	_ = answerSilently(bot, cq)
+
+	if act == "cancel" {
+		return nil
+	}
+
+	if act == "confirm" {
+		reqCtx := context.Background()
+		chatID := cq.Message.GetChat().Id
+		group, err := b.db.GetBotGroupByChatID(reqCtx, chatID)
+		if err != nil {
+			slog.Error("fetching group for sync confirmation", "error", err, "chat_id", chatID)
+			_, sendErr := bot.SendMessage(chatID, genericErrorText, nil)
+			return sendErr
+		}
+
+		user, err := b.resolveUser(reqCtx, cq.From.Id)
+		if err != nil {
+			slog.Error("resolving user for sync confirmation", "error", err, "telegram_id", cq.From.Id)
+			_, sendErr := bot.SendMessage(chatID, genericErrorText, nil)
+			return sendErr
+		}
+
+		updatedCount, err := b.svc.SyncUserLessonURLsWithGroup(reqCtx, user.ID, group.ID, group.AcademicGroupID)
+		if err != nil {
+			slog.Error("syncing user lesson urls with group", "error", err, "telegram_id", cq.From.Id, "group_id", group.ID)
+			_, sendErr := bot.SendMessage(chatID, genericErrorText, nil)
+			return sendErr
+		}
+
+		callerName := formatUserName(&cq.From)
+		successMsg := formatGroupSyncSuccess(callerName, group.AcademicGroupName, updatedCount)
+		_, sendErr := bot.SendMessage(chatID, successMsg, &gotgbot.SendMessageOpts{
+			ParseMode:          "HTML",
+			LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
+		})
+		return sendErr
+	}
+
+	return nil
+}
+
 

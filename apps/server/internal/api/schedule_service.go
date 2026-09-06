@@ -448,3 +448,51 @@ func (s *Service) GetUniqueGroupLessons(ctx context.Context, botGroupID uuid.UUI
 
 	return unique, nil
 }
+
+// SyncUserLessonURLsWithGroup synchronizes personal schedule lesson URLs with the URLs configured
+// for the given academic group.
+// It matches identical lessons:
+// 1. The lesson must appear in the user's personal schedule.
+// 2. The lesson must appear in the group's schedule.
+// 3. The lesson must have a non-empty URL configured in the group settings.
+// Lessons without group URLs or not in group schedule are left untouched.
+// Lessons not in user's personal schedule are not added.
+// Returns the number of synced/replaced URLs.
+func (s *Service) SyncUserLessonURLsWithGroup(ctx context.Context, userID uuid.UUID, botGroupID uuid.UUID, academicGroupID int) (int, error) {
+	userLessons, err := s.db.GetUniqueScheduleLessons(ctx, userID)
+	if err != nil {
+		return 0, fmt.Errorf("fetching user lessons: %w", err)
+	}
+	if len(userLessons) == 0 {
+		return 0, nil
+	}
+
+	userLessonKeys := make(map[string]bool, len(userLessons))
+	for _, ul := range userLessons {
+		userLessonKeys[ul.SubjectNorm+"|"+ul.Tag] = true
+	}
+
+	groupLessons, err := s.GetUniqueGroupLessons(ctx, botGroupID, academicGroupID)
+	if err != nil {
+		return 0, fmt.Errorf("fetching group lessons: %w", err)
+	}
+
+	urlsToSet := make(map[string]string)
+	for _, gl := range groupLessons {
+		key := gl.SubjectNorm + "|" + gl.Tag
+		if gl.URL != "" && userLessonKeys[key] {
+			urlsToSet[key] = gl.URL
+		}
+	}
+
+	if len(urlsToSet) == 0 {
+		return 0, nil
+	}
+
+	if err := s.db.SetLessonURLs(ctx, userID, urlsToSet); err != nil {
+		return 0, fmt.Errorf("updating user lesson urls: %w", err)
+	}
+
+	return len(urlsToSet), nil
+}
+

@@ -981,3 +981,31 @@ func userSettingsKeyboard(notificationsEnabled bool) gotgbot.InlineKeyboardMarku
 	}
 }
 
+func formatGroupSyncConfirm(callerName, groupName string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "🔄 <b>Синхронізація посилань з групою %s</b>\n\n", html.EscapeString(groupName))
+	fmt.Fprintf(&b, "👤 <b>%s</b>, ця дія перезапише встановлені тобою посилання у персональному розкладі посиланнями з налаштувань групи <b>%s</b> (якщо вони були тобою встановлені).\n\n", html.EscapeString(callerName), html.EscapeString(groupName))
+	b.WriteString("Будуть замінені лише посилання для спільних занять, які налаштовані в конфігурації цієї групи. Посилання для інших занять залишаться без змін.\n\n")
+	b.WriteString("Продовжити?")
+	return b.String()
+}
+
+func groupSyncKeyboard(callerID int64) gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{Text: "✅ Продовжити", CallbackData: fmt.Sprintf("%sconfirm:%d", groupSyncCallbackPrefix, callerID)},
+				{Text: "❌ Скасувати", CallbackData: fmt.Sprintf("%scancel:%d", groupSyncCallbackPrefix, callerID)},
+			},
+		},
+	}
+}
+
+func formatGroupSyncSuccess(callerName, groupName string, updatedCount int) string {
+	if updatedCount == 0 {
+		return fmt.Sprintf("ℹ️ <b>%s</b>, посилання синхронізовано з налаштуваннями групи <b>%s</b>. Нових посилань для твоїх занять у групі не знайдено.", html.EscapeString(callerName), html.EscapeString(groupName))
+	}
+	return fmt.Sprintf("✅ <b>%s</b>, посилання на онлайн-заняття успішно синхронізовано з налаштуваннями групи <b>%s</b>! (Оновлено занять: %d)", html.EscapeString(callerName), html.EscapeString(groupName), updatedCount)
+}
+
+

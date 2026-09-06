@@ -2,7 +2,7 @@
 
 > **Runtime note.** The bot is **not a separate service**. It runs inside the single Go backend (`apps/server/internal/bot/`, using `gotgbot/v2`) and shares its process, database, cache, and scheduler. It calls `internal/api.Service` and `internal/storage.DB` directly, in-process — not over HTTP with `X-Internal-Token`, even though the `/api/v1/auth/pair/generate` and `/api/v1/schedule/*` endpoints exist and are internal-token-protected for other internal/admin callers. Updates arrive via webhook (`POST /api/v1/telegram/webhook`), authenticated by `secret_token` via the `X-Telegram-Bot-Api-Secret-Token` header and exempt from IP rate limiting (see `docs/architecture/error-handling-resilience.md` §5). Both local development (via ngrok/tunnel) and production use webhooks — no long polling is used. See [`docs/project-repository.md` §4.1](../project-repository.md) for the rationale.
 >
-> **Implementation status.** `/start`, `/install`, `/link`, `/today`, `/tomorrow`, `/week`, `/urls`, `/group`, `/group_today`, `/group_tomorrow`, `/group_week`, and `/settings` are implemented. `/help`, morning reminders, and the stale-schedule background check are **not implemented yet** — see §6.
+> **Implementation status.** `/start`, `/install`, `/link`, `/today`, `/tomorrow`, `/week`, `/urls`, `/group`, `/group_today`, `/group_tomorrow`, `/group_week`, `/group_url_sync`, and `/settings` are implemented. `/help`, morning reminders, and the stale-schedule background check are **not implemented yet** — see §6.
 
 ## 1. Bot Purpose & Features
 
@@ -32,6 +32,7 @@ Commands are scoped via Telegram's `setMyCommands` API (`BotCommandScopeAllPriva
 | `/group_today` (`/group-today`) | Groups only | `Показати розклад групи на сьогодні` | ✅ Implemented | Shows today's overall group schedule fetched directly from the secondary Campus API (`api.campus.kpi.ua`). |
 | `/group_tomorrow` (`/group-tomorrow`) | Groups only | `Показати розклад групи на завтра` | ✅ Implemented | Shows tomorrow's overall group schedule fetched directly from the secondary Campus API (`api.campus.kpi.ua`). |
 | `/group_week` (`/group-week`) | Groups only | `Показати розклад групи на тиждень` | ✅ Implemented | Shows one academic week of the overall group schedule from the secondary Campus API. |
+| `/group_url_sync` (`/group-url-sync`) | Groups only | `Синхронізувати посилання з розкладу групи` | ✅ Implemented | Synchronizes the caller's personal schedule lesson URLs with the URLs configured for the academic group bound to the chat (see §3.5). Prompts with a confirmation screen (Proceed/Cancel) that auto-deletes on action; replaces only identical lessons configured in the group settings. |
 | `/settings` | DM only | `Налаштування сповіщень` | ✅ Implemented | Manage lesson reminders (10m before and at start) with in-place toggle. |
 | `/issues` | DM only | `Повідомити про помилку або запропонувати ідею` | ✅ Implemented | Files bug reports and feature requests through a guided type → title → description wizard, and lists the caller's own issues with their triage status. See [issues.md](issues.md). |
 | `/help` | Both | `Довідка та інструкції` | Not yet built | FAQ, troubleshooting, and links to web extension. |
@@ -252,6 +253,19 @@ To prevent chat flooding, unauthorized modifications, and permission leaks:
 - The bot retrieves the group's timetable from Campus API, lists distinct disciplines, and allows adding, editing, or deleting conference URLs (Zoom, Meet, Teams, etc.).
 - Active URL prompts are persisted in `user_group_prompts` with auto-deletion of student text messages.
 - Once configured, group schedule messages (`/group_today`, `/group_tomorrow`, and `/group_week`) render clickable `[Онлайн]` links pointing to the configured meetings.
+
+#### 6. Group URL Synchronization (`/group_url_sync`)
+- Available and visible exclusively in Telegram group chats (`BotCommandScopeAllGroupChats` and `BotCommandScopeAllChatAdministrators`). Aliased to `/group-url-sync`.
+- **Group Connection Check**: If the chat is not connected to any academic group in the bot database, returns `⚙️ Для цього чату ще не налаштовано академічну групу...`.
+- **Account & Schedule Verification**: Checks whether the caller is linked to the bot and has pushed schedule data. If not, prompts the student to link or sync before synchronizing URLs.
+- **Confirmation Screen**: Displays an interactive menu warning that proceeding will override matching lesson URLs in their personal schedule with the group's configured URLs. Features `[ ✅ Продовжити ]` and `[ ❌ Скасувати ]` buttons.
+- **Caller Isolation**: Buttons are bound to the invoking user (`gsync:confirm:<callerID>`). If another group member taps a button, a personal popup alert is displayed without altering the prompt.
+- **Zero Chat Pollution**: Tapping either button immediately deletes the confirmation menu message from the group chat (`deleteMessage`).
+- **Selective Synchronization**:
+  - Replaces only **identical lessons**: the lesson `(subject_norm, tag)` must appear in both the student's personal schedule and the group's schedule.
+  - Replaces only lessons that have a configured URL in the group settings (`bot_group_lesson_urls`). Lessons without a group URL are left untouched.
+  - Personal elective courses or courses outside the group schedule are never altered.
+  - Upon selecting `Proceed`, sends a confirmation message to the group: `✅ <Користувач>, посилання на онлайн-заняття успішно синхронізовано з налаштуваннями групи <Група>!`.
 
 ---
 

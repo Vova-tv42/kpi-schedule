@@ -725,6 +725,55 @@ func (b *Bot) cmdGroupWeek(bot *gotgbot.Bot, ctx *ext.Context) error {
 	return sendScreen(bot, ctx.EffectiveChat.Id, text, kb, hasKeyboard)
 }
 
+func (b *Bot) cmdGroupURLSync(bot *gotgbot.Bot, ctx *ext.Context) error {
+	if !isGroupChat(ctx.EffectiveChat) {
+		_, err := bot.SendMessage(ctx.EffectiveChat.Id, "⚠️ Ця команда доступна лише у групових чатах.", nil)
+		return err
+	}
+
+	reqCtx := context.Background()
+	group, err := b.db.GetBotGroupByChatID(reqCtx, ctx.EffectiveChat.Id)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, "⚙️ Для цього чату ще не налаштовано академічну групу. Адміністратор може налаштувати її за допомогою команди /group.", nil)
+			return sendErr
+		}
+		slog.Error("fetching group for /group_url_sync", "error", err, "chat_id", ctx.EffectiveChat.Id)
+		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, genericErrorText, nil)
+		return sendErr
+	}
+
+	callerName := formatUserName(ctx.EffectiveUser)
+	user, err := b.resolveUser(reqCtx, ctx.EffectiveUser.Id)
+	if err != nil {
+		if errors.Is(err, ErrNotLinked) {
+			msg := fmt.Sprintf("🔒 <b>%s</b>, твій акаунт ще не прив'язано до бота. Напиши боту в особисті повідомлення /start, щоб підключити розклад.", html.EscapeString(callerName))
+			_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, msg, &gotgbot.SendMessageOpts{ParseMode: "HTML"})
+			return sendErr
+		}
+		slog.Error("resolving user for /group_url_sync", "error", err, "telegram_id", ctx.EffectiveUser.Id)
+		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, genericErrorText, nil)
+		return sendErr
+	}
+
+	hasData, _, _, sErr := b.svc.ScheduleFreshness(reqCtx, user)
+	if sErr != nil || !hasData {
+		msg := fmt.Sprintf("📭 <b>%s</b>, твій розклад ще не синхронізовано з браузерного розширення.", html.EscapeString(callerName))
+		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, msg, &gotgbot.SendMessageOpts{ParseMode: "HTML"})
+		return sendErr
+	}
+
+	text := formatGroupSyncConfirm(callerName, group.AcademicGroupName)
+	kb := groupSyncKeyboard(ctx.EffectiveUser.Id)
+	_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, text, &gotgbot.SendMessageOpts{
+		ParseMode:          "HTML",
+		ReplyMarkup:        kb,
+		LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
+	})
+	return sendErr
+}
+
+
 func (b *Bot) handleGroupInput(bot *gotgbot.Bot, ctx *ext.Context, prompt *model.GroupPrompt, rawInput string) error {
 	reqCtx := context.Background()
 
@@ -942,6 +991,9 @@ func (b *Bot) onTextMessage(bot *gotgbot.Bot, ctx *ext.Context) error {
 		}
 		if strings.HasPrefix(msg.Text, "/group-week") {
 			return b.cmdGroupWeek(bot, ctx)
+		}
+		if strings.HasPrefix(msg.Text, "/group-url-sync") {
+			return b.cmdGroupURLSync(bot, ctx)
 		}
 	}
 
