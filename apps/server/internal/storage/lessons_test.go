@@ -204,7 +204,7 @@ func TestGetUniqueScheduleLessonsFiltering(t *testing.T) {
 			Tag:         "lec",
 			LocationRaw: "Онлайн Zoom",
 		},
-		// 4. Offline lecture for Physics in 18th building -> MUST BE EXCLUDED
+		// 4. Offline lecture for Physics in 18th building -> MUST BE INCLUDED
 		{
 			Date:        time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC),
 			Week:        1,
@@ -226,22 +226,28 @@ func TestGetUniqueScheduleLessonsFiltering(t *testing.T) {
 		t.Fatalf("getting unique lessons: %v", err)
 	}
 
-	// Should contain exactly 2 lessons: DevOps (lec) and DevOps (prac).
-	// Physics (lec, offline) must be filtered out.
-	if len(unique) != 2 {
-		t.Fatalf("expected 2 unique online lessons, got %d", len(unique))
+	// Should contain 3 unique lessons: DevOps (lec), DevOps (prac), and Physics (lec).
+	// Physics (lec, offline) must be included so students can configure fallback URLs.
+	if len(unique) != 3 {
+		t.Fatalf("expected 3 unique lessons (including offline), got %d", len(unique))
 	}
 
+	foundPhysics := false
 	tags := map[string]bool{}
 	for _, u := range unique {
-		if u.Subject != "Технології DevOps" {
-			t.Errorf("unexpected subject: %q", u.Subject)
+		if u.Subject == "Технології DevOps" {
+			tags[u.Tag] = true
 		}
-		tags[u.Tag] = true
+		if u.Subject == "Фізика" && u.Tag == "lec" {
+			foundPhysics = true
+		}
 	}
 
 	if !tags["lec"] || !tags["prac"] {
-		t.Errorf("expected both 'lec' and 'prac' to be present separately, got: %v", tags)
+		t.Errorf("expected both 'lec' and 'prac' for DevOps to be present separately, got: %v", tags)
+	}
+	if !foundPhysics {
+		t.Errorf("expected Physics (lec, offline) to be present in unique lessons")
 	}
 }
 

@@ -398,7 +398,6 @@ func (s *Service) GetUniqueGroupLessons(ctx context.Context, botGroupID uuid.UUI
 		subject     string
 		subjectNorm string
 		tag         string
-		hasOnline   bool
 	}
 	groups := make(map[string]*groupData)
 	var groupKeys []string
@@ -410,29 +409,17 @@ func (s *Service) GetUniqueGroupLessons(ctx context.Context, botGroupID uuid.UUI
 				norm := engine.NormalizeSubject(p.Name)
 				key := norm + "|" + tag
 
-				loc := ""
-				if p.Location != nil {
-					loc = p.Location.Title
-				}
-				isOnline := model.IsOnline(loc)
-
 				g, exists := groups[key]
 				if !exists {
 					g = &groupData{
 						subject:     p.Name,
 						subjectNorm: norm,
 						tag:         tag,
-						hasOnline:   isOnline,
 					}
 					groups[key] = g
 					groupKeys = append(groupKeys, key)
-				} else {
-					if isOnline {
-						g.hasOnline = true
-					}
-					if g.subject == "" && p.Name != "" {
-						g.subject = p.Name
-					}
+				} else if g.subject == "" && p.Name != "" {
+					g.subject = p.Name
 				}
 			}
 		}
@@ -444,14 +431,10 @@ func (s *Service) GetUniqueGroupLessons(ctx context.Context, botGroupID uuid.UUI
 	var unique []model.UniqueLesson
 	for _, key := range groupKeys {
 		g := groups[key]
-		if !g.hasOnline {
-			continue
-		}
 		unique = append(unique, model.UniqueLesson{
 			Subject:     g.subject,
 			SubjectNorm: g.subjectNorm,
 			Tag:         g.tag,
-			IsOnline:    true,
 			URL:         urls[key],
 		})
 	}

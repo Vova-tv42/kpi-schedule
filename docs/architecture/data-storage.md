@@ -137,9 +137,9 @@ CREATE INDEX idx_user_lesson_urls_user ON user_lesson_urls (user_id);
   - `tag`: Distinguishes between lectures (`"lec"`), practices/seminars (`"prac"`), and labs (`"lab"`).
     This allows students to assign distinct meeting links to lectures and practices of the same discipline.
 - **Online vs. Offline Handling**:
-  `model.LocationKind` inspects raw and enriched location strings. Offline classes (e.g. rooms like `"18-402"`)
-  are automatically excluded from the `/urls` configuration menu, preventing useless URL prompts for
-  on-campus classes.
+  Both online and offline classes (e.g. rooms like `"18-402"`) are included in the `/urls` configuration
+  menu. In practice, in-person classes may be cancelled and moved online (e.g. due to air raid alerts or
+  remote study days), so students and group admins can configure fallback conference URLs for any lesson.
 
 #### Table `user_url_prompts`
 ```sql

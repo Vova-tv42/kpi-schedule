@@ -154,7 +154,7 @@ the extension in another tab and then goes back sees the updated screen.
 ### 3.4 Lesson URLs Interactive Menu (`/urls`)
 
 Allows students to associate video conference links (Zoom, Google Meet, Teams, etc.) with their
-online lessons.
+lessons (including offline classes in case they are cancelled or moved online).
 
 #### Key Principles:
 1. **Deduplication & Refresh Resilience**:
@@ -162,9 +162,10 @@ online lessons.
    - Lectures (`tag: "lec"`) and practices (`tag: "prac"`) are distinct items with separate URLs.
    - URLs are stored in a dedicated table (`user_lesson_urls`), so they survive full schedule
      re-syncs and replacements from the browser extension.
-2. **Offline Exclusion**:
-   - Classes determined to be in-person/offline (`[... , Оффлайн]`) are excluded from the editable
-     lessons menu.
+2. **All Lessons Configurable (Online & Offline)**:
+   - Both online and in-person/offline classes are included in the editable lessons menu. Because offline
+     classes may unexpectedly be cancelled or moved online (e.g. air alerts, remote study days), students
+     and group admins can configure fallback conference URLs for any lesson.
 3. **Zero Chat Pollution (Auto-Deletion)**:
    - When a student taps a lesson button, the interactive menu message edits in-place to prompt for the URL.
    - Any message the user sends during this active prompt is **immediately deleted** via `deleteMessage`

@@ -263,7 +263,7 @@ func formatLessonsMenu(lessons []model.UniqueLesson, notice string) string {
 	}
 
 	if len(lessons) == 0 {
-		b.WriteString("📭 У твоєму розкладі не знайдено онлайн-занять для додавання посилань.\n")
+		b.WriteString("📭 У твоєму розкладі не знайдено занять для додавання посилань.\n")
 		return b.String()
 	}
 

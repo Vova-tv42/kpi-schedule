@@ -121,7 +121,7 @@ In Telegram, message your bot:
 /link    → a 6-digit pairing code, valid 10 minutes
 /today   → day schedule with ◀️ / 📅 Сьогодні / ▶️ buttons once linked
 /week    → one academic week, with previous/current/next week slots
-/urls    → interactive menu to add, edit, or delete video conference URLs for online lessons
+/urls    → interactive menu to add, edit, or delete video conference URLs for lessons (including offline lessons)
 ```
 
 Every button edits the same message in place rather than sending a new one — confirm no new

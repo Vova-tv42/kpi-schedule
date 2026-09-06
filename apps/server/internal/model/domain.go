@@ -109,7 +109,6 @@ type UniqueLesson struct {
 	Subject     string
 	SubjectNorm string
 	Tag         string
-	IsOnline    bool
 	URL         string
 }
 

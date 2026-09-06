@@ -178,14 +178,12 @@ func TestFormatLessonsMenu(t *testing.T) {
 			Subject:     "Технології DevOps",
 			SubjectNorm: "технології devops",
 			Tag:         "lec",
-			IsOnline:    true,
 			URL:         "https://zoom.us/j/123",
 		},
 		{
 			Subject:     "Технології DevOps",
 			SubjectNorm: "технології devops",
 			Tag:         "prac",
-			IsOnline:    true,
 			URL:         "",
 		},
 	}

@@ -221,11 +221,11 @@ func (db *DB) ClearURLPrompt(ctx context.Context, telegramID int64) error {
 	return nil
 }
 
-// GetUniqueScheduleLessons returns deduplicated online lessons from user_lessons,
-// excluding offline classes, and populated with existing custom URLs.
+// GetUniqueScheduleLessons returns deduplicated lessons from user_lessons,
+// populated with existing custom URLs.
 func (db *DB) GetUniqueScheduleLessons(ctx context.Context, userID uuid.UUID) ([]model.UniqueLesson, error) {
 	rows, err := db.SQL.QueryContext(ctx, `
-		SELECT subject, subject_norm, tag, location_raw, location_title
+		SELECT subject, subject_norm, tag
 		FROM user_lessons
 		WHERE user_id = ?
 		ORDER BY subject, tag
@@ -239,23 +239,16 @@ func (db *DB) GetUniqueScheduleLessons(ctx context.Context, userID uuid.UUID) ([
 		subject     string
 		subjectNorm string
 		tag         string
-		hasOnline   bool
 	}
 	groups := make(map[string]*groupData)
 	var groupKeys []string
 
 	for rows.Next() {
-		var subject, subjectNorm, tag, locRaw string
-		var locTitle *string
-		if err := rows.Scan(&subject, &subjectNorm, &tag, &locRaw, &locTitle); err != nil {
+		var subject, subjectNorm, tag string
+		if err := rows.Scan(&subject, &subjectNorm, &tag); err != nil {
 			return nil, fmt.Errorf("scanning unique lesson row: %w", err)
 		}
 		key := subjectNorm + "|" + tag
-		loc := locRaw
-		if locTitle != nil && *locTitle != "" {
-			loc = *locTitle
-		}
-		isOnline := model.IsOnline(loc)
 
 		g, exists := groups[key]
 		if !exists {
@@ -263,17 +256,11 @@ func (db *DB) GetUniqueScheduleLessons(ctx context.Context, userID uuid.UUID) ([
 				subject:     subject,
 				subjectNorm: subjectNorm,
 				tag:         tag,
-				hasOnline:   isOnline,
 			}
 			groups[key] = g
 			groupKeys = append(groupKeys, key)
-		} else {
-			if isOnline {
-				g.hasOnline = true
-			}
-			if g.subject == "" && subject != "" {
-				g.subject = subject
-			}
+		} else if g.subject == "" && subject != "" {
+			g.subject = subject
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -288,14 +275,10 @@ func (db *DB) GetUniqueScheduleLessons(ctx context.Context, userID uuid.UUID) ([
 	var unique []model.UniqueLesson
 	for _, key := range groupKeys {
 		g := groups[key]
-		if !g.hasOnline {
-			continue
-		}
 		unique = append(unique, model.UniqueLesson{
 			Subject:     g.subject,
 			SubjectNorm: g.subjectNorm,
 			Tag:         g.tag,
-			IsOnline:    true,
 			URL:         urls[key],
 		})
 	}

@@ -26,3 +26,10 @@ All AI agents working on this codebase must adhere to the following documentatio
 
 4. **Zero Tolerance for Stale Docs**:
    - Outdated documentation is considered a defect. Always verify that code changes do not contradict existing documentation.
+
+---
+
+## Language
+
+Everything must be written in English, except for bot UI. Any text, button and other UI elements must be written in Ukrainian. 
+Only the commands that the bot accepts must be written in English.

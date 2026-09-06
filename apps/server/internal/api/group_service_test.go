@@ -55,6 +55,12 @@ func TestGroupLessonsURLsAndBuildGroupDay(t *testing.T) {
 					Tag:  "prac",
 					Time: "10:25:00",
 				},
+				{
+					Name: "Фізика",
+					Tag:  "lec",
+					Time: "12:20:00",
+					Location: &campus.Location{Title: "18-402"},
+				},
 			},
 		},
 	}
@@ -72,18 +78,25 @@ func TestGroupLessonsURLsAndBuildGroupDay(t *testing.T) {
 		t.Fatalf("creating bot group: %v", err)
 	}
 
-	// Initially no URLs
+	// Initially no URLs, should include all 3 lessons (including offline Physics)
 	unique, err := svc.GetUniqueGroupLessons(ctx, botGroup.ID, botGroup.AcademicGroupID)
 	if err != nil {
 		t.Fatalf("GetUniqueGroupLessons: %v", err)
 	}
-	if len(unique) != 2 {
-		t.Fatalf("expected 2 unique lessons, got: %d", len(unique))
+	if len(unique) != 3 {
+		t.Fatalf("expected 3 unique lessons, got: %d", len(unique))
 	}
+	foundPhysics := false
 	for _, u := range unique {
 		if u.URL != "" {
 			t.Errorf("expected empty URL initially, got: %s", u.URL)
 		}
+		if u.Subject == "Фізика" && u.Tag == "lec" {
+			foundPhysics = true
+		}
+	}
+	if !foundPhysics {
+		t.Errorf("expected offline Physics (lec) to be present in unique group lessons")
 	}
 
 	// Set URL for Programming (lec)
@@ -116,8 +129,8 @@ func TestGroupLessonsURLsAndBuildGroupDay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildGroupDay: %v", err)
 	}
-	if len(dayView.Lessons) != 2 {
-		t.Fatalf("expected 2 lessons in day view, got: %d", len(dayView.Lessons))
+	if len(dayView.Lessons) != 3 {
+		t.Fatalf("expected 3 lessons in day view, got: %d", len(dayView.Lessons))
 	}
 	progLesson := dayView.Lessons[0]
 	if progLesson.Name != "Програмування" || progLesson.URL != testURL {
