@@ -131,7 +131,7 @@ func shortDate(date string) string {
 	return t.Format("02.01")
 }
 
-// formatLessonMode renders "[Лек.|Практ., Онлайн|Оффлайн]" after a lesson name.
+// formatLessonMode renders "[Лек.|Практ., Онлайн|Офлайн]" after a lesson name.
 // If url is provided, the text is wrapped in an HTML link.
 func formatLessonMode(tag, location, url string) string {
 	kind := model.LocationKind(location)
@@ -255,7 +255,7 @@ func formatWeek(w weekInfo, offset int, group *string) string {
 
 func formatLessonsMenu(lessons []model.UniqueLesson, notice string) string {
 	var b strings.Builder
-	b.WriteString("🔗 <b>Посилання на онлайн-заняття</b>\n\n")
+	b.WriteString("🔗 <b>Посилання на заняття</b>\n\n")
 
 	if notice != "" {
 		b.WriteString(notice)
@@ -280,6 +280,22 @@ func formatLessonsMenu(lessons []model.UniqueLesson, notice string) string {
 	return b.String()
 }
 
+func formatLessonButtonText(prefix, title, tag, locationKind string) string {
+	abbr := tagAbbr(tag)
+	isOffline := locationKind == "Офлайн" || locationKind == "Оффлайн"
+
+	var badge string
+	if abbr != "" && isOffline {
+		badge = fmt.Sprintf(" (%s, Офлайн)", abbr)
+	} else if abbr != "" {
+		badge = fmt.Sprintf(" (%s)", abbr)
+	} else if isOffline {
+		badge = " (Офлайн)"
+	}
+
+	return fmt.Sprintf("%s%s%s", prefix, title, badge)
+}
+
 func urlsKeyboard(lessons []model.UniqueLesson) gotgbot.InlineKeyboardMarkup {
 	var rows [][]gotgbot.InlineKeyboardButton
 	for _, l := range lessons {
@@ -292,7 +308,7 @@ func urlsKeyboard(lessons []model.UniqueLesson) gotgbot.InlineKeyboardMarkup {
 		if len(runes) > 30 {
 			title = string(runes[:27]) + "..."
 		}
-		btnText := fmt.Sprintf("%s%s (%s)", prefix, title, tagAbbr(l.Tag))
+		btnText := formatLessonButtonText(prefix, title, l.Tag, l.LocationKind)
 		rows = append(rows, []gotgbot.InlineKeyboardButton{
 			{Text: btnText, CallbackData: urlsCallbackPrefix + "edit:" + lessonHash(l.SubjectNorm, l.Tag)},
 		})
@@ -907,7 +923,7 @@ func formatUserName(u *gotgbot.User) string {
 
 func formatGroupLessonsMenu(groupName string, lessons []model.UniqueLesson, notice string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "🔗 <b>Посилання на онлайн-заняття групи %s</b>\n\n", html.EscapeString(groupName))
+	fmt.Fprintf(&b, "🔗 <b>Посилання на заняття групи %s</b>\n\n", html.EscapeString(groupName))
 
 	if notice != "" {
 		b.WriteString(notice)
@@ -944,7 +960,7 @@ func groupURLsKeyboard(groupID string, lessons []model.UniqueLesson) gotgbot.Inl
 		if len(runes) > 30 {
 			title = string(runes[:27]) + "..."
 		}
-		btnText := fmt.Sprintf("%s%s (%s)", prefix, title, tagAbbr(l.Tag))
+		btnText := formatLessonButtonText(prefix, title, l.Tag, l.LocationKind)
 		rows = append(rows, []gotgbot.InlineKeyboardButton{
 			{Text: btnText, CallbackData: fmt.Sprintf("%surledit:%s:%s", groupCallbackPrefix, groupID, lessonHash(l.SubjectNorm, l.Tag))},
 		})

@@ -124,7 +124,7 @@ type URLPrompt struct {
 	UpdatedAt       time.Time
 }
 
-// LocationKind returns "Онлайн" or "Оффлайн" based on location text.
+// LocationKind returns "Онлайн" or "Офлайн" based on location text.
 func LocationKind(location string) string {
 	if location == "" {
 		return "Онлайн"
@@ -137,7 +137,7 @@ func LocationKind(location string) string {
 		strings.HasPrefix(lower, "https://") {
 		return "Онлайн"
 	}
-	return "Оффлайн"
+	return "Офлайн"
 }
 
 // IsOnline reports whether a location represents an online lesson.

@@ -446,7 +446,7 @@ func TestDispatcherOfflineLessonWithURL(t *testing.T) {
 		t.Fatalf("expected 1 alert, got %d", len(sender.sentMessages))
 	}
 	msg := sender.sentMessages[0]
-	expected := `<code>10:25</code>  Фізика <i><a href="https://zoom.us/j/123456789">[Лек., Оффлайн]</a></i>`
+	expected := `<code>10:25</code>  Фізика <i><a href="https://zoom.us/j/123456789">[Лек., Офлайн]</a></i>`
 	if !strings.Contains(msg.Text, expected) {
 		t.Errorf("expected %q in text, got: %s", expected, msg.Text)
 	}

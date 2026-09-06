@@ -47,7 +47,7 @@ Commands are scoped via Telegram's `setMyCommands` API (`BotCommandScopeAllPriva
 ```text
 📅 Розклад на 02.09 (Вівторок)
 
-08:30 Процеси розробки вбудованого ПЗ [Лек., Оффлайн]
+08:30 Процеси розробки вбудованого ПЗ [Лек., Офлайн]
 Викладач: Гуменний Д. О.
 
 10:25 Технології DevOps [Практ., Онлайн]    ← clickable link if URL added
@@ -63,7 +63,7 @@ to. There is no separate "refresh" button: every render re-reads storage, so the
 always fresh — tapping 📅 Сьогодні while already on today is the refresh. The date is
 day/month only (no year) and the week/group summary row is gone entirely — a student
 already knows their own group, and the parity shows up on the `/week` screen. The
-room/online-meeting detail is formatted as `[Лек.|Практ., Онлайн|Оффлайн]`: when a URL
+room/online-meeting detail is formatted as `[Лек.|Практ., Онлайн|Офлайн]`: when a URL
 is available for this online lesson, the text is wrapped with an HTML link `<a href="...">...</a>`
 so students can tap it directly to join.
 
@@ -81,7 +81,7 @@ block for six days would not fit a Telegram message):
 12:20 Компоненти програмної інженерії. Частина 4 [Лек., Онлайн]
 
 ▎Середа - Сьогодні
-08:30 Процеси розробки вбудованого ПЗ [Практ., Оффлайн]
+08:30 Процеси розробки вбудованого ПЗ [Практ., Офлайн]
 16:10 Основи розробки трансляторів [Практ., Онлайн]
 
 [ ◀️ Минулий ]  [ ✅ Поточний ]  [ Наступний ▶️ ]
@@ -92,7 +92,7 @@ block for six days would not fit a Telegram message):
 (`▎…`) is a native Telegram `<blockquote>` — plain-text approximations here for
 readability.)
 
-Each lesson displays its `[Лек.|Практ., Онлайн|Оффлайн]` tag, wrapping it in an HTML link
+Each lesson displays its `[Лек.|Практ., Онлайн|Офлайн]` tag, wrapping it in an HTML link
 whenever a custom URL is stored.
 
 The three week buttons are **fixed slots** relative to the real current week (offsets −1,
@@ -180,15 +180,17 @@ lessons (including offline classes in case they are cancelled or moved online).
    - An existing URL can also be removed via `[ 🗑 Видалити посилання ]`.
 
 ```text
-🔗 Посилання на онлайн-заняття
+🔗 Посилання на заняття
 
 • Технології DevOps [Лек., Онлайн] (https://zoom.us/...)
 • Технології DevOps [Практ., Онлайн]
+• Основи розробки трансляторів [Практ., Офлайн]
 
 Обери заняття зі списку нижче, щоб додати або змінити посилання:
 
 [ 🔗 Технології DevOps (Лек.) ]
 [ ➕ Технології DevOps (Практ.) ]
+[ ➕ Основи розробки трансляторів (Практ., Офлайн) ]
 [ 📅 До розкладу ]
 
         ↓ (tapped a lesson, message edited in-place)

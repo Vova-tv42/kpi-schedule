@@ -66,7 +66,7 @@ func TestFormatLessonMode(t *testing.T) {
 			tag:      "prac",
 			location: "18-402",
 			url:      "",
-			expected: "[Практ., Оффлайн]",
+			expected: "[Практ., Офлайн]",
 		},
 		{
 			name:     "lab without location defaults to online",
@@ -134,8 +134,8 @@ func TestFormatDayWithURLs(t *testing.T) {
 	out := formatDay(info)
 
 	// Offline class without URL
-	if !strings.Contains(out, "[Лек., Оффлайн]") {
-		t.Errorf("expected offline badge [Лек., Оффлайн] in output, got:\n%s", out)
+	if !strings.Contains(out, "[Лек., Офлайн]") {
+		t.Errorf("expected offline badge [Лек., Офлайн] in output, got:\n%s", out)
 	}
 
 	// Online class with URL
@@ -190,7 +190,7 @@ func TestFormatLessonsMenu(t *testing.T) {
 			Subject:      "Фізика",
 			SubjectNorm:  "фізика",
 			Tag:          "lab",
-			LocationKind: "Оффлайн",
+			LocationKind: "Офлайн",
 			URL:          "https://meet.google.com/xyz",
 		},
 	}
@@ -199,13 +199,57 @@ func TestFormatLessonsMenu(t *testing.T) {
 	if !strings.Contains(out, "✅ Збережено!") {
 		t.Errorf("expected notice in menu output:\n%s", out)
 	}
+	if !strings.Contains(out, "🔗 <b>Посилання на заняття</b>") {
+		t.Errorf("expected header without 'онлайн-' in menu output:\n%s", out)
+	}
 	if !strings.Contains(out, `<a href="https://zoom.us/j/123">[Лек., Онлайн]</a>`) {
 		t.Errorf("expected link for lecture in menu output:\n%s", out)
 	}
 	if !strings.Contains(out, "[Практ., Онлайн]") {
 		t.Errorf("expected plain badge for unlinked practice in menu output:\n%s", out)
 	}
-	if !strings.Contains(out, `<a href="https://meet.google.com/xyz">[Лаб., Оффлайн]</a>`) {
+	if !strings.Contains(out, `<a href="https://meet.google.com/xyz">[Лаб., Офлайн]</a>`) {
 		t.Errorf("expected link for offline lab in menu output:\n%s", out)
+	}
+}
+
+func TestURLsKeyboardsOfflineBadge(t *testing.T) {
+	lessons := []model.UniqueLesson{
+		{
+			Subject:      "Технології DevOps",
+			SubjectNorm:  "технології devops",
+			Tag:          "lec",
+			LocationKind: "Онлайн",
+			URL:          "https://zoom.us/j/123",
+		},
+		{
+			Subject:      "Основи розробки трансляторів",
+			SubjectNorm:  "основи розробки трансляторів",
+			Tag:          "prac",
+			LocationKind: "Офлайн",
+			URL:          "",
+		},
+	}
+
+	kb := urlsKeyboard(lessons)
+	if len(kb.InlineKeyboard) != 3 { // 2 lessons + "До розкладу"
+		t.Fatalf("expected 3 rows, got %d", len(kb.InlineKeyboard))
+	}
+	if kb.InlineKeyboard[0][0].Text != "🔗 Технології DevOps (Лек.)" {
+		t.Errorf("expected online button without location suffix, got %q", kb.InlineKeyboard[0][0].Text)
+	}
+	if kb.InlineKeyboard[1][0].Text != "➕ Основи розробки трансляторів (Практ., Офлайн)" {
+		t.Errorf("expected offline button with 'Офлайн' suffix, got %q", kb.InlineKeyboard[1][0].Text)
+	}
+
+	groupKB := groupURLsKeyboard("test-group", lessons)
+	if len(groupKB.InlineKeyboard) != 3 { // 2 lessons + "Назад"
+		t.Fatalf("expected 3 rows in group keyboard, got %d", len(groupKB.InlineKeyboard))
+	}
+	if groupKB.InlineKeyboard[0][0].Text != "🔗 Технології DevOps (Лек.)" {
+		t.Errorf("expected group online button without location suffix, got %q", groupKB.InlineKeyboard[0][0].Text)
+	}
+	if groupKB.InlineKeyboard[1][0].Text != "➕ Основи розробки трансляторів (Практ., Офлайн)" {
+		t.Errorf("expected group offline button with 'Офлайн' suffix, got %q", groupKB.InlineKeyboard[1][0].Text)
 	}
 }
