@@ -237,12 +237,13 @@ func (b *Bot) RegisterWebhook(webhookURL, secretToken string) error {
 	defer cancel()
 
 	// 0. Ensure commands are updated when commands configuration version changes
-	const currentCommandsVersion = "v5_group_url_sync"
+	const currentCommandsVersion = "v6_swap_group_personal"
 	if b.db != nil {
 		var cachedVer string
 		if ok, _ := b.db.CacheGet(ctx, "telegram_commands_version", 365*24*time.Hour, &cachedVer); !ok || cachedVer != currentCommandsVersion {
-			_ = b.SetupCommands()
-			_ = b.db.CacheSet(ctx, "telegram_commands_version", currentCommandsVersion)
+			if err := b.SetupCommands(); err == nil {
+				_ = b.db.CacheSet(ctx, "telegram_commands_version", currentCommandsVersion)
+			}
 		}
 	} else {
 		_ = b.SetupCommands()
