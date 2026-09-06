@@ -265,12 +265,12 @@ func (b *Bot) cmdStart(bot *gotgbot.Bot, ctx *ext.Context) error {
 	if isGroupChat(ctx.EffectiveChat) {
 		welcome := "👋 <b>Вітаю! Я бот розкладу КПІ.</b>\n\n" +
 			"У цьому чаті доступні команди:\n" +
-			"• /today — твій персональний розклад на сьогодні\n" +
-			"• /tomorrow — твій персональний розклад на завтра\n" +
-			"• /week — твій персональний розклад на тиждень\n" +
-			"• /group_today — загальний розклад групи на сьогодні\n" +
-			"• /group_tomorrow — загальний розклад групи на завтра\n" +
-			"• /group_week — загальний розклад групи на тиждень\n\n" +
+			"• /today — загальний розклад групи на сьогодні\n" +
+			"• /tomorrow — загальний розклад групи на завтра\n" +
+			"• /week — загальний розклад групи на тиждень\n" +
+			"• /me_today — твій персональний розклад на сьогодні\n" +
+			"• /me_tomorrow — твій персональний розклад на завтра\n" +
+			"• /me_week — твій персональний розклад на тиждень\n\n" +
 			"⚙️ <b>Адміністраторам:</b> надішліть /group, щоб налаштувати академічну групу для цього чату."
 		_, err := bot.SendMessage(ctx.EffectiveChat.Id, welcome, &gotgbot.SendMessageOpts{ParseMode: "HTML"})
 		return err
@@ -432,6 +432,27 @@ func (b *Bot) cmdLink(bot *gotgbot.Bot, ctx *ext.Context) error {
 }
 
 func (b *Bot) cmdToday(bot *gotgbot.Bot, ctx *ext.Context) error {
+	if isGroupChat(ctx.EffectiveChat) {
+		return b.cmdGroupToday(bot, ctx)
+	}
+	return b.cmdMeToday(bot, ctx)
+}
+
+func (b *Bot) cmdTomorrow(bot *gotgbot.Bot, ctx *ext.Context) error {
+	if isGroupChat(ctx.EffectiveChat) {
+		return b.cmdGroupTomorrow(bot, ctx)
+	}
+	return b.cmdMeTomorrow(bot, ctx)
+}
+
+func (b *Bot) cmdWeek(bot *gotgbot.Bot, ctx *ext.Context) error {
+	if isGroupChat(ctx.EffectiveChat) {
+		return b.cmdGroupWeek(bot, ctx)
+	}
+	return b.cmdMeWeek(bot, ctx)
+}
+
+func (b *Bot) cmdMeToday(bot *gotgbot.Bot, ctx *ext.Context) error {
 	callerName := ""
 	if isGroupChat(ctx.EffectiveChat) {
 		callerName = formatUserName(ctx.EffectiveUser)
@@ -455,14 +476,14 @@ func (b *Bot) cmdToday(bot *gotgbot.Bot, ctx *ext.Context) error {
 			_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, msg, &gotgbot.SendMessageOpts{ParseMode: "HTML"})
 			return sendErr
 		}
-		slog.Error("rendering /today", "error", err, "telegram_id", ctx.EffectiveUser.Id)
+		slog.Error("rendering /me_today", "error", err, "telegram_id", ctx.EffectiveUser.Id)
 		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, genericErrorText, nil)
 		return sendErr
 	}
 	return sendScreen(bot, ctx.EffectiveChat.Id, text, kb, hasKeyboard)
 }
 
-func (b *Bot) cmdTomorrow(bot *gotgbot.Bot, ctx *ext.Context) error {
+func (b *Bot) cmdMeTomorrow(bot *gotgbot.Bot, ctx *ext.Context) error {
 	callerName := ""
 	if isGroupChat(ctx.EffectiveChat) {
 		callerName = formatUserName(ctx.EffectiveUser)
@@ -487,14 +508,14 @@ func (b *Bot) cmdTomorrow(bot *gotgbot.Bot, ctx *ext.Context) error {
 			_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, msg, &gotgbot.SendMessageOpts{ParseMode: "HTML"})
 			return sendErr
 		}
-		slog.Error("rendering /tomorrow", "error", err, "telegram_id", ctx.EffectiveUser.Id)
+		slog.Error("rendering /me_tomorrow", "error", err, "telegram_id", ctx.EffectiveUser.Id)
 		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, genericErrorText, nil)
 		return sendErr
 	}
 	return sendScreen(bot, ctx.EffectiveChat.Id, text, kb, hasKeyboard)
 }
 
-func (b *Bot) cmdWeek(bot *gotgbot.Bot, ctx *ext.Context) error {
+func (b *Bot) cmdMeWeek(bot *gotgbot.Bot, ctx *ext.Context) error {
 	callerName := ""
 	if isGroupChat(ctx.EffectiveChat) {
 		callerName = formatUserName(ctx.EffectiveUser)
@@ -518,7 +539,7 @@ func (b *Bot) cmdWeek(bot *gotgbot.Bot, ctx *ext.Context) error {
 			_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, msg, &gotgbot.SendMessageOpts{ParseMode: "HTML"})
 			return sendErr
 		}
-		slog.Error("rendering /week", "error", err, "telegram_id", ctx.EffectiveUser.Id)
+		slog.Error("rendering /me_week", "error", err, "telegram_id", ctx.EffectiveUser.Id)
 		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, genericErrorText, nil)
 		return sendErr
 	}
@@ -1006,6 +1027,15 @@ func (b *Bot) onTextMessage(bot *gotgbot.Bot, ctx *ext.Context) error {
 		}
 		if strings.HasPrefix(msg.Text, "/group-url-sync") {
 			return b.cmdGroupURLSync(bot, ctx)
+		}
+		if strings.HasPrefix(msg.Text, "/me-today") {
+			return b.cmdMeToday(bot, ctx)
+		}
+		if strings.HasPrefix(msg.Text, "/me-tomorrow") {
+			return b.cmdMeTomorrow(bot, ctx)
+		}
+		if strings.HasPrefix(msg.Text, "/me-week") {
+			return b.cmdMeWeek(bot, ctx)
 		}
 	}
 

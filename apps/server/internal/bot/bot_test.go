@@ -271,3 +271,75 @@ func TestSetupCommandsIncludesTomorrow(t *testing.T) {
 	}
 }
 
+func TestCommandScopesAndDescriptions(t *testing.T) {
+	privCmds := PrivateCommands()
+	privMap := make(map[string]string)
+	for _, c := range privCmds {
+		privMap[c.Command] = c.Description
+	}
+
+	if privMap["today"] != "Показати розклад на сьогодні" {
+		t.Errorf("unexpected private today desc: %q", privMap["today"])
+	}
+	if privMap["tomorrow"] != "Показати розклад на завтра" {
+		t.Errorf("unexpected private tomorrow desc: %q", privMap["tomorrow"])
+	}
+	if privMap["week"] != "Показати розклад на тиждень" {
+		t.Errorf("unexpected private week desc: %q", privMap["week"])
+	}
+	if _, ok := privMap["me_today"]; ok {
+		t.Errorf("private commands should not list me_today")
+	}
+
+	grpCmds := GroupCommands()
+	grpMap := make(map[string]string)
+	for _, c := range grpCmds {
+		grpMap[c.Command] = c.Description
+	}
+
+	expectedGrp := map[string]string{
+		"today":          "Показати розклад групи на сьогодні",
+		"tomorrow":       "Показати розклад групи на завтра",
+		"week":           "Показати розклад групи на тиждень",
+		"me_today":       "Показати персональний розклад на сьогодні",
+		"me_tomorrow":    "Показати персональний розклад на завтра",
+		"me_week":        "Показати персональний розклад на тиждень",
+		"group_url_sync": "Синхронізувати посилання з розкладу групи",
+	}
+
+	if len(grpMap) != len(expectedGrp) {
+		t.Fatalf("expected %d group commands, got %d: %+v", len(expectedGrp), len(grpMap), grpMap)
+	}
+
+	for cmd, desc := range expectedGrp {
+		if grpMap[cmd] != desc {
+			t.Errorf("expected command %s to have description %q, got %q", cmd, desc, grpMap[cmd])
+		}
+	}
+
+	if _, ok := grpMap["group_today"]; ok {
+		t.Errorf("group commands should not list deprecated /group_today")
+	}
+	if _, ok := grpMap["group_week"]; ok {
+		t.Errorf("group commands should not list deprecated /group_week")
+	}
+	if _, ok := grpMap["me_group"]; ok {
+		t.Errorf("group commands should not list me_group")
+	}
+
+	adminCmds := AdminCommands()
+	adminMap := make(map[string]string)
+	for _, c := range adminCmds {
+		adminMap[c.Command] = c.Description
+	}
+
+	if adminMap["group"] != "Керування академічною групою" {
+		t.Errorf("expected admin command 'group' to be present, got %q", adminMap["group"])
+	}
+	for cmd, desc := range expectedGrp {
+		if adminMap[cmd] != desc {
+			t.Errorf("expected admin command %s to have description %q, got %q", cmd, desc, adminMap[cmd])
+		}
+	}
+}
+

@@ -82,9 +82,8 @@ with scale-to-zero: it sleeps after 15 minutes idle, wakes on the next request, 
 SQLite file on a mounted volume. Lesson reminders are driven by an external cron service
 hitting `/api/v1/cron/lesson-alerts`, since in-process timers can't fire while the VM sleeps.
 
-Bot commands: `/today`, `/tomorrow`, `/week`, `/urls` (conference links per subject), `/group` (bind an
-academic group to a Telegram chat), `/group_today`, `/group_tomorrow`, `/group_week`, `/settings`, `/link`,
-`/install`.
+Bot commands: `/today`, `/tomorrow`, `/week`, `/me_today`, `/me_tomorrow`, `/me_week`, `/urls` (conference links per subject),
+`/group` (bind an academic group to a Telegram chat), `/group_url_sync`, `/settings`, `/link`, `/install`.
 
 ### Extension (`apps/extension`)
 

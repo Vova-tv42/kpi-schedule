@@ -109,6 +109,9 @@ func New(token string, svc *api.Service, db *storage.DB, botOpts ...*gotgbot.Bot
 	dispatcher.AddHandler(handlers.NewCommand("today", b.wrap("telegram_command", "/today", b.cmdToday)))
 	dispatcher.AddHandler(handlers.NewCommand("tomorrow", b.wrap("telegram_command", "/tomorrow", b.cmdTomorrow)))
 	dispatcher.AddHandler(handlers.NewCommand("week", b.wrap("telegram_command", "/week", b.cmdWeek)))
+	dispatcher.AddHandler(handlers.NewCommand("me_today", b.wrap("telegram_command", "/me_today", b.cmdMeToday)))
+	dispatcher.AddHandler(handlers.NewCommand("me_tomorrow", b.wrap("telegram_command", "/me_tomorrow", b.cmdMeTomorrow)))
+	dispatcher.AddHandler(handlers.NewCommand("me_week", b.wrap("telegram_command", "/me_week", b.cmdMeWeek)))
 	dispatcher.AddHandler(handlers.NewCommand("urls", b.wrap("telegram_command", "/urls", b.cmdURLs)))
 	dispatcher.AddHandler(handlers.NewCommand("group", b.wrap("telegram_command", "/group", b.cmdGroup)))
 	dispatcher.AddHandler(handlers.NewCommand("group_today", b.wrap("telegram_command", "/group_today", b.cmdGroupToday)))
@@ -154,12 +157,12 @@ func PrivateCommands() []gotgbot.BotCommand {
 // GroupCommands returns the bot commands scoped to all group chats.
 func GroupCommands() []gotgbot.BotCommand {
 	return []gotgbot.BotCommand{
-		{Command: "today", Description: "Показати персональний розклад на сьогодні"},
-		{Command: "tomorrow", Description: "Показати персональний розклад на завтра"},
-		{Command: "week", Description: "Показати персональний розклад на тиждень"},
-		{Command: "group_today", Description: "Показати розклад групи на сьогодні"},
-		{Command: "group_tomorrow", Description: "Показати розклад групи на завтра"},
-		{Command: "group_week", Description: "Показати розклад групи на тиждень"},
+		{Command: "today", Description: "Показати розклад групи на сьогодні"},
+		{Command: "tomorrow", Description: "Показати розклад групи на завтра"},
+		{Command: "week", Description: "Показати розклад групи на тиждень"},
+		{Command: "me_today", Description: "Показати персональний розклад на сьогодні"},
+		{Command: "me_tomorrow", Description: "Показати персональний розклад на завтра"},
+		{Command: "me_week", Description: "Показати персональний розклад на тиждень"},
 		{Command: "group_url_sync", Description: "Синхронізувати посилання з розкладу групи"},
 	}
 }
@@ -167,12 +170,12 @@ func GroupCommands() []gotgbot.BotCommand {
 // AdminCommands returns the bot commands scoped to chat administrators.
 func AdminCommands() []gotgbot.BotCommand {
 	return []gotgbot.BotCommand{
-		{Command: "today", Description: "Показати персональний розклад на сьогодні"},
-		{Command: "tomorrow", Description: "Показати персональний розклад на завтра"},
-		{Command: "week", Description: "Показати персональний розклад на тиждень"},
-		{Command: "group_today", Description: "Показати розклад групи на сьогодні"},
-		{Command: "group_tomorrow", Description: "Показати розклад групи на завтра"},
-		{Command: "group_week", Description: "Показати розклад групи на тиждень"},
+		{Command: "today", Description: "Показати розклад групи на сьогодні"},
+		{Command: "tomorrow", Description: "Показати розклад групи на завтра"},
+		{Command: "week", Description: "Показати розклад групи на тиждень"},
+		{Command: "me_today", Description: "Показати персональний розклад на сьогодні"},
+		{Command: "me_tomorrow", Description: "Показати персональний розклад на завтра"},
+		{Command: "me_week", Description: "Показати персональний розклад на тиждень"},
 		{Command: "group_url_sync", Description: "Синхронізувати посилання з розкладу групи"},
 		{Command: "group", Description: "Керування академічною групою"},
 	}
