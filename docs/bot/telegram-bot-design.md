@@ -53,10 +53,12 @@ Commands are scoped via Telegram's `setMyCommands` API (`BotCommandScopeAllPriva
 10:25 Технології DevOps [Практ., Онлайн]    ← clickable link if URL added
 Викладач: Колумбет В. П.
 
+▎До кінця пари лишилося: 01:28:26
+
 [ ◀️ ]  [ 📅 Сьогодні ]  [ ▶️ ]
 ```
 
-(`02.09`, `Викладач:`, and the time are HTML `<b>`/`<code>` — plain-text here for readability.)
+(`02.09`, `Викладач:`, and the time are HTML `<b>`/`<code>`; the countdown footer (`▎…`) is a native Telegram `<blockquote>` with bold time `<b>hh:mm:ss</b>` — plain-text here for readability.)
 
 The middle button jumps back to the current day from wherever navigation has wandered
 to. There is no separate "refresh" button: every render re-reads storage, so the data is
@@ -66,6 +68,12 @@ already knows their own group, and the parity shows up on the `/week` screen. Th
 room/online-meeting detail is formatted as `[Лек.|Практ., Онлайн|Офлайн]`: when a URL
 is available for this online lesson, the text is wrapped with an HTML link `<a href="...">...</a>`
 so students can tap it directly to join.
+
+#### Lesson & Break Real-Time Countdown
+When viewing today's schedule (`/today`, `/group_today`, or navigating to today via inline buttons), a dynamic blockquote line is appended at the bottom:
+- **During a lesson in progress**: `<blockquote>До кінця пари лишилося: <b>hh:mm:ss</b></blockquote>` (remaining time until the end of the lesson; defaults to 95 minutes duration if end time is unspecified).
+- **During a break or before the first lesson** (when lessons remain today): `<blockquote>До кінця перерви лишилося: <b>hh:mm:ss</b></blockquote>` (remaining time until the start of the next upcoming lesson).
+- **After all lessons for the day have finished, on days off, or when viewing other dates**: no blockquote is displayed.
 
 ### 3.2 Weekly Schedule View (`/week`)
 

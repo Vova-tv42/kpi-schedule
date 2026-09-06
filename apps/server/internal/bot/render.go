@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 // this package trying to name those unexported types directly.
 type lessonLine struct {
 	Time          string
+	EndTime       string
 	Name          string
 	Tag           string
 	TeacherRaw    string
@@ -36,6 +39,7 @@ type dayInfo struct {
 	Stale            bool
 	CallerName       string
 	Lessons          []lessonLine
+	Now              time.Time
 }
 
 // weekDayLine and weekInfo mirror api.weekDayView/weekBlockView the same way,
@@ -147,6 +151,128 @@ func lessonHash(subjectNorm, tag string) string {
 	return hex.EncodeToString(h[:6])
 }
 
+func kyivLocation() *time.Location {
+	loc, err := time.LoadLocation("Europe/Kyiv")
+	if err != nil {
+		return time.FixedZone("EEST", 3*3600)
+	}
+	return loc
+}
+
+func parseClock(s string) (h, m, sec int, ok bool) {
+	s = strings.TrimSpace(s)
+	parts := strings.Split(s, ":")
+	if len(parts) < 2 {
+		return 0, 0, 0, false
+	}
+	h, errH := strconv.Atoi(parts[0])
+	m, errM := strconv.Atoi(parts[1])
+	if errH != nil || errM != nil {
+		return 0, 0, 0, false
+	}
+	if len(parts) >= 3 {
+		sec, _ = strconv.Atoi(parts[2])
+	}
+	return h, m, sec, true
+}
+
+func parseLessonTimes(l lessonLine, targetDate time.Time, loc *time.Location) (start, end time.Time, ok bool) {
+	sh, sm, ss, okStart := parseClock(l.Time)
+	if !okStart {
+		return time.Time{}, time.Time{}, false
+	}
+	start = time.Date(targetDate.Year(), targetDate.Month(), targetDate.Day(), sh, sm, ss, 0, loc)
+
+	if eh, em, es, okEnd := parseClock(l.EndTime); okEnd {
+		end = time.Date(targetDate.Year(), targetDate.Month(), targetDate.Day(), eh, em, es, 0, loc)
+	} else {
+		end = start.Add(95 * time.Minute)
+	}
+	if end.Before(start) {
+		end = start.Add(95 * time.Minute)
+	}
+	return start, end, true
+}
+
+func formatDuration(d time.Duration) string {
+	if d <= 0 {
+		return "00:00:00"
+	}
+	totalSec := int(math.Ceil(d.Seconds()))
+	h := totalSec / 3600
+	m := (totalSec % 3600) / 60
+	s := totalSec % 60
+	return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
+}
+
+// formatCountdown determines if there is an ongoing lesson or break today and
+// formats a blockquote showing the remaining time. Returns empty string if
+// lessons are over, if today is a day off, or if the day being viewed is not today.
+func formatCountdown(d dayInfo) string {
+	if d.IsDayOff || len(d.Lessons) == 0 {
+		return ""
+	}
+
+	loc := kyivLocation()
+	now := d.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	nowKyiv := now.In(loc)
+
+	todayStr := nowKyiv.Format("2006-01-02")
+	if d.Date != todayStr {
+		return ""
+	}
+
+	type interval struct {
+		start time.Time
+		end   time.Time
+	}
+
+	intervals := make([]interval, 0, len(d.Lessons))
+	for _, l := range d.Lessons {
+		start, end, ok := parseLessonTimes(l, nowKyiv, loc)
+		if ok {
+			intervals = append(intervals, interval{start: start, end: end})
+		}
+	}
+	if len(intervals) == 0 {
+		return ""
+	}
+
+	// 1. Check if a lesson is in progress right now (start <= now < end).
+	var activeEnd time.Time
+	for _, it := range intervals {
+		if !nowKyiv.Before(it.start) && nowKyiv.Before(it.end) {
+			if activeEnd.IsZero() || it.end.After(activeEnd) {
+				activeEnd = it.end
+			}
+		}
+	}
+	if !activeEnd.IsZero() {
+		remaining := activeEnd.Sub(nowKyiv)
+		return fmt.Sprintf("<blockquote>До кінця пари лишилося: <b>%s</b></blockquote>", formatDuration(remaining))
+	}
+
+	// 2. Check if there is an upcoming lesson today (start > now).
+	var nextStart time.Time
+	for _, it := range intervals {
+		if it.start.After(nowKyiv) {
+			if nextStart.IsZero() || it.start.Before(nextStart) {
+				nextStart = it.start
+			}
+		}
+	}
+	if !nextStart.IsZero() {
+		remaining := nextStart.Sub(nowKyiv)
+		return fmt.Sprintf("<blockquote>До кінця перерви лишилося: <b>%s</b></blockquote>", formatDuration(remaining))
+	}
+
+	// 3. All lessons for today have finished.
+	return ""
+}
+
 // formatDay renders a day's schedule as an HTML-parse-mode Telegram message,
 // matching the layout in docs/bot/telegram-bot-design.md §3.1. All dynamic
 // text is HTML-escaped since subject/teacher/room names come from external
@@ -188,6 +314,12 @@ func formatDay(d dayInfo) string {
 		if teacher != "" {
 			fmt.Fprintf(&b, "<b>Викладач:</b> %s\n", html.EscapeString(teacher))
 		}
+	}
+
+	if countdown := formatCountdown(d); countdown != "" {
+		b.WriteString("\n")
+		b.WriteString(countdown)
+		b.WriteString("\n")
 	}
 
 	return b.String()
@@ -521,6 +653,12 @@ func formatGroupDay(d dayInfo, groupName string) string {
 		if teacher != "" {
 			fmt.Fprintf(&b, "<b>Викладач:</b> %s\n", html.EscapeString(teacher))
 		}
+	}
+
+	if countdown := formatCountdown(d); countdown != "" {
+		b.WriteString("\n")
+		b.WriteString(countdown)
+		b.WriteString("\n")
 	}
 
 	return b.String()

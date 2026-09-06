@@ -73,6 +73,7 @@ func (b *Bot) renderDay(ctx context.Context, telegramID int64, date time.Time, c
 	for _, l := range view.Lessons {
 		line := lessonLine{
 			Time:        l.Time,
+			EndTime:     l.EndTime,
 			Name:        l.Name,
 			Tag:         l.Tag,
 			TeacherRaw:  l.TeacherRaw,
@@ -177,6 +178,7 @@ func (b *Bot) renderGroupDay(ctx context.Context, group model.BotGroup, date tim
 	for _, l := range view.Lessons {
 		line := lessonLine{
 			Time:        l.Time,
+			EndTime:     l.EndTime,
 			Name:        l.Name,
 			Tag:         l.Tag,
 			TeacherRaw:  l.TeacherRaw,
