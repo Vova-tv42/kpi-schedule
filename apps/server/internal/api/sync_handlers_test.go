@@ -321,4 +321,77 @@ func TestScheduleRawSync(t *testing.T) {
 	}
 }
 
+func TestFormatTimeHHMMSS(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"8:30", "08:30:00"},
+		{"08:30:00", "08:30:00"},
+		{"8:30:00", "08:30:00"},
+		{" 8:30:00 ", "08:30:00"},
+		{"14:15", "14:15:00"},
+		{"14:15:20", "14:15:20"},
+		{"", ""},
+	}
+	for _, tc := range tests {
+		got := formatTimeHHMMSS(tc.input)
+		if got != tc.expected {
+			t.Errorf("formatTimeHHMMSS(%q) = %q; want %q", tc.input, got, tc.expected)
+		}
+	}
+}
+
+func TestCleanTeacherRaw(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"<i>Викладач: Колумбет В. П.</i>", "Колумбет В. П."},
+		{"Викладачі: Іванов І. І.", "Іванов І. І."},
+		{"Викладача: Сидоров С. С.", "Сидоров С. С."},
+		{"Колумбет В. П.", "Колумбет В. П."},
+		{"", ""},
+	}
+	for _, tc := range tests {
+		got := cleanTeacherRaw(tc.input)
+		if got != tc.expected {
+			t.Errorf("cleanTeacherRaw(%q) = %q; want %q", tc.input, got, tc.expected)
+		}
+	}
+}
+
+func TestSyncEmptyPayloadValidation(t *testing.T) {
+	router, _, internalToken := setupTestServer(t)
+
+	// 1. Extension sync with empty lessons array -> 400
+	req1Body, _ := json.Marshal(map[string]any{
+		"telegram_id": 12345,
+		"lessons":     []any{},
+	})
+	req1 := httptest.NewRequest(http.MethodPost, "/api/v1/schedule/sync", bytes.NewReader(req1Body))
+	req1.Header.Set("Content-Type", "application/json")
+	req1.Header.Set("X-Internal-Token", internalToken)
+	w1 := httptest.NewRecorder()
+	router.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty lessons, got %d", w1.Code)
+	}
+
+	// 2. Console sync with empty events array -> 400
+	req2Body, _ := json.Marshal(map[string]any{
+		"telegram_id": 12345,
+		"events":      []any{},
+	})
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/schedule/raw-sync", bytes.NewReader(req2Body))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("X-Internal-Token", internalToken)
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty events, got %d", w2.Code)
+	}
+}
+
+
 

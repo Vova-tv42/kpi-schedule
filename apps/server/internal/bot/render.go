@@ -656,7 +656,7 @@ func formatExtensionInstructions() string {
 
 func buildConsoleScript(serverURL, pairCode string) string {
 	serverURL = strings.TrimRight(serverURL, "/")
-	return fmt.Sprintf("(async c=>{const h=await(await fetch('/room/student/calendar')).text(),id=h.match(/studevents\\?id=(\\d+)/)?.[1];if(!id)return alert('⚠️ Спочатку увійдіть у кабінет на my.kpi.ua!');const d=Date.now(),s=o=>new Date(d+o*864e5).toISOString().slice(0,10),events=await(await fetch('/calendar/studevents?id='+id+'&start='+s(-14)+'&end='+s(120))).json(),res=await(await fetch('%s/api/v1/schedule/raw-sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pair_code:c,events})})).json();alert(res.success?'✅ Збережено '+res.lesson_count+' занять!':'❌ Помилка: '+(res.message||'Не вдалося зберегти'))})('%s');", serverURL, pairCode)
+	return fmt.Sprintf("(async c=>{try{const h=await(await fetch('/room/student/calendar')).text(),id=h.match(/studevents\\?id=(\\d+)/i)?.[1];if(!id)return alert('⚠️ Спочатку увійдіть у кабінет на my.kpi.ua!');const d=Date.now(),s=o=>new Date(d+o*864e5).toISOString().slice(0,10),events=await(await fetch('/calendar/studevents?id='+id+'&start='+s(-14)+'&end='+s(120))).json(),res=await(await fetch('%s/api/v1/schedule/raw-sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pair_code:c,events})})).json();alert(res.success?'✅ Збережено '+res.lesson_count+' занять!':'❌ Помилка: '+(res.message||'Не вдалося зберегти'))}catch(e){alert('❌ Помилка синхронізації: '+(e.message||e))}})('%s');", serverURL, pairCode)
 }
 
 func formatConsoleScriptScreen(script string, expiresIn int) string {

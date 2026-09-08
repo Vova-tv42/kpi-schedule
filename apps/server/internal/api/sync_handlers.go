@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -172,7 +173,7 @@ func (h *handlers) postAuthPairVerify(w http.ResponseWriter, r *http.Request) {
 
 var (
 	htmlTagRegex       = regexp.MustCompile(`<[^>]*>`)
-	teacherPrefixRegex = regexp.MustCompile(`(?i)^Викладач(?:і|я)?:\s*`)
+	teacherPrefixRegex = regexp.MustCompile(`(?i)^Викладач(?:і|а)?:\s*`)
 )
 
 func normalizeMyKPITag(tag string) string {
@@ -193,8 +194,8 @@ func cleanTeacherRaw(raw string) string {
 	if raw == "" {
 		return ""
 	}
-	cleaned := teacherPrefixRegex.ReplaceAllString(raw, "")
-	cleaned = htmlTagRegex.ReplaceAllString(cleaned, "")
+	cleaned := htmlTagRegex.ReplaceAllString(raw, "")
+	cleaned = teacherPrefixRegex.ReplaceAllString(cleaned, "")
 	return strings.TrimSpace(cleaned)
 }
 
@@ -206,19 +207,27 @@ func cleanLocationRaw(raw string) string {
 	return strings.TrimSpace(cleaned)
 }
 
+func pad2(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) == 1 {
+		return "0" + s
+	}
+	return s
+}
+
 func formatTimeHHMMSS(t string) string {
 	parts := strings.Split(t, ":")
 	if len(parts) == 0 || parts[0] == "" {
 		return ""
 	}
-	hour := fmt.Sprintf("%02s", parts[0])
+	hour := pad2(parts[0])
 	min := "00"
 	if len(parts) > 1 && parts[1] != "" {
-		min = fmt.Sprintf("%02s", parts[1])
+		min = pad2(parts[1])
 	}
 	sec := "00"
 	if len(parts) > 2 && parts[2] != "" {
-		sec = fmt.Sprintf("%02s", parts[2])
+		sec = pad2(parts[2])
 	}
 	return fmt.Sprintf("%s:%s:%s", hour, min, sec)
 }
@@ -286,7 +295,7 @@ func parseRawFullCalendarEvents(events []rawFullCalendarEventDTO) ([]model.Parse
 	var detectedGroup string
 	maxCount := 0
 	for grp, count := range groupOccurrences {
-		if count > maxCount {
+		if count > maxCount || (count == maxCount && (detectedGroup == "" || grp < detectedGroup)) {
 			maxCount = count
 			detectedGroup = grp
 		}
@@ -305,7 +314,10 @@ func (h *handlers) resolveSyncUser(
 		code := strings.ReplaceAll(strings.TrimSpace(pairCode), "-", "")
 		tid, pairErr := h.svc.db.VerifyAndConsumePairingCode(ctx, code)
 		if pairErr != nil {
-			return model.User{}, http.StatusUnauthorized, model.ErrUnauthorized, errors.New("invalid or expired pairing code")
+			if errors.Is(pairErr, storage.ErrInvalidOrExpiredCode) {
+				return model.User{}, http.StatusUnauthorized, model.ErrUnauthorized, errors.New("invalid or expired pairing code")
+			}
+			return model.User{}, http.StatusInternalServerError, model.ErrInternal, pairErr
 		}
 		user, err := h.svc.db.UpsertUser(ctx, tid, nil, nil)
 		if err != nil {
@@ -317,7 +329,10 @@ func (h *handlers) resolveSyncUser(
 	if authToken != "" {
 		user, err := h.svc.db.GetUserByToken(ctx, strings.TrimSpace(authToken))
 		if err != nil {
-			return model.User{}, http.StatusUnauthorized, model.ErrUnauthorized, errors.New("invalid user or token")
+			if errors.Is(err, storage.ErrNotFound) || errors.Is(err, storage.ErrInvalidToken) {
+				return model.User{}, http.StatusUnauthorized, model.ErrUnauthorized, errors.New("invalid user or token")
+			}
+			return model.User{}, http.StatusInternalServerError, model.ErrInternal, err
 		}
 		return user, http.StatusOK, "", nil
 	}
@@ -325,12 +340,15 @@ func (h *handlers) resolveSyncUser(
 	if headerToken != "" {
 		user, err := h.svc.db.GetUserByToken(ctx, strings.TrimSpace(headerToken))
 		if err != nil {
-			return model.User{}, http.StatusUnauthorized, model.ErrUnauthorized, errors.New("invalid user or token")
+			if errors.Is(err, storage.ErrNotFound) || errors.Is(err, storage.ErrInvalidToken) {
+				return model.User{}, http.StatusUnauthorized, model.ErrUnauthorized, errors.New("invalid user or token")
+			}
+			return model.User{}, http.StatusInternalServerError, model.ErrInternal, err
 		}
 		return user, http.StatusOK, "", nil
 	}
 
-	if telegramID != 0 && h.internalToken != "" && internalTokenHeader == h.internalToken {
+	if telegramID != 0 && h.internalToken != "" && subtle.ConstantTimeCompare([]byte(internalTokenHeader), []byte(h.internalToken)) == 1 {
 		user, err := h.svc.db.GetUserByTelegramID(ctx, telegramID)
 		if errors.Is(err, storage.ErrNotFound) {
 			user, err = h.svc.db.UpsertUser(ctx, telegramID, nil, nil)
@@ -490,6 +508,11 @@ func (h *handlers) postScheduleSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(req.Lessons) == 0 {
+		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "lessons array cannot be empty")
+		return
+	}
+
 	parsedLessons := make([]model.ParsedLesson, 0, len(req.Lessons))
 	for _, dto := range req.Lessons {
 		t, parseErr := time.Parse("2006-01-02", dto.Date)
@@ -507,7 +530,7 @@ func (h *handlers) postScheduleSync(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	if len(req.Lessons) > 0 && len(parsedLessons) == 0 {
+	if len(parsedLessons) == 0 {
 		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "invalid lesson dates: expected format YYYY-MM-DD")
 		return
 	}
@@ -547,8 +570,13 @@ func (h *handlers) postScheduleRawSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(req.Events) == 0 {
+		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "events array cannot be empty")
+		return
+	}
+
 	parsedLessons, detectedGroup := parseRawFullCalendarEvents(req.Events)
-	if len(req.Events) > 0 && len(parsedLessons) == 0 {
+	if len(parsedLessons) == 0 {
 		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "no valid events could be parsed")
 		return
 	}

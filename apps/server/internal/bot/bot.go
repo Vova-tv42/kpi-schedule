@@ -162,7 +162,7 @@ func PrivateCommands() []gotgbot.BotCommand {
 		{Command: "group", Description: "Керування академічними групами"},
 		{Command: "settings", Description: "Налаштування сповіщень"},
 		{Command: "issues", Description: "Повідомити про помилку або запропонувати ідею"},
-		{Command: "install", Description: "Інструкція та завантаження розширення"},
+		{Command: "install", Description: "Інструкція та підключення розкладу"},
 		{Command: "link", Description: "Отримати код прив'язки браузерного розширення"},
 		{Command: "start", Description: "Знайомство та головне меню"},
 	}

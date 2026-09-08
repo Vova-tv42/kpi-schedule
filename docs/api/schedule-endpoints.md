@@ -222,10 +222,13 @@ Ingests raw FullCalendar event arrays directly fetched by a browser console scri
 - **Headers**:
   - `Content-Type: application/json`
   - `X-User-Token: <AUTH_TOKEN>` (optional header alternative to `auth_token` in body)
+  - `X-Internal-Token: <INTERNAL_API_TOKEN>` (optional header for internal backend calls)
 - **Request Body**:
 ```json
 {
   "pair_code": "742918",
+  "auth_token": "client-uuid-or-token",
+  "telegram_id": 123456789,
   "events": [
     {
       "id": 1019849,
@@ -244,6 +247,7 @@ Ingests raw FullCalendar event arrays directly fetched by a browser console scri
   ]
 }
 ```
+*(Provide one authentication identifier: `pair_code`, `auth_token`, `X-User-Token` header, or `telegram_id` paired with `X-Internal-Token` header)*
 
 ### Response (`200 OK`)
 ```json

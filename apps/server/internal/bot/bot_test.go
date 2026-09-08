@@ -338,6 +338,9 @@ func TestCommandScopesAndDescriptions(t *testing.T) {
 	if privMap["week"] != "Показати розклад на тиждень" {
 		t.Errorf("unexpected private week desc: %q", privMap["week"])
 	}
+	if privMap["install"] != "Інструкція та підключення розкладу" {
+		t.Errorf("unexpected private install desc: %q", privMap["install"])
+	}
 	if _, ok := privMap["me_today"]; ok {
 		t.Errorf("private commands should not list me_today")
 	}
