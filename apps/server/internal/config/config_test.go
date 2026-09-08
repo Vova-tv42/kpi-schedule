@@ -132,3 +132,41 @@ func TestConfigExtensionInstallURL(t *testing.T) {
 		t.Errorf("expected fallback url, got %q", cfg.ExtensionInstallURL)
 	}
 }
+
+func TestConfigPublicServerURL(t *testing.T) {
+	t.Setenv("DATABASE_PATH", ":memory:")
+	t.Setenv("INTERNAL_API_TOKEN", "test-token")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+
+	// 1. Explicit PUBLIC_SERVER_URL
+	t.Setenv("PUBLIC_SERVER_URL", "https://custom.kpi.ua")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.PublicServerURL != "https://custom.kpi.ua" {
+		t.Errorf("expected custom url, got %q", cfg.PublicServerURL)
+	}
+
+	// 2. Derived from TELEGRAM_WEBHOOK_URL
+	t.Setenv("PUBLIC_SERVER_URL", "")
+	t.Setenv("TELEGRAM_WEBHOOK_URL", "https://my-bot.fly.dev/api/v1/telegram/webhook")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.PublicServerURL != "https://my-bot.fly.dev" {
+		t.Errorf("expected derived url, got %q", cfg.PublicServerURL)
+	}
+
+	// 3. Fallback default
+	t.Setenv("TELEGRAM_WEBHOOK_URL", "")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.PublicServerURL != "https://kpi-schedule.fly.dev" {
+		t.Errorf("expected default fallback url, got %q", cfg.PublicServerURL)
+	}
+}
+

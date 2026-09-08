@@ -32,6 +32,7 @@ type Bot struct {
 	svc                 *api.Service
 	db                  *storage.DB
 	extensionInstallURL string
+	publicServerURL     string
 	telemetry           *telemetry.Client
 }
 
@@ -74,6 +75,19 @@ func (b *Bot) SetExtensionDownloadURL(url string) {
 // ExtensionDownloadURL is an alias for ExtensionInstallURL for backward compatibility.
 func (b *Bot) ExtensionDownloadURL() string {
 	return b.ExtensionInstallURL()
+}
+
+// SetPublicServerURL sets the base URL for public API endpoints used in scripts.
+func (b *Bot) SetPublicServerURL(url string) {
+	b.publicServerURL = strings.TrimRight(url, "/")
+}
+
+// PublicServerURL returns the public base URL, defaulting to https://kpi-schedule.fly.dev.
+func (b *Bot) PublicServerURL() string {
+	if b.publicServerURL != "" {
+		return b.publicServerURL
+	}
+	return "https://kpi-schedule.fly.dev"
 }
 
 // GBot returns the underlying gotgbot.Bot client.
@@ -148,7 +162,7 @@ func PrivateCommands() []gotgbot.BotCommand {
 		{Command: "group", Description: "Керування академічними групами"},
 		{Command: "settings", Description: "Налаштування сповіщень"},
 		{Command: "issues", Description: "Повідомити про помилку або запропонувати ідею"},
-		{Command: "install", Description: "Інструкція та завантаження розширення"},
+		{Command: "install", Description: "Інструкція та підключення розкладу"},
 		{Command: "link", Description: "Отримати код прив'язки браузерного розширення"},
 		{Command: "start", Description: "Знайомство та головне меню"},
 	}

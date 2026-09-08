@@ -22,7 +22,7 @@ Commands are scoped via Telegram's `setMyCommands` API (`BotCommandScopeAllPriva
 | Command | Scope | Menu Description | Status | Action Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `/start` | DM / Groups | `Знайомство та головне меню` | ✅ Implemented | In DMs: onboarding screen or deep-link router (`bind_<chatID>`, `cfg_<groupID>`). In groups: introduces the bot and explains available commands. |
-| `/install` | DM only | `Інструкція та встановлення розширення` | ✅ Implemented | Shows step-by-step developer mode installation guide and button linking to external extension package or marketplace (`EXTENSION_INSTALL_URL`). |
+| `/install` | DM only | `Інструкція та підключення розкладу` | ✅ Implemented | Shows synchronization options (browser extension vs browser console script) and step-by-step guides. |
 | `/link` | DM only | `Отримати код прив'язки браузерного розширення` | ✅ Implemented | Generates a 6-digit one-time code for Browser Extension pairing. |
 | `/urls` | DM only | `Посилання на онлайн-заняття` | ✅ Implemented | Interactive menu to manage custom lesson conference URLs (Zoom, Meet, etc.) with prompt-and-delete chat flow (see §3.4). |
 | `/today` | DM & Groups | DM: `Показати розклад на сьогодні`<br>Group: `Показати розклад групи на сьогодні` | ✅ Implemented | In DMs: shows today's personal classes. In groups: shows today's overall group schedule. |
@@ -117,36 +117,45 @@ the same information with far less noise.
 
 ### 3.3 Onboarding screens (`/start` → `/link`)
 
-Two screens inside a single message, edited in place:
+Onboarding screens inside a single message, edited in place:
 
 ```text
 👋 Вітаю! Я покажу твій персональний розклад КПІ. …
 Щоб підключити розклад:
-1️⃣ Встанови розширення в браузер (Chrome, Edge, Brave, Opera).
-2️⃣ Натисни «Прив'язати акаунт» та отримай 6-значний код.
-3️⃣ Увійди на my.kpi.ua і синхронізуй розклад в один клік!
-[ 📥 Як встановити розширення ]  [ 🔗 Прив'язати акаунт ]
+Натисни «Як підключити розклад» нижче та обери зручний спосіб!
+[ 📥 Як підключити розклад ]  [ 🔗 Прив'язати акаунт ]
 [ 📅 Розклад на сьогодні ]                                               ← only if fresh
 
-        ↓ Tapping [ 📥 Як встановити розширення ] (or /install)
+        ↓ Tapping [ 📥 Як підключити розклад ] (or /install)
 
-📥 Встановлення розширення (Chrome / Edge / Brave / Opera) …
-1️⃣ Завантаж архів (.zip)
-2️⃣ Відкрий chrome://extensions
-3️⃣ Увімкни «Режим розробника»
-4️⃣ Натисни «Завантажити розпаковане» та вибери папку
-[ 📥 Встановити розширення ] (external install URL)
-[ 🔑 Отримати код прив'язки ]
+⚙️ Як підключити розклад My KPI?
+1️⃣ 🧩 Браузерне розширення (Chrome / Edge / Brave / Opera)
+2️⃣ 💻 Скрипт для консолі (швидко, без встановлення додатків)
+[ 🧩 Розширення ]  [ 💻 Скрипт (консоль) ]
 [ ◀️ Назад ]
 
-        ↓ Tapping [ 🔗 Прив'язати акаунт ] (or /link)
-
-🔑 Код прив'язки: 123-456 …
-[ 📥 Як встановити розширення ]
-[ ◀️ Назад ]  [ 🗓 Показати розклад ]
+        ├─→ Tapping [ 🧩 Розширення ]:
+        │   🧩 Встановлення розширення …
+        │   1️⃣ Завантаж архів (.zip)
+        │   2️⃣ Відкрий chrome://extensions
+        │   3️⃣ Увімкни «Режим розробника»
+        │   4️⃣ Натисни «Завантажити розпаковане»
+        │   [ 📥 Встановити розширення ] (external install URL)
+        │   [ 🔑 Отримати код прив'язки ]
+        │   [ ◀️ Назад ]
+        │
+        └─→ Tapping [ 💻 Скрипт (консоль) ]:
+            💻 Синхронізація через консоль браузера
+            ⚠️ Важливо: запустити саме на сайті my.kpi.ua!
+            1️⃣ Увійди на my.kpi.ua
+            2️⃣ Натисни F12 -> Console
+            3️⃣ Скопіюй скрипт і натисни Enter:
+            <pre><code class="language-javascript">(async c=>{...})('742918');</code></pre>
+            [ 🔄 Оновити скрипт ]
+            [ ◀️ Назад ]  [ 🗓 Показати розклад ]
 ```
 
-`◀️ Назад` returns to the start screen; `🗓 Показати розклад` moves forward into the `/week`
+`◀️ Назад` returns to the previous onboarding step or start screen; `🗓 Показати розклад` moves forward into the `/week`
 view. The schedule screens (§3.1, §3.2) deliberately have **no route back** to onboarding —
 it is a one-way path.
 

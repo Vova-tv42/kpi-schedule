@@ -1,13 +1,16 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -52,6 +55,30 @@ type scheduleSyncRequest struct {
 	TelegramID int64             `json:"telegram_id,omitempty"`
 	GroupName  string            `json:"group_name,omitempty"`
 	Lessons    []parsedLessonDTO `json:"lessons"`
+}
+
+type rawFullCalendarExtendedPropsDTO struct {
+	Type        string `json:"type"`
+	LocationRAW string `json:"locationRAW"`
+	LocationPDF string `json:"locationPDF"`
+	Groups      string `json:"groups"`
+}
+
+type rawFullCalendarEventDTO struct {
+	ID             any                              `json:"id"`
+	Title          string                           `json:"title"`
+	Start          string                           `json:"start"`
+	End            string                           `json:"end"`
+	Description    string                           `json:"description"`
+	DescriptionRAW string                           `json:"descriptionRAW"`
+	ExtendedProps  rawFullCalendarExtendedPropsDTO `json:"extendedProps"`
+}
+
+type scheduleRawSyncRequest struct {
+	PairCode   string                    `json:"pair_code,omitempty"`
+	AuthToken  string                    `json:"auth_token,omitempty"`
+	TelegramID int64                     `json:"telegram_id,omitempty"`
+	Events     []rawFullCalendarEventDTO `json:"events"`
 }
 
 type scheduleSyncResponse struct {
@@ -144,86 +171,212 @@ func (h *handlers) postAuthPairVerify(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// POST /api/v1/schedule/sync
-// Ingestion endpoint for the browser extension
-func (h *handlers) postScheduleSync(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
-	var req scheduleSyncRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if h.telemetry != nil {
-			h.telemetry.ReportAction("extension_sync", "schedule_sync", http.StatusBadRequest, time.Since(start).Milliseconds(), nil)
-		}
-		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "invalid json payload")
-		return
+var (
+	htmlTagRegex       = regexp.MustCompile(`<[^>]*>`)
+	teacherPrefixRegex = regexp.MustCompile(`(?i)^Викладач(?:і|а)?:\s*`)
+)
+
+func normalizeMyKPITag(tag string) string {
+	clean := strings.ToLower(strings.TrimSpace(tag))
+	switch clean {
+	case "lec", "лек":
+		return "lec"
+	case "prc", "прак", "prac":
+		return "prac"
+	case "lab", "лаб":
+		return "lab"
+	default:
+		return ""
 	}
+}
 
-	var user model.User
-	var err error
-
-	// 1. Resolve user by pair_code, auth_token, or internal TelegramID
-	if req.PairCode != "" {
-		code := strings.ReplaceAll(strings.TrimSpace(req.PairCode), "-", "")
-		telegramID, pairErr := h.svc.db.VerifyAndConsumePairingCode(r.Context(), code)
-		if pairErr != nil {
-			model.WriteError(w, http.StatusUnauthorized, model.ErrUnauthorized, "invalid or expired pairing code")
-			return
-		}
-		user, err = h.svc.db.UpsertUser(r.Context(), telegramID, nil, nil)
-	} else if req.AuthToken != "" {
-		user, err = h.svc.db.GetUserByToken(r.Context(), strings.TrimSpace(req.AuthToken))
-	} else if tokenHeader := r.Header.Get("X-User-Token"); tokenHeader != "" {
-		user, err = h.svc.db.GetUserByToken(r.Context(), strings.TrimSpace(tokenHeader))
-	} else if req.TelegramID != 0 && h.internalToken != "" && r.Header.Get("X-Internal-Token") == h.internalToken {
-		// Only trusted internal services (e.g. Telegram Bot direct sync) can authenticate by TelegramID alone
-		user, err = h.svc.db.GetUserByTelegramID(r.Context(), req.TelegramID)
-		if errors.Is(err, storage.ErrNotFound) {
-			user, err = h.svc.db.UpsertUser(r.Context(), req.TelegramID, nil, nil)
-		}
-	} else {
-		model.WriteError(w, http.StatusUnauthorized, model.ErrAuthRequired, "authentication required (pair_code, auth_token, or valid internal token)")
-		return
+func cleanTeacherRaw(raw string) string {
+	if raw == "" {
+		return ""
 	}
+	cleaned := htmlTagRegex.ReplaceAllString(raw, "")
+	cleaned = teacherPrefixRegex.ReplaceAllString(cleaned, "")
+	return strings.TrimSpace(cleaned)
+}
 
-	if err != nil {
-		if errors.Is(err, storage.ErrInvalidToken) || errors.Is(err, storage.ErrNotFound) {
-			model.WriteError(w, http.StatusUnauthorized, model.ErrUnauthorized, "invalid user or token")
-			return
-		}
-		model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, err.Error())
-		return
+func cleanLocationRaw(raw string) string {
+	if raw == "" {
+		return ""
 	}
+	cleaned := htmlTagRegex.ReplaceAllString(raw, "")
+	return strings.TrimSpace(cleaned)
+}
 
-	// 2. Parse lessons from DTO
-	parsedLessons := make([]model.ParsedLesson, 0, len(req.Lessons))
-	for _, dto := range req.Lessons {
-		t, parseErr := time.Parse("2006-01-02", dto.Date)
-		if parseErr != nil {
+func pad2(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) == 1 {
+		return "0" + s
+	}
+	return s
+}
+
+func formatTimeHHMMSS(t string) string {
+	parts := strings.Split(t, ":")
+	if len(parts) == 0 || parts[0] == "" {
+		return ""
+	}
+	hour := pad2(parts[0])
+	min := "00"
+	if len(parts) > 1 && parts[1] != "" {
+		min = pad2(parts[1])
+	}
+	sec := "00"
+	if len(parts) > 2 && parts[2] != "" {
+		sec = pad2(parts[2])
+	}
+	return fmt.Sprintf("%s:%s:%s", hour, min, sec)
+}
+
+func parseRawFullCalendarEvents(events []rawFullCalendarEventDTO) ([]model.ParsedLesson, string) {
+	lessons := make([]model.ParsedLesson, 0, len(events))
+	groupOccurrences := make(map[string]int)
+
+	for _, ev := range events {
+		if strings.TrimSpace(ev.Start) == "" || strings.TrimSpace(ev.Title) == "" {
 			continue
 		}
-		parsedLessons = append(parsedLessons, model.ParsedLesson{
-			Date:        t,
-			StartTime:   dto.StartTime,
-			EndTime:     dto.EndTime,
-			Subject:     dto.Subject,
-			Tag:         dto.Tag,
-			TeacherRaw:  dto.TeacherRaw,
-			LocationRaw: dto.LocationRaw,
+
+		parts := strings.Split(ev.Start, "T")
+		if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+			continue
+		}
+		datePart := parts[0]
+		timePart := parts[1]
+
+		d, err := time.Parse("2006-01-02", datePart)
+		if err != nil {
+			continue
+		}
+
+		startTime := formatTimeHHMMSS(timePart)
+		var endTime string
+		if strings.Contains(ev.End, "T") {
+			endParts := strings.Split(ev.End, "T")
+			if len(endParts) > 1 {
+				endTime = formatTimeHHMMSS(endParts[1])
+			}
+		}
+
+		teacherRaw := ev.DescriptionRAW
+		if teacherRaw == "" {
+			teacherRaw = ev.Description
+		}
+		locationRaw := ev.ExtendedProps.LocationPDF
+		if locationRaw == "" {
+			locationRaw = ev.ExtendedProps.LocationRAW
+		}
+
+		lessons = append(lessons, model.ParsedLesson{
+			Date:        d,
+			StartTime:   startTime,
+			EndTime:     endTime,
+			Subject:     strings.TrimSpace(ev.Title),
+			Tag:         normalizeMyKPITag(ev.ExtendedProps.Type),
+			TeacherRaw:  cleanTeacherRaw(teacherRaw),
+			LocationRaw: cleanLocationRaw(locationRaw),
 		})
+
+		if ev.ExtendedProps.Groups != "" {
+			rawGroups := strings.Split(ev.ExtendedProps.Groups, ",")
+			for _, g := range rawGroups {
+				trimmed := strings.TrimSpace(g)
+				if trimmed != "" {
+					groupOccurrences[trimmed]++
+				}
+			}
+		}
 	}
 
-	if len(req.Lessons) > 0 && len(parsedLessons) == 0 {
-		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "invalid lesson dates: expected format YYYY-MM-DD")
-		return
+	var detectedGroup string
+	maxCount := 0
+	for grp, count := range groupOccurrences {
+		if count > maxCount || (count == maxCount && (detectedGroup == "" || grp < detectedGroup)) {
+			maxCount = count
+			detectedGroup = grp
+		}
 	}
 
-	// 3. Resolve group name and group ID if provided
-	groupName := strings.TrimSpace(req.GroupName)
+	return lessons, detectedGroup
+}
+
+func (h *handlers) resolveSyncUser(
+	ctx context.Context,
+	pairCode, authToken, headerToken string,
+	telegramID int64,
+	internalTokenHeader string,
+) (model.User, int, string, error) {
+	if pairCode != "" {
+		code := strings.ReplaceAll(strings.TrimSpace(pairCode), "-", "")
+		tid, pairErr := h.svc.db.VerifyAndConsumePairingCode(ctx, code)
+		if pairErr != nil {
+			if errors.Is(pairErr, storage.ErrInvalidOrExpiredCode) {
+				return model.User{}, http.StatusUnauthorized, model.ErrUnauthorized, errors.New("invalid or expired pairing code")
+			}
+			return model.User{}, http.StatusInternalServerError, model.ErrInternal, pairErr
+		}
+		user, err := h.svc.db.UpsertUser(ctx, tid, nil, nil)
+		if err != nil {
+			return model.User{}, http.StatusInternalServerError, model.ErrInternal, err
+		}
+		return user, http.StatusOK, "", nil
+	}
+
+	if authToken != "" {
+		user, err := h.svc.db.GetUserByToken(ctx, strings.TrimSpace(authToken))
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) || errors.Is(err, storage.ErrInvalidToken) {
+				return model.User{}, http.StatusUnauthorized, model.ErrUnauthorized, errors.New("invalid user or token")
+			}
+			return model.User{}, http.StatusInternalServerError, model.ErrInternal, err
+		}
+		return user, http.StatusOK, "", nil
+	}
+
+	if headerToken != "" {
+		user, err := h.svc.db.GetUserByToken(ctx, strings.TrimSpace(headerToken))
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) || errors.Is(err, storage.ErrInvalidToken) {
+				return model.User{}, http.StatusUnauthorized, model.ErrUnauthorized, errors.New("invalid user or token")
+			}
+			return model.User{}, http.StatusInternalServerError, model.ErrInternal, err
+		}
+		return user, http.StatusOK, "", nil
+	}
+
+	if telegramID != 0 && h.internalToken != "" && subtle.ConstantTimeCompare([]byte(internalTokenHeader), []byte(h.internalToken)) == 1 {
+		user, err := h.svc.db.GetUserByTelegramID(ctx, telegramID)
+		if errors.Is(err, storage.ErrNotFound) {
+			user, err = h.svc.db.UpsertUser(ctx, telegramID, nil, nil)
+		}
+		if err != nil {
+			return model.User{}, http.StatusInternalServerError, model.ErrInternal, err
+		}
+		return user, http.StatusOK, "", nil
+	}
+
+	return model.User{}, http.StatusUnauthorized, model.ErrAuthRequired, errors.New("authentication required (pair_code, auth_token, or valid internal token)")
+}
+
+func (h *handlers) ingestAndStoreLessons(
+	ctx context.Context,
+	user model.User,
+	groupName string,
+	parsedLessons []model.ParsedLesson,
+	start time.Time,
+	actionName string,
+) (scheduleSyncResponse, int, error) {
+	groupName = strings.TrimSpace(groupName)
 	if groupName != "" {
-		groups, gErr := h.svc.campus.Groups(r.Context())
+		groups, gErr := h.svc.campus.Groups(ctx)
 		if gErr == nil {
 			for _, g := range groups {
 				if strings.EqualFold(g.Name, groupName) {
-					updatedUser, uErr := h.svc.db.UpsertUser(r.Context(), user.TelegramID, &g.ID, &g.Name)
+					updatedUser, uErr := h.svc.db.UpsertUser(ctx, user.TelegramID, &g.ID, &g.Name)
 					if uErr == nil {
 						user = updatedUser
 					}
@@ -233,15 +386,14 @@ func (h *handlers) postScheduleSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 4. Enrich lessons with Campus API
 	now := time.Now().UTC()
 	var lessonsToStore []model.Lesson
 	enrichmentStatus := model.EnrichmentDegraded
 
 	if user.GroupID != nil {
-		groupSchedule, schedErr := h.svc.campus.GroupSchedule(r.Context(), *user.GroupID)
-		slots, slotErr := h.svc.campus.LessonSlots(r.Context())
-		currTime, timeErr := h.svc.campus.CurrentTime(r.Context())
+		groupSchedule, schedErr := h.svc.campus.GroupSchedule(ctx, *user.GroupID)
+		slots, slotErr := h.svc.campus.LessonSlots(ctx)
+		currTime, timeErr := h.svc.campus.CurrentTime(ctx)
 
 		if schedErr == nil && slotErr == nil && timeErr == nil {
 			merged := engine.Merge(parsedLessons, groupSchedule, slots, now, currTime.CurrentWeek)
@@ -278,9 +430,8 @@ func (h *handlers) postScheduleSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fallback to unenriched lessons if Campus API was unavailable
 	if len(lessonsToStore) == 0 && len(parsedLessons) > 0 {
-		currTime, _ := h.svc.campus.CurrentTime(r.Context())
+		currTime, _ := h.svc.campus.CurrentTime(ctx)
 		refWeek := 1
 		if currTime.CurrentWeek == 1 || currTime.CurrentWeek == 2 {
 			refWeek = currTime.CurrentWeek
@@ -309,26 +460,132 @@ func (h *handlers) postScheduleSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 5. Replace lessons in DB
-	if err := h.svc.db.ReplaceLessons(r.Context(), user.ID, lessonsToStore, enrichmentStatus, nil); err != nil {
+	if err := h.svc.db.ReplaceLessons(ctx, user.ID, lessonsToStore, enrichmentStatus, nil); err != nil {
 		if h.telemetry != nil {
-			h.telemetry.ReportAction("extension_sync", "schedule_sync", http.StatusInternalServerError, time.Since(start).Milliseconds(), nil)
+			h.telemetry.ReportAction(actionName, "schedule_sync", http.StatusInternalServerError, time.Since(start).Milliseconds(), nil)
 		}
-		model.WriteError(w, http.StatusInternalServerError, model.ErrInternal, fmt.Sprintf("storing lessons: %s", err))
-		return
+		return scheduleSyncResponse{}, http.StatusInternalServerError, fmt.Errorf("storing lessons: %w", err)
 	}
 
 	if h.telemetry != nil {
-		h.telemetry.ReportAction("extension_sync", "schedule_sync", http.StatusOK, time.Since(start).Milliseconds(), map[string]any{
+		h.telemetry.ReportAction(actionName, "schedule_sync", http.StatusOK, time.Since(start).Milliseconds(), map[string]any{
 			"lesson_count": len(lessonsToStore),
 		})
 	}
 
-	writeJSON(w, http.StatusOK, scheduleSyncResponse{
+	return scheduleSyncResponse{
 		Success:          true,
 		LessonCount:      len(lessonsToStore),
 		GroupName:        user.GroupName,
 		EnrichmentStatus: string(enrichmentStatus),
 		SyncedAt:         now,
-	})
+	}, http.StatusOK, nil
+}
+
+// POST /api/v1/schedule/sync
+// Ingestion endpoint for the browser extension
+func (h *handlers) postScheduleSync(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	var req scheduleSyncRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if h.telemetry != nil {
+			h.telemetry.ReportAction("extension_sync", "schedule_sync", http.StatusBadRequest, time.Since(start).Milliseconds(), nil)
+		}
+		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "invalid json payload")
+		return
+	}
+
+	user, status, errCode, err := h.resolveSyncUser(
+		r.Context(),
+		req.PairCode,
+		req.AuthToken,
+		r.Header.Get("X-User-Token"),
+		req.TelegramID,
+		r.Header.Get("X-Internal-Token"),
+	)
+	if err != nil {
+		model.WriteError(w, status, errCode, err.Error())
+		return
+	}
+
+	if len(req.Lessons) == 0 {
+		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "lessons array cannot be empty")
+		return
+	}
+
+	parsedLessons := make([]model.ParsedLesson, 0, len(req.Lessons))
+	for _, dto := range req.Lessons {
+		t, parseErr := time.Parse("2006-01-02", dto.Date)
+		if parseErr != nil {
+			continue
+		}
+		parsedLessons = append(parsedLessons, model.ParsedLesson{
+			Date:        t,
+			StartTime:   dto.StartTime,
+			EndTime:     dto.EndTime,
+			Subject:     dto.Subject,
+			Tag:         dto.Tag,
+			TeacherRaw:  dto.TeacherRaw,
+			LocationRaw: dto.LocationRaw,
+		})
+	}
+
+	if len(parsedLessons) == 0 {
+		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "invalid lesson dates: expected format YYYY-MM-DD")
+		return
+	}
+
+	resp, statusCode, err := h.ingestAndStoreLessons(r.Context(), user, req.GroupName, parsedLessons, start, "extension_sync")
+	if err != nil {
+		model.WriteError(w, statusCode, model.ErrInternal, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// POST /api/v1/schedule/raw-sync
+// Ingestion endpoint for browser console script (accepts raw FullCalendar event array)
+func (h *handlers) postScheduleRawSync(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	var req scheduleRawSyncRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if h.telemetry != nil {
+			h.telemetry.ReportAction("console_sync", "schedule_raw_sync", http.StatusBadRequest, time.Since(start).Milliseconds(), nil)
+		}
+		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "invalid json payload")
+		return
+	}
+
+	user, status, errCode, err := h.resolveSyncUser(
+		r.Context(),
+		req.PairCode,
+		req.AuthToken,
+		r.Header.Get("X-User-Token"),
+		req.TelegramID,
+		r.Header.Get("X-Internal-Token"),
+	)
+	if err != nil {
+		model.WriteError(w, status, errCode, err.Error())
+		return
+	}
+
+	if len(req.Events) == 0 {
+		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "events array cannot be empty")
+		return
+	}
+
+	parsedLessons, detectedGroup := parseRawFullCalendarEvents(req.Events)
+	if len(parsedLessons) == 0 {
+		model.WriteError(w, http.StatusBadRequest, model.ErrInvalidRequest, "no valid events could be parsed")
+		return
+	}
+
+	resp, statusCode, err := h.ingestAndStoreLessons(r.Context(), user, detectedGroup, parsedLessons, start, "console_sync")
+	if err != nil {
+		model.WriteError(w, statusCode, model.ErrInternal, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }

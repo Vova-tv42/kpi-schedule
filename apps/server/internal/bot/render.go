@@ -543,7 +543,7 @@ func weekNavButton(target, displayed int, label string) gotgbot.InlineKeyboardBu
 func startKeyboard(state linkState) gotgbot.InlineKeyboardMarkup {
 	rows := [][]gotgbot.InlineKeyboardButton{
 		{
-			{Text: "📥 Як встановити розширення", CallbackData: menuCallbackData("install")},
+			{Text: "📥 Як підключити розклад", CallbackData: menuCallbackData("install")},
 			{Text: "🔗 Прив'язати акаунт", CallbackData: menuCallbackData("link")},
 		},
 	}
@@ -555,7 +555,21 @@ func startKeyboard(state linkState) gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-func installKeyboard(downloadURL string) gotgbot.InlineKeyboardMarkup {
+func installKeyboard() gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{Text: "🧩 Розширення", CallbackData: menuCallbackData("install_ext")},
+				{Text: "💻 Скрипт (консоль)", CallbackData: menuCallbackData("install_script")},
+			},
+			{
+				{Text: "◀️ Назад", CallbackData: menuCallbackData("back")},
+			},
+		},
+	}
+}
+
+func extensionKeyboard(downloadURL string) gotgbot.InlineKeyboardMarkup {
 	var rows [][]gotgbot.InlineKeyboardButton
 	if downloadURL != "" {
 		rows = append(rows, []gotgbot.InlineKeyboardButton{
@@ -566,16 +580,30 @@ func installKeyboard(downloadURL string) gotgbot.InlineKeyboardMarkup {
 		{Text: "🔑 Отримати код прив'язки", CallbackData: menuCallbackData("link")},
 	})
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
-		{Text: "◀️ Назад", CallbackData: menuCallbackData("back")},
+		{Text: "◀️ Назад", CallbackData: menuCallbackData("install")},
 	})
 	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func consoleScriptKeyboard() gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{Text: "🔄 Оновити скрипт", CallbackData: menuCallbackData("install_script")},
+			},
+			{
+				{Text: "◀️ Назад", CallbackData: menuCallbackData("install")},
+				{Text: "🗓 Показати розклад", CallbackData: menuCallbackData("week")},
+			},
+		},
+	}
 }
 
 func linkKeyboard() gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 			{
-				{Text: "📥 Як встановити розширення", CallbackData: menuCallbackData("install")},
+				{Text: "📥 Як підключити розклад", CallbackData: menuCallbackData("install")},
 			},
 			{
 				{Text: "◀️ Назад", CallbackData: menuCallbackData("back")},
@@ -586,11 +614,9 @@ func linkKeyboard() gotgbot.InlineKeyboardMarkup {
 }
 
 const startScreenBase = "👋 <b>Вітаю! Я покажу твій персональний розклад КПІ.</b>\n\n" +
-	"Я враховую твої вибіркові дисципліни та підгрупи завдяки швидкій синхронізації через браузерне розширення для комп'ютера.\n\n" +
+	"Я враховую твої вибіркові дисципліни та підгрупи завдяки швидкій синхронізації через браузерне розширення або консоль браузера.\n\n" +
 	"<b>Щоб підключити розклад:</b>\n" +
-	"1️⃣ Встанови розширення в браузер (Chrome, Edge, Brave, Opera).\n" +
-	"2️⃣ Натисни «Прив'язати акаунт» та отримай 6-значний код.\n" +
-	"3️⃣ Увійди на my.kpi.ua і синхронізуй розклад в один клік!"
+	"Натисни «Як підключити розклад» нижче та обери зручний спосіб!"
 
 // formatStartScreen appends a short status note for users who have already
 // synced. The onboarding text itself never changes — the note is additive, so
@@ -600,14 +626,24 @@ func formatStartScreen(state linkState) string {
 	case linkStateFresh:
 		return startScreenBase + "\n\n✅ <b>Твій розклад уже синхронізовано!</b> Можеш одразу відкрити його кнопкою нижче."
 	case linkStateStale:
-		return startScreenBase + "\n\n⚠️ <b>Розклад застарів</b> — відкрий розширення в браузері та синхронізуй ще раз."
+		return startScreenBase + "\n\n⚠️ <b>Розклад застарів</b> — онови його через розширення або скрипт."
 	default:
 		return startScreenBase
 	}
 }
 
 func formatInstallScreen() string {
-	return "📥 <b>Встановлення розширення (Chrome / Edge / Brave / Opera)</b>\n\n" +
+	return "⚙️ <b>Як підключити розклад My KPI?</b>\n\n" +
+		"Обери зручний спосіб синхронізації:\n\n" +
+		"1️⃣ <b>🧩 Браузерне розширення</b>\n" +
+		"Встановлюється один раз у браузер на комп'ютері (Chrome, Edge, Brave, Opera). Зручно для регулярного оновлення розкладу.\n\n" +
+		"2️⃣ <b>💻 Скрипт для консолі</b>\n" +
+		"Швидка синхронізація без встановлення додатків. Працює у будь-якому браузері — ти просто вставляєш готовий скрипт у консоль на сайті my.kpi.ua.\n\n" +
+		"Обери варіант нижче, щоб переглянути інструкцію 👇"
+}
+
+func formatExtensionInstructions() string {
+	return "🧩 <b>Встановлення розширення (Chrome / Edge / Brave / Opera)</b>\n\n" +
 		"Розширення працює на десктопних браузерах (Windows, macOS, Linux):\n\n" +
 		"1️⃣ <b>Отримай розширення:</b> натисни кнопку <b>«Встановити розширення»</b> нижче та завантаж архів чи перейди на сторінку розширення.\n\n" +
 		"2️⃣ <b>Відкрий керування розширеннями:</b> перейди в браузері за адресою:\n" +
@@ -616,6 +652,27 @@ func formatInstallScreen() string {
 		"3️⃣ <b>Увімкни режим розробника:</b> увімкни перемикач <b>«Режим розробника»</b> (<i>Developer mode</i>) у правому верхньому кутку.\n\n" +
 		"4️⃣ <b>Завантаж розширення:</b> натисни кнопку <b>«Завантажити розпаковане»</b> (<i>Load unpacked</i>) ліворуч угорі та обери розпаковану папку.\n\n" +
 		"Після цього повертайся сюди й тисни <b>«Отримати код прив'язки»</b>!"
+}
+
+func buildConsoleScript(serverURL, pairCode string) string {
+	serverURL = strings.TrimRight(serverURL, "/")
+	return fmt.Sprintf("(async c=>{try{const h=await(await fetch('/room/student/calendar')).text(),id=h.match(/studevents\\?id=(\\d+)/i)?.[1];if(!id)return alert('⚠️ Спочатку увійдіть у кабінет на my.kpi.ua!');const d=Date.now(),s=o=>new Date(d+o*864e5).toISOString().slice(0,10),events=await(await fetch('/calendar/studevents?id='+id+'&start='+s(-14)+'&end='+s(120))).json(),res=await(await fetch('%s/api/v1/schedule/raw-sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pair_code:c,events})})).json();alert(res.success?'✅ Збережено '+res.lesson_count+' занять!':'❌ Помилка: '+(res.message||'Не вдалося зберегти'))}catch(e){alert('❌ Помилка синхронізації: '+(e.message||e))}})('%s');", serverURL, pairCode)
+}
+
+func formatConsoleScriptScreen(script string, expiresIn int) string {
+	escapedScript := html.EscapeString(script)
+	return fmt.Sprintf(
+		"💻 <b>Синхронізація через консоль браузера</b>\n\n"+
+			"⚠️ <b>Важливо:</b> скрипт потрібно запустити саме на сайті <b><a href=\"https://my.kpi.ua\">my.kpi.ua</a></b>!\n\n"+
+			"<b>Інструкція:</b>\n"+
+			"1️⃣ Відкрий сайт <b><a href=\"https://my.kpi.ua\">my.kpi.ua</a></b> та увійди у свій кабінет.\n"+
+			"2️⃣ Натисни клавішу <b>F12</b> (або правою кнопкою миші ➡️ «Дослідити код» / Inspect) та перейди на вкладку <b>Console</b> (Консоль).\n"+
+			"3️⃣ Натисни на блок нижче, щоб скопіювати скрипт, встав його в консоль і натисни <b>Enter</b>:\n\n"+
+			"<pre><code class=\"language-javascript\">%s</code></pre>\n\n"+
+			"⏱ Код прив'язки у скрипті дійсний <b>%d хв</b>.\n"+
+			"Після виконання скрипта розклад автоматично з'явиться в боті!",
+		escapedScript, expiresIn/60,
+	)
 }
 
 func formatLinkText(code string, expiresIn int) string {

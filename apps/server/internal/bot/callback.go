@@ -112,6 +112,10 @@ func (b *Bot) onMenu(bot *gotgbot.Bot, ctx *ext.Context) error {
 	switch strings.TrimPrefix(cq.Data, menuCallbackPrefix) {
 	case "install":
 		return b.editToInstallScreen(bot, cq)
+	case "install_ext":
+		return b.editToExtensionScreen(bot, cq)
+	case "install_script":
+		return b.editToConsoleScriptScreen(bot, cq)
 	case "link":
 		return b.editToLinkScreen(bot, cq)
 	case "back":
@@ -358,7 +362,21 @@ func (b *Bot) editToStartScreen(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery) err
 }
 
 func (b *Bot) editToInstallScreen(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery) error {
-	return b.applyScreen(bot, cq, formatInstallScreen(), installKeyboard(b.ExtensionDownloadURL()), true)
+	return b.applyScreen(bot, cq, formatInstallScreen(), installKeyboard(), true)
+}
+
+func (b *Bot) editToExtensionScreen(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery) error {
+	return b.applyScreen(bot, cq, formatExtensionInstructions(), extensionKeyboard(b.ExtensionDownloadURL()), true)
+}
+
+func (b *Bot) editToConsoleScriptScreen(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery) error {
+	code, expiresIn, err := b.svc.GeneratePairCode(context.Background(), cq.From.Id)
+	if err != nil {
+		slog.Error("generating pair code for console script", "error", err, "telegram_id", cq.From.Id)
+		return answerWithError(bot, cq)
+	}
+	script := buildConsoleScript(b.PublicServerURL(), code)
+	return b.applyScreen(bot, cq, formatConsoleScriptScreen(script, expiresIn), consoleScriptKeyboard(), true)
 }
 
 func (b *Bot) editToLinkScreen(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery) error {

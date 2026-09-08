@@ -212,3 +212,52 @@ Ingests parsed lesson occurrences pushed by the browser extension. Performs auto
 }
 ```
 
+---
+
+## 7. Raw Sync Schedule (Browser Console Ingestion Endpoint)
+
+Ingests raw FullCalendar event arrays directly fetched by a browser console script running on `my.kpi.ua`. Normalizes tags, sanitizes teachers/locations, automatically discovers the dominant group name, and performs metadata enrichment via `api.campus.kpi.ua` server-side.
+
+- **Endpoint**: `POST /api/v1/schedule/raw-sync`
+- **Headers**:
+  - `Content-Type: application/json`
+  - `X-User-Token: <AUTH_TOKEN>` (optional header alternative to `auth_token` in body)
+  - `X-Internal-Token: <INTERNAL_API_TOKEN>` (optional header for internal backend calls)
+- **Request Body**:
+```json
+{
+  "pair_code": "742918",
+  "auth_token": "client-uuid-or-token",
+  "telegram_id": 123456789,
+  "events": [
+    {
+      "id": 1019849,
+      "title": "Технології DevOps",
+      "start": "2026-09-01T08:30:00",
+      "end": "2026-09-01T10:05:00",
+      "description": "<i>Колумбет В. П.</i>",
+      "descriptionRAW": "Викладачі: Колумбет В. П.",
+      "extendedProps": {
+        "type": "prc",
+        "locationRAW": ", URL: Не вказано",
+        "locationPDF": "Online Zoom",
+        "groups": "ТВ-41, ТВ-42"
+      }
+    }
+  ]
+}
+```
+*(Provide one authentication identifier: `pair_code`, `auth_token`, `X-User-Token` header, or `telegram_id` paired with `X-Internal-Token` header)*
+
+### Response (`200 OK`)
+```json
+{
+  "success": true,
+  "lesson_count": 14,
+  "group_name": "ТВ-42",
+  "enrichment_status": "full",
+  "synced_at": "2026-09-02T10:00:00Z"
+}
+```
+
+

@@ -22,8 +22,8 @@ import (
 
 const (
 	genericErrorText = "⚠️ Щось пішло не так. Спробуй ще раз трохи пізніше."
-	notLinkedText    = "🔒 Акаунт ще не прив'язано. Надішли /start, щоб отримати код і синхронізувати браузерне розширення."
-	noScheduleText   = "📭 Розкладу ще немає. Синхронізуй браузерне розширення (після прив'язки) і спробуй ще раз."
+	notLinkedText    = "🔒 Акаунт ще не прив'язано. Надішли /start, щоб підключити розклад (через розширення або консоль)."
+	noScheduleText   = "📭 Розкладу ще немає. Синхронізуй розклад (через розширення або консоль) і спробуй ще раз."
 )
 
 func isGroupChat(chat *gotgbot.Chat) bool {
@@ -399,7 +399,7 @@ func (b *Bot) cmdInstall(bot *gotgbot.Bot, ctx *ext.Context) error {
 
 	_, err := bot.SendMessage(ctx.EffectiveChat.Id, formatInstallScreen(), &gotgbot.SendMessageOpts{
 		ParseMode:          "HTML",
-		ReplyMarkup:        installKeyboard(b.ExtensionDownloadURL()),
+		ReplyMarkup:        installKeyboard(),
 		LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
 	})
 	return err
