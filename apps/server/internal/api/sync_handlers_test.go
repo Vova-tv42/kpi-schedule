@@ -204,3 +204,121 @@ func TestScheduleSyncRejectsRawTelegramIDWithoutInternalToken(t *testing.T) {
 	}
 }
 
+func TestScheduleRawSync(t *testing.T) {
+	router, _, internalToken := setupTestServer(t)
+
+	// 1. Generate pairing code
+	genReqBody, _ := json.Marshal(map[string]any{"telegram_id": 555444333})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/pair/generate", bytes.NewReader(genReqBody))
+	req.Header.Set("X-Internal-Token", internalToken)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("generate code failed: %d", w.Code)
+	}
+	var genResp struct {
+		PairCode string `json:"pair_code"`
+	}
+	_ = json.NewDecoder(w.Body).Decode(&genResp)
+
+	// 2. Raw sync with raw FullCalendar events fixture
+	rawPayload := map[string]any{
+		"pair_code": genResp.PairCode,
+		"events": []map[string]any{
+			{
+				"id":             1019849,
+				"title":          "Технології DevOps",
+				"start":          "2026-09-01T08:30:00",
+				"end":            "2026-09-01T10:05:00",
+				"description":    "<i>Колумбет В. П.</i>",
+				"descriptionRAW": "Викладачі: Колумбет В. П.",
+				"extendedProps": map[string]any{
+					"type":        "prc",
+					"locationRAW": ", URL: Не вказано",
+					"locationPDF": "Online Zoom",
+					"groups":      "ТВ-41, ТВ-42",
+				},
+			},
+			{
+				"id":             1019850,
+				"title":          "Архітектура ПЗ",
+				"start":          "2026-09-01T10:20:00",
+				"end":            "2026-09-01T11:55:00",
+				"description":    "Петренко П. П.",
+				"descriptionRAW": "Викладач: Петренко П. П.",
+				"extendedProps": map[string]any{
+					"type":        "lec",
+					"locationRAW": ", URL: Не вказано",
+					"locationPDF": "Online Teams",
+					"groups":      "ТВ-42",
+				},
+			},
+		},
+	}
+	rawBytes, _ := json.Marshal(rawPayload)
+
+	syncReq := httptest.NewRequest(http.MethodPost, "/api/v1/schedule/raw-sync", bytes.NewReader(rawBytes))
+	syncReq.Header.Set("Content-Type", "application/json")
+	syncW := httptest.NewRecorder()
+	router.ServeHTTP(syncW, syncReq)
+
+	if syncW.Code != http.StatusOK {
+		t.Fatalf("raw-sync failed: %d, body: %s", syncW.Code, syncW.Body.String())
+	}
+
+	var syncResp struct {
+		Success     bool    `json:"success"`
+		LessonCount int     `json:"lesson_count"`
+		GroupName   *string `json:"group_name"`
+	}
+	if err := json.NewDecoder(syncW.Body).Decode(&syncResp); err != nil {
+		t.Fatalf("decoding sync response: %v", err)
+	}
+	if !syncResp.Success || syncResp.LessonCount != 2 {
+		t.Errorf("expected 2 lessons stored, got %+v", syncResp)
+	}
+	// "ТВ-42" appeared in both events, so it should be detected as the primary group
+	if syncResp.GroupName == nil || *syncResp.GroupName != "ТВ-42" {
+		t.Errorf("expected detected group ТВ-42, got %v", syncResp.GroupName)
+	}
+
+	// 3. Verify querying the schedule
+	schedReq := httptest.NewRequest(http.MethodGet, "/api/v1/schedule/date?telegram_id=555444333&date=2026-09-01", nil)
+	schedReq.Header.Set("X-Internal-Token", internalToken)
+	schedW := httptest.NewRecorder()
+	router.ServeHTTP(schedW, schedReq)
+
+	if schedW.Code != http.StatusOK {
+		t.Fatalf("query schedule date failed: %d, body: %s", schedW.Code, schedW.Body.String())
+	}
+
+	var dateResp struct {
+		Lessons []struct {
+			Name       string `json:"name"`
+			Tag        string `json:"tag"`
+			TeacherRaw string `json:"teacher_raw"`
+		} `json:"lessons"`
+	}
+	_ = json.NewDecoder(schedW.Body).Decode(&dateResp)
+	if len(dateResp.Lessons) != 2 {
+		t.Fatalf("expected 2 lessons in date response, got %d", len(dateResp.Lessons))
+	}
+	if dateResp.Lessons[0].Tag != "prac" { // "prc" was normalized to "prac"
+		t.Errorf("expected tag prac, got %q", dateResp.Lessons[0].Tag)
+	}
+	if dateResp.Lessons[0].TeacherRaw != "Колумбет В. П." {
+		t.Errorf("expected stripped teacher, got %q", dateResp.Lessons[0].TeacherRaw)
+	}
+
+	// 4. Repeated sync with same consumed pair_code must fail (401)
+	repeatReq := httptest.NewRequest(http.MethodPost, "/api/v1/schedule/raw-sync", bytes.NewReader(rawBytes))
+	repeatReq.Header.Set("Content-Type", "application/json")
+	repeatW := httptest.NewRecorder()
+	router.ServeHTTP(repeatW, repeatReq)
+	if repeatW.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for consumed pair code, got %d", repeatW.Code)
+	}
+}
+
+

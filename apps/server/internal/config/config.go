@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -23,6 +24,7 @@ type Config struct {
 	AdminAPISecret        string
 	AdminIngestURL        string
 	AdminIngestKey        string
+	PublicServerURL       string
 }
 
 func Load() (Config, error) {
@@ -42,6 +44,17 @@ func Load() (Config, error) {
 		AdminAPISecret:        os.Getenv("ADMIN_API_SECRET"),
 		AdminIngestURL:        os.Getenv("ADMIN_INGEST_URL"),
 		AdminIngestKey:        os.Getenv("ADMIN_INGEST_KEY"),
+		PublicServerURL:       os.Getenv("PUBLIC_SERVER_URL"),
+	}
+	if cfg.PublicServerURL == "" {
+		if cfg.TelegramWebhookURL != "" {
+			base := strings.TrimSuffix(cfg.TelegramWebhookURL, "/api/v1/telegram/webhook")
+			base = strings.TrimSuffix(base, "/telegram/webhook")
+			cfg.PublicServerURL = strings.TrimRight(base, "/")
+		}
+		if cfg.PublicServerURL == "" {
+			cfg.PublicServerURL = "https://kpi-schedule.fly.dev"
+		}
 	}
 	if cfg.ExtensionInstallURL == "" {
 		cfg.ExtensionInstallURL = os.Getenv("EXTENSION_DOWNLOAD_URL")

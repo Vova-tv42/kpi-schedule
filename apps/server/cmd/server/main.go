@@ -62,6 +62,9 @@ func main() {
 		if cfg.ExtensionInstallURL != "" {
 			tgBot.SetExtensionInstallURL(cfg.ExtensionInstallURL)
 		}
+		if cfg.PublicServerURL != "" {
+			tgBot.SetPublicServerURL(cfg.PublicServerURL)
+		}
 		if err := tgBot.RegisterWebhook(cfg.TelegramWebhookURL, cfg.TelegramWebhookSecret); err != nil {
 			log.Fatalf("bot webhook: %v", err)
 		}

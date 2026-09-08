@@ -81,7 +81,7 @@ Week/Day/Slot) is the schema's primary key component — see
 still stored, but only as *derived* display/matching fields, computed at merge time via
 `engine.WeekAt`/`engine.ISODay` against the Campus API's current-week anchor.
 
-## 4. Field mapping (target: the extension's `parse-schedule.ts`)
+## 4. Field mapping (implemented in extension `parse-schedule.ts` and server `parseRawFullCalendarEvents`)
 
 | JSON field | Parsed into | Notes |
 |---|---|---|

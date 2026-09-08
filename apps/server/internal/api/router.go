@@ -103,9 +103,10 @@ func NewRouterWithOpts(svc *Service, internalToken string, opts RouterOpts) http
 		r.Group(func(r chi.Router) {
 			r.Use(ipRateLimitMiddleware())
 
-			// Public extension endpoints (authenticated via pair_code or user_token in payload/header)
+			// Public extension and console script endpoints (authenticated via pair_code or user_token in payload/header)
 			r.Post("/auth/pair/verify", h.postAuthPairVerify)
 			r.Post("/schedule/sync", h.postScheduleSync)
+			r.Post("/schedule/raw-sync", h.postScheduleRawSync)
 
 			// Protected internal routes (require X-Internal-Token, e.g. for bot / admin calls)
 			r.Group(func(r chi.Router) {

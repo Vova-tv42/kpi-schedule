@@ -1,10 +1,12 @@
-# Browser Extension Authentication Flow
+# Client Schedule Synchronization Flow (Extension & Browser Console)
 
-> **Implementation status: Implemented.** The extension fetches and parses the schedule client-side, using the browser's own session (`fetch(..., { credentials: "include" })`, no `cookies` permission needed — see [`docs/extension/browser-extension-design.md`](../../extension/browser-extension-design.md)), and sends the parsed lesson list to the server. Telegram account pairing uses single-use 6-digit numeric codes generated via `POST /api/v1/auth/pair/generate` (by the Telegram bot) and verified via `POST /api/v1/auth/pair/verify` or directly with `POST /api/v1/schedule/sync`.
+> **Implementation status: Implemented.** Schedule extraction from `my.kpi.ua` can be performed either client-side via the browser extension (`POST /api/v1/schedule/sync`) or via a lightweight browser console script (`POST /api/v1/schedule/raw-sync`). In both cases, the browser's own session is utilized (`fetch(..., { credentials: "include" })`, no `cookies` permission needed), and raw credentials never leave the student's browser. Telegram account pairing uses single-use 6-digit numeric codes generated via `POST /api/v1/auth/pair/generate` (by the Telegram bot) and verified upon synchronization.
 
 ## 1. Overview
 
-Because `my.kpi.ua` uses HTTP-only session cookies without a public OAuth API, the **Browser Extension** is the only component that can read the student's personal schedule — it does so inside their own authenticated browser session, then bridges the result to their Telegram Bot account.
+Because `my.kpi.ua` uses HTTP-only session cookies without a public OAuth API, the browser environment is the component that reads the student's personal schedule — it does so inside their own authenticated browser session, then bridges the result to their Telegram Bot account. Two synchronization channels exist:
+1. **Browser Extension (Manifest V3)**: Installed in desktop browsers (Chrome, Edge, Brave, Opera); parses events locally and sends `POST /api/v1/schedule/sync`.
+2. **Browser Console Script**: One-line copy-paste snippet executed in DevTools Console on `my.kpi.ua`; sends raw FullCalendar events to `POST /api/v1/schedule/raw-sync`, with normalization and parsing handled server-side in Go.
 
 ---
 

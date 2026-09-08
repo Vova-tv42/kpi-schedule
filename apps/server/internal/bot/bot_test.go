@@ -79,22 +79,40 @@ func TestBotWebhookAuthentication(t *testing.T) {
 }
 
 func TestInstallAndOnboardingScreens(t *testing.T) {
-	// 1. Check formatInstallScreen content
+	// 1. Check formatInstallScreen content (method choice)
 	installText := formatInstallScreen()
-	if !strings.Contains(installText, "Встановлення розширення") {
+	if !strings.Contains(installText, "Як підключити розклад") {
 		t.Errorf("formatInstallScreen missing title: %s", installText)
 	}
-	if !strings.Contains(installText, "chrome://extensions") {
-		t.Errorf("formatInstallScreen missing chrome://extensions: %s", installText)
+	if !strings.Contains(installText, "Браузерне розширення") {
+		t.Errorf("formatInstallScreen missing extension option: %s", installText)
 	}
-	if !strings.Contains(installText, "Режим розробника") {
-		t.Errorf("formatInstallScreen missing developer mode note: %s", installText)
+	if !strings.Contains(installText, "Скрипт для консолі") {
+		t.Errorf("formatInstallScreen missing console script option: %s", installText)
 	}
 
-	// 2. Check installKeyboard with URL
-	kbWithURL := installKeyboard("https://example.com/download/extension.zip")
+	// 2. Check installKeyboard (2 choices + back)
+	installKb := installKeyboard()
+	if len(installKb.InlineKeyboard) != 2 {
+		t.Fatalf("expected 2 rows in installKeyboard, got %d", len(installKb.InlineKeyboard))
+	}
+	if len(installKb.InlineKeyboard[0]) != 2 {
+		t.Fatalf("expected 2 buttons in first row of installKeyboard, got %d", len(installKb.InlineKeyboard[0]))
+	}
+	if installKb.InlineKeyboard[0][0].CallbackData != menuCallbackData("install_ext") {
+		t.Errorf("expected install_ext on first button, got %s", installKb.InlineKeyboard[0][0].CallbackData)
+	}
+	if installKb.InlineKeyboard[0][1].CallbackData != menuCallbackData("install_script") {
+		t.Errorf("expected install_script on second button, got %s", installKb.InlineKeyboard[0][1].CallbackData)
+	}
+	if installKb.InlineKeyboard[1][0].CallbackData != menuCallbackData("back") {
+		t.Errorf("expected back on second row, got %s", installKb.InlineKeyboard[1][0].CallbackData)
+	}
+
+	// 3. Check extensionKeyboard with and without URL
+	kbWithURL := extensionKeyboard("https://example.com/download/extension.zip")
 	if len(kbWithURL.InlineKeyboard) != 3 {
-		t.Fatalf("expected 3 rows in installKeyboard with URL, got %d", len(kbWithURL.InlineKeyboard))
+		t.Fatalf("expected 3 rows in extensionKeyboard with URL, got %d", len(kbWithURL.InlineKeyboard))
 	}
 	if kbWithURL.InlineKeyboard[0][0].Url != "https://example.com/download/extension.zip" {
 		t.Errorf("expected URL on first button, got %s", kbWithURL.InlineKeyboard[0][0].Url)
@@ -102,17 +120,50 @@ func TestInstallAndOnboardingScreens(t *testing.T) {
 	if kbWithURL.InlineKeyboard[1][0].CallbackData != menuCallbackData("link") {
 		t.Errorf("expected link callback on second button, got %s", kbWithURL.InlineKeyboard[1][0].CallbackData)
 	}
-	if kbWithURL.InlineKeyboard[2][0].CallbackData != menuCallbackData("back") {
-		t.Errorf("expected back callback on third button, got %s", kbWithURL.InlineKeyboard[2][0].CallbackData)
+	if kbWithURL.InlineKeyboard[2][0].CallbackData != menuCallbackData("install") {
+		t.Errorf("expected install callback on third button, got %s", kbWithURL.InlineKeyboard[2][0].CallbackData)
 	}
 
-	// 3. Check installKeyboard without URL
-	kbNoURL := installKeyboard("")
+	kbNoURL := extensionKeyboard("")
 	if len(kbNoURL.InlineKeyboard) != 2 {
-		t.Fatalf("expected 2 rows in installKeyboard without URL, got %d", len(kbNoURL.InlineKeyboard))
+		t.Fatalf("expected 2 rows in extensionKeyboard without URL, got %d", len(kbNoURL.InlineKeyboard))
 	}
 
-	// 4. Check startKeyboard buttons
+	// 4. Check formatExtensionInstructions
+	extText := formatExtensionInstructions()
+	if !strings.Contains(extText, "chrome://extensions") {
+		t.Errorf("formatExtensionInstructions missing chrome://extensions: %s", extText)
+	}
+	if !strings.Contains(extText, "Режим розробника") {
+		t.Errorf("formatExtensionInstructions missing developer mode note: %s", extText)
+	}
+
+	// 5. Check console script building and rendering
+	script := buildConsoleScript("https://test.fly.dev", "123456")
+	if !strings.Contains(script, "https://test.fly.dev/api/v1/schedule/raw-sync") {
+		t.Errorf("buildConsoleScript missing endpoint URL: %s", script)
+	}
+	if !strings.Contains(script, "123456") {
+		t.Errorf("buildConsoleScript missing pair code: %s", script)
+	}
+
+	scriptText := formatConsoleScriptScreen(script, 600)
+	if !strings.Contains(scriptText, "my.kpi.ua") {
+		t.Errorf("formatConsoleScriptScreen missing my.kpi.ua: %s", scriptText)
+	}
+	if !strings.Contains(scriptText, "<pre><code class=\"language-javascript\">") {
+		t.Errorf("formatConsoleScriptScreen missing code block: %s", scriptText)
+	}
+
+	scriptKb := consoleScriptKeyboard()
+	if len(scriptKb.InlineKeyboard) != 2 {
+		t.Fatalf("expected 2 rows in consoleScriptKeyboard, got %d", len(scriptKb.InlineKeyboard))
+	}
+	if scriptKb.InlineKeyboard[0][0].CallbackData != menuCallbackData("install_script") {
+		t.Errorf("expected refresh on first button, got %s", scriptKb.InlineKeyboard[0][0].CallbackData)
+	}
+
+	// 6. Check startKeyboard buttons
 	startKbNone := startKeyboard(linkStateNone)
 	if len(startKbNone.InlineKeyboard) != 1 || len(startKbNone.InlineKeyboard[0]) != 2 {
 		t.Fatalf("expected 1 row with 2 buttons in startKeyboard(linkStateNone), got %+v", startKbNone.InlineKeyboard)

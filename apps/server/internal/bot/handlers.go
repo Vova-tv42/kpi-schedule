@@ -399,7 +399,7 @@ func (b *Bot) cmdInstall(bot *gotgbot.Bot, ctx *ext.Context) error {
 
 	_, err := bot.SendMessage(ctx.EffectiveChat.Id, formatInstallScreen(), &gotgbot.SendMessageOpts{
 		ParseMode:          "HTML",
-		ReplyMarkup:        installKeyboard(b.ExtensionDownloadURL()),
+		ReplyMarkup:        installKeyboard(),
 		LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
 	})
 	return err
