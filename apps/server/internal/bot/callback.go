@@ -31,6 +31,7 @@ const (
 	groupNavCallbackPrefix  = "gnav:"  // group schedule day screen: prev / today / next
 	groupWeekCallbackPrefix = "gweek:" // group schedule week screen: slots / today
 	groupSyncCallbackPrefix = "gsync:" // group URL sync: confirm / cancel
+	groupPingCallbackPrefix = "gping:" // group /ping set: confirm / cancel
 	issuesCallbackPrefix    = "iss:"   // issues screens: menu / new / type / list / view / thread
 )
 
@@ -937,6 +938,120 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		notice := fmt.Sprintf("🗑 Посилання для «<b>%s (%s)</b>» видалено.", html.EscapeString(target.Subject), tagAbbr(target.Tag))
 		return b.applyScreen(bot, cq, formatGroupLessonsMenu(g.AcademicGroupName, lessons, notice), groupURLsKeyboard(parts[0], lessons), true)
 
+	case action == "ping_noop":
+		return answerSilently(bot, cq)
+
+	case strings.HasPrefix(action, "ping:"):
+		idStr := strings.TrimPrefix(action, "ping:")
+		gid, err := uuid.Parse(idStr)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" && rel != "accepted" {
+			return answerWithError(bot, cq)
+		}
+		_ = b.db.ClearGroupPrompt(reqCtx, cq.From.Id)
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		if g.TelegramChatID == nil {
+			_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+				Text:      "⚠️ Спочатку прив'яжіть групу до чату, щоб налаштувати /ping.",
+				ShowAlert: true,
+			})
+			return ansErr
+		}
+		users, err := b.db.GetGroupPingUsers(reqCtx, gid)
+		if err != nil {
+			slog.Error("fetching group ping users", "error", err, "group_id", gid)
+			return answerWithError(bot, cq)
+		}
+		return b.applyScreen(bot, cq, formatGroupPingMenu(g.AcademicGroupName, users, ""), groupPingKeyboard(idStr, users, 0), true)
+
+	case strings.HasPrefix(action, "ping_page:"):
+		rest := strings.TrimPrefix(action, "ping_page:")
+		parts := strings.Split(rest, ":")
+		if len(parts) != 2 {
+			return answerSilently(bot, cq)
+		}
+		gid, err := uuid.Parse(parts[0])
+		page, err2 := strconv.Atoi(parts[1])
+		if err != nil || err2 != nil {
+			return answerSilently(bot, cq)
+		}
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" && rel != "accepted" {
+			return answerWithError(bot, cq)
+		}
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		users, err := b.db.GetGroupPingUsers(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		return b.applyScreen(bot, cq, formatGroupPingMenu(g.AcademicGroupName, users, ""), groupPingKeyboard(parts[0], users, page), true)
+
+	case strings.HasPrefix(action, "ping_rm:"):
+		rest := strings.TrimPrefix(action, "ping_rm:")
+		parts := strings.Split(rest, ":")
+		if len(parts) != 3 {
+			return answerSilently(bot, cq)
+		}
+		gid, err := uuid.Parse(parts[0])
+		page, err2 := strconv.Atoi(parts[1])
+		username := parts[2]
+		if err != nil || err2 != nil {
+			return answerSilently(bot, cq)
+		}
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" && rel != "accepted" {
+			return answerWithError(bot, cq)
+		}
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		if err := b.db.RemoveGroupPingUser(reqCtx, gid, username); err != nil {
+			slog.Error("removing group ping user", "error", err, "group_id", gid, "username", username)
+			return answerWithError(bot, cq)
+		}
+		users, err := b.db.GetGroupPingUsers(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		notice := fmt.Sprintf("🗑 Користувача «@%s» видалено зі списку.", html.EscapeString(username))
+		return b.applyScreen(bot, cq, formatGroupPingMenu(g.AcademicGroupName, users, notice), groupPingKeyboard(parts[0], users, page), true)
+
+	case strings.HasPrefix(action, "ping_add:"):
+		idStr := strings.TrimPrefix(action, "ping_add:")
+		gid, err := uuid.Parse(idStr)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		rel, _ := b.db.GetGroupAdminRelation(reqCtx, gid, cq.From.Id)
+		if rel != "creator" && rel != "accepted" {
+			return answerWithError(bot, cq)
+		}
+		g, err := b.db.GetBotGroupByID(reqCtx, gid)
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		msgID := cq.Message.GetMessageId()
+		err = b.db.SetGroupPrompt(reqCtx, model.GroupPrompt{
+			TelegramID:      cq.From.Id,
+			PromptMessageID: msgID,
+			Action:          "add_ping_users",
+			GroupID:         &gid,
+		})
+		if err != nil {
+			return answerWithError(bot, cq)
+		}
+		return b.applyScreen(bot, cq, formatGroupPingAddPrompt(g.AcademicGroupName, ""), groupPingAddKeyboard(idStr), true)
+
 	case strings.HasPrefix(action, "edit_acad:"):
 		idStr := strings.TrimPrefix(action, "edit_acad:")
 		gid, err := uuid.Parse(idStr)
@@ -1219,6 +1334,82 @@ func (b *Bot) onGroupSync(bot *gotgbot.Bot, ctx *ext.Context) error {
 
 		callerName := formatUserName(&cq.From)
 		successMsg := formatGroupSyncSuccess(callerName, group.AcademicGroupName, updatedCount)
+		_, sendErr := bot.SendMessage(chatID, successMsg, &gotgbot.SendMessageOpts{
+			ParseMode:          "HTML",
+			LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
+		})
+		return sendErr
+	}
+
+	return nil
+}
+
+// onGroupPing handles callbacks from the in-group /ping set confirmation prompt (gping:confirm:... or gping:cancel:...).
+func (b *Bot) onGroupPing(bot *gotgbot.Bot, ctx *ext.Context) error {
+	cq := ctx.CallbackQuery
+	if cq == nil || cq.Message == nil {
+		if cq != nil {
+			return answerSilently(bot, cq)
+		}
+		return nil
+	}
+	action := strings.TrimPrefix(cq.Data, groupPingCallbackPrefix)
+	parts := strings.SplitN(action, ":", 3)
+	if len(parts) != 3 {
+		return answerSilently(bot, cq)
+	}
+	act, callerIDStr, pendingIDStr := parts[0], parts[1], parts[2]
+	callerID, err := strconv.ParseInt(callerIDStr, 10, 64)
+	if err != nil {
+		return answerSilently(bot, cq)
+	}
+	pendingID, err := uuid.Parse(pendingIDStr)
+	if err != nil {
+		return answerSilently(bot, cq)
+	}
+
+	if cq.From.Id != callerID {
+		_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+			Text:      "⚠️ Ця дія призначена для іншого адміністратора.",
+			ShowAlert: true,
+		})
+		return ansErr
+	}
+
+	chatID := cq.Message.GetChat().Id
+	if !isChatAdmin(bot, chatID, cq.From.Id) {
+		_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+			Text:      "⚠️ Тільки адміністратори цього чату можуть підтверджувати налаштування.",
+			ShowAlert: true,
+		})
+		return ansErr
+	}
+
+	// Always delete confirmation prompt from chat
+	_, _ = bot.DeleteMessage(chatID, cq.Message.GetMessageId(), nil)
+	_ = answerSilently(bot, cq)
+
+	reqCtx := context.Background()
+	pGID, _, _, usernames, err := b.db.GetGroupPingPending(reqCtx, pendingID)
+	_ = b.db.DeleteGroupPingPending(reqCtx, pendingID)
+
+	if act == "cancel" || err != nil {
+		return nil
+	}
+
+	if act == "confirm" {
+		group, gErr := b.db.GetBotGroupByID(reqCtx, pGID)
+		if gErr != nil {
+			slog.Error("fetching group for ping confirmation", "error", gErr, "group_id", pGID)
+			return nil
+		}
+		if err := b.db.SetGroupPingUsers(reqCtx, pGID, usernames); err != nil {
+			slog.Error("setting group ping users from confirmation", "error", err, "group_id", pGID)
+			return nil
+		}
+
+		callerName := formatUserName(&cq.From)
+		successMsg := formatGroupPingSetSuccess(callerName, group.AcademicGroupName, len(usernames))
 		_, sendErr := bot.SendMessage(chatID, successMsg, &gotgbot.SendMessageOpts{
 			ParseMode:          "HTML",
 			LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},

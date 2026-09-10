@@ -2,7 +2,7 @@
 
 > **Runtime note.** The bot is **not a separate service**. It runs inside the single Go backend (`apps/server/internal/bot/`, using `gotgbot/v2`) and shares its process, database, cache, and scheduler. It calls `internal/api.Service` and `internal/storage.DB` directly, in-process — not over HTTP with `X-Internal-Token`, even though the `/api/v1/auth/pair/generate` and `/api/v1/schedule/*` endpoints exist and are internal-token-protected for other internal/admin callers. Updates arrive via webhook (`POST /api/v1/telegram/webhook`), authenticated by `secret_token` via the `X-Telegram-Bot-Api-Secret-Token` header and exempt from IP rate limiting (see `docs/architecture/error-handling-resilience.md` §5). Both local development (via ngrok/tunnel) and production use webhooks — no long polling is used. See [`docs/project-repository.md` §4.1](../project-repository.md) for the rationale.
 >
-> **Implementation status.** `/start`, `/install`, `/link`, `/today`, `/tomorrow`, `/week`, `/me_today`, `/me_tomorrow`, `/me_week`, `/urls`, `/group`, `/group_today`, `/group_tomorrow`, `/group_week`, `/group_url_sync`, and `/settings` are implemented. `/help`, morning reminders, and the stale-schedule background check are **not implemented yet** — see §6.
+> **Implementation status.** `/start`, `/install`, `/link`, `/today`, `/tomorrow`, `/week`, `/me_today`, `/me_tomorrow`, `/me_week`, `/urls`, `/group`, `/group_today`, `/group_tomorrow`, `/group_week`, `/group_url_sync`, `/ping`, and `/settings` are implemented. `/help`, morning reminders, and the stale-schedule background check are **not implemented yet** — see §6.
 
 ## 1. Bot Purpose & Features
 
@@ -31,11 +31,12 @@ Commands are scoped via Telegram's `setMyCommands` API (`BotCommandScopeAllPriva
 | `/me_today` (`/me-today`) | DM & Groups | `Показати персональний розклад на сьогодні` | ✅ Implemented | Shows today's personal classes. In groups, prepends `👤 Розклад: <Користувач>` attributing who last triggered or navigated the schedule (see §3.5). |
 | `/me_tomorrow` (`/me-tomorrow`) | DM & Groups | `Показати персональний розклад на завтра` | ✅ Implemented | Shows tomorrow's personal classes. In groups, carries caller attribution (see §3.5). |
 | `/me_week` (`/me-week`) | DM & Groups | `Показати персональний розклад на тиждень` | ✅ Implemented | Shows one academic week compactly. In groups, also carries caller attribution (see §3.5). |
-| `/group` | Chat Admins & DM | `Керування академічною групою` | ✅ Implemented | In DMs: interactive group management menu (create, view, edit academic group, unbind, delete, toggle notifications, manage admins). In groups: registered exclusively under `BotCommandScopeAllChatAdministrators` (invisible to regular members), providing secure callback buttons to configure in DM. |
+| `/group` | Chat Admins & DM | `Керування академічною групою` | ✅ Implemented | In DMs: interactive group management menu (create, view, edit academic group, unbind, delete, toggle notifications, manage admins, configure `/ping`). In groups: registered exclusively under `BotCommandScopeAllChatAdministrators` (invisible to regular members), providing secure callback buttons to configure in DM. |
 | `/group_today` (`/group-today`) | Groups only | `Показати розклад групи на сьогодні` | ✅ Implemented (Alias) | Legacy alias for `/today` in groups. Shows today's overall group schedule fetched directly from the secondary Campus API (`api.campus.kpi.ua`). |
 | `/group_tomorrow` (`/group-tomorrow`) | Groups only | `Показати розклад групи на завтра` | ✅ Implemented (Alias) | Legacy alias for `/tomorrow` in groups. Shows tomorrow's overall group schedule fetched directly from the secondary Campus API (`api.campus.kpi.ua`). |
 | `/group_week` (`/group-week`) | Groups only | `Показати розклад групи на тиждень` | ✅ Implemented (Alias) | Legacy alias for `/week` in groups. Shows overall group schedule for a week. |
 | `/group_url_sync` (`/group-url-sync`) | Groups only | `Синхронізувати посилання з розкладу групи` | ✅ Implemented | Synchronizes the caller's personal schedule lesson URLs with the URLs configured for the academic group bound to the chat (see §3.5). Prompts with a confirmation screen (Proceed/Cancel) that auto-deletes on action; replaces only identical lessons configured in the group settings. |
+| `/ping` | Groups only | Group: `Покликати учасників групи`<br>Admin: `Покликати учасників (/ping set для налаштування)` | ✅ Implemented | In groups: tags configured non-bot members (`@user1 @user2 ...`) in batches. Admins can execute `/ping set @u1 @u2 ...` to quickly override the ping roster with an auto-deleted confirmation prompt (see §3.5). |
 | `/settings` | DM only | `Налаштування сповіщень` | ✅ Implemented | Manage lesson reminders (10m before and at start) with in-place toggle. |
 | `/issues` | DM only | `Повідомити про помилку або запропонувати ідею` | ✅ Implemented | Files bug reports and feature requests through a guided type → title → description wizard, and lists the caller's own issues with their triage status. See [issues.md](issues.md). |
 | `/help` | Both | `Довідка та інструкції` | Not yet built | FAQ, troubleshooting, and links to web extension. |
@@ -289,6 +290,28 @@ To prevent chat flooding, unauthorized modifications, and permission leaks:
   - Updates only URLs that are new or different from the student's personal configuration. If all URLs are already identical, reports that no new URLs were found.
   - Personal elective courses or courses outside the group schedule are never altered.
   - Upon selecting `Proceed`, sends a confirmation message to the group: `✅ <Користувач>, посилання на онлайн-заняття успішно синхронізовано з налаштуваннями групи <Група>! (Оновлено занять: <N>)` (or `ℹ️ ... Нових посилань для твоїх занять у групі не знайдено.` when 0 were changed).
+
+#### 7. Group Member Mention Command (`/ping`) & Roster Configuration
+- **Purpose**: Mention configured members of the academic group in a single message (e.g. `@user1 @user2 @user3 ...`). Available in group chats only.
+- **Invocation by Anyone**: Any member in the bound group chat can trigger `/ping` (with an optional custom text message appended, e.g. `/ping Прокидайтесь!`). The bot tags all configured non-bot users in batches of 40 to avoid message size and mention rate limit truncation.
+- **Admin Quick-Set Command (`/ping set`)**:
+  - Chat administrators can invoke `/ping set @user1 @user2 ...` in the group chat.
+  - Automatically filters out bot usernames (usernames ending with `bot`, case-insensitive).
+  - To prevent chat pollution, the bot immediately deletes the admin's `/ping set ...` command message via `deleteMessage`.
+  - Sends an interactive confirmation prompt (`formatGroupPingSetConfirm`) showing the list of users in a blockquote with `[ ✅ Продовжити ]` and `[ ❌ Скасувати ]` buttons.
+  - Caller and admin status are verified on callback query; non-admins and other members cannot confirm the change.
+  - Upon selecting either button, the confirmation message is deleted immediately. If confirmed, the group's ping roster is replaced in `bot_group_ping_users`, and a brief confirmation is posted to the chat.
+- **Interactive DM Configuration (`/group` in DM)**:
+  - From the group settings menu (`formatGroupConfig`), authorized group administrators can tap `[ 📣 Налаштування /ping ]`.
+  - **Connected Users Roster**:
+    - Displays all configured usernames in a Telegram `<blockquote>` block.
+    - Each user is represented as an inline button: `[ ❌ @username ]`. Tapping the button removes the user from the ping roster and updates the screen in place.
+    - **Pagination**: 5 users per page. If total pages > 1, displays a pagination row with `◀️` and `▶️`. The row uses `⏹️` as a disabled indicator when on the first or last page.
+  - **Adding Users**:
+    - Tapping `[ ➕ Додати користувачів ]` prompts the admin to enter usernames separated by whitespace or newlines.
+    - User message is deleted immediately (`deleteMessage`).
+    - Skips bot usernames and invalid characters, reporting what was added and what was omitted in an informative notice.
+    - Persisted in `bot_group_ping_users` and cleared upon group deletion.
 
 ---
 

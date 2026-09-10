@@ -359,6 +359,7 @@ func TestCommandScopesAndDescriptions(t *testing.T) {
 		"me_tomorrow":    "Показати персональний розклад на завтра",
 		"me_week":        "Показати персональний розклад на тиждень",
 		"group_url_sync": "Синхронізувати посилання з розкладу групи",
+		"ping":           "Покликати учасників групи",
 	}
 
 	if len(grpMap) != len(expectedGrp) {
@@ -390,7 +391,13 @@ func TestCommandScopesAndDescriptions(t *testing.T) {
 	if adminMap["group"] != "Керування академічною групою" {
 		t.Errorf("expected admin command 'group' to be present, got %q", adminMap["group"])
 	}
+	if adminMap["ping"] != "Покликати учасників (/ping set для налаштування)" {
+		t.Errorf("expected admin command 'ping' to be present, got %q", adminMap["ping"])
+	}
 	for cmd, desc := range expectedGrp {
+		if cmd == "ping" {
+			continue
+		}
 		if adminMap[cmd] != desc {
 			t.Errorf("expected admin command %s to have description %q, got %q", cmd, desc, adminMap[cmd])
 		}

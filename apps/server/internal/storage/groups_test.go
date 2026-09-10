@@ -403,3 +403,114 @@ func TestDeleteOrTransferGroupOwnership(t *testing.T) {
 	}
 }
 
+func TestGroupPingUsers(t *testing.T) {
+	ctx := context.Background()
+	db, _, telegramID := setupTestDB(t)
+
+	g, err := db.CreateBotGroup(ctx, telegramID, 4402, "ІП-21", "ФІОТ", nil, "")
+	if err != nil {
+		t.Fatalf("CreateBotGroup: %v", err)
+	}
+
+	// Initially empty
+	users, err := db.GetGroupPingUsers(ctx, g.ID)
+	if err != nil {
+		t.Fatalf("GetGroupPingUsers: %v", err)
+	}
+	if len(users) != 0 {
+		t.Errorf("expected 0 users initially, got %d", len(users))
+	}
+
+	// Add users
+	added, err := db.AddGroupPingUsers(ctx, g.ID, []string{"user_b", "user_a", "user_c"})
+	if err != nil {
+		t.Fatalf("AddGroupPingUsers: %v", err)
+	}
+	if added != 3 {
+		t.Errorf("expected 3 added, got %d", added)
+	}
+
+	// Adding duplicate
+	addedDup, err := db.AddGroupPingUsers(ctx, g.ID, []string{"user_a", "user_d"})
+	if err != nil {
+		t.Fatalf("AddGroupPingUsers dup: %v", err)
+	}
+	if addedDup != 1 {
+		t.Errorf("expected 1 added, got %d", addedDup)
+	}
+
+	// Verify alphabetical order
+	users, err = db.GetGroupPingUsers(ctx, g.ID)
+	if err != nil {
+		t.Fatalf("GetGroupPingUsers: %v", err)
+	}
+	expected := []string{"user_a", "user_b", "user_c", "user_d"}
+	if len(users) != len(expected) {
+		t.Fatalf("expected %d users, got %d", len(expected), len(users))
+	}
+	for i, exp := range expected {
+		if users[i] != exp {
+			t.Errorf("at index %d: expected %s, got %s", i, exp, users[i])
+		}
+	}
+
+	// Remove a user
+	if err := db.RemoveGroupPingUser(ctx, g.ID, "user_b"); err != nil {
+		t.Fatalf("RemoveGroupPingUser: %v", err)
+	}
+	users, err = db.GetGroupPingUsers(ctx, g.ID)
+	if err != nil {
+		t.Fatalf("GetGroupPingUsers: %v", err)
+	}
+	if len(users) != 3 || users[1] != "user_c" {
+		t.Errorf("unexpected users after removal: %+v", users)
+	}
+
+	// Set users (overwrite)
+	newUsers := []string{"new_1", "new_2"}
+	if err := db.SetGroupPingUsers(ctx, g.ID, newUsers); err != nil {
+		t.Fatalf("SetGroupPingUsers: %v", err)
+	}
+	users, err = db.GetGroupPingUsers(ctx, g.ID)
+	if err != nil {
+		t.Fatalf("GetGroupPingUsers: %v", err)
+	}
+	if len(users) != 2 || users[0] != "new_1" || users[1] != "new_2" {
+		t.Errorf("unexpected users after SetGroupPingUsers: %+v", users)
+	}
+
+	// Pending operations
+	pendingID := uuid.New()
+	var chatID int64 = -100123
+	var callerID int64 = 999
+	if err := db.SaveGroupPingPending(ctx, pendingID, g.ID, chatID, callerID, []string{"p1", "p2"}); err != nil {
+		t.Fatalf("SaveGroupPingPending: %v", err)
+	}
+	pGID, pChatID, pUserID, pList, err := db.GetGroupPingPending(ctx, pendingID)
+	if err != nil {
+		t.Fatalf("GetGroupPingPending: %v", err)
+	}
+	if pGID != g.ID || pChatID != chatID || pUserID != callerID || len(pList) != 2 {
+		t.Errorf("mismatched pending data: gid=%s chat=%d user=%d list=%+v", pGID, pChatID, pUserID, pList)
+	}
+	if err := db.DeleteGroupPingPending(ctx, pendingID); err != nil {
+		t.Fatalf("DeleteGroupPingPending: %v", err)
+	}
+	_, _, _, _, err = db.GetGroupPingPending(ctx, pendingID)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound after pending deletion, got: %v", err)
+	}
+
+	// Group deletion cascades to ping users
+	if err := db.DeleteBotGroup(ctx, g.ID); err != nil {
+		t.Fatalf("DeleteBotGroup: %v", err)
+	}
+	users, err = db.GetGroupPingUsers(ctx, g.ID)
+	if err != nil {
+		t.Fatalf("GetGroupPingUsers after delete: %v", err)
+	}
+	if len(users) != 0 {
+		t.Errorf("expected 0 users after group delete, got %d", len(users))
+	}
+}
+
