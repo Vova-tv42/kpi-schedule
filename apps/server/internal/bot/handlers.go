@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
@@ -826,17 +827,19 @@ func (b *Bot) cmdPing(bot *gotgbot.Bot, ctx *ext.Context) error {
 
 	rawText := strings.TrimSpace(ctx.EffectiveMessage.Text)
 	args := strings.TrimSpace(strings.TrimPrefix(rawText, "/ping"))
-	if bot.Username != "" && strings.HasPrefix(args, "@"+bot.Username) {
-		args = strings.TrimSpace(strings.TrimPrefix(args, "@"+bot.Username))
+	botPrefix := "@" + bot.Username
+	if bot.Username != "" && len(args) >= len(botPrefix) && strings.EqualFold(args[:len(botPrefix)], botPrefix) {
+		args = strings.TrimSpace(args[len(botPrefix):])
 	}
 
-	if strings.HasPrefix(args, "set") {
+	isSetCmd := args == "set" || strings.HasPrefix(args, "set ") || strings.HasPrefix(args, "set\n")
+	if isSetCmd {
 		if ctx.EffectiveUser == nil || !isChatAdmin(bot, ctx.EffectiveChat.Id, ctx.EffectiveUser.Id) {
 			_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, "⚠️ Тільки адміністратори цього чату можуть налаштовувати список /ping.", nil)
 			return sendErr
 		}
 
-		remainder := strings.TrimSpace(strings.TrimPrefix(args, "set"))
+		remainder := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(args, "set"), "\n"))
 		valid, bots, invalid := parseUsernames(remainder)
 		if len(valid) == 0 {
 			if len(bots) > 0 && len(invalid) == 0 {
@@ -859,12 +862,17 @@ func (b *Bot) cmdPing(bot *gotgbot.Bot, ctx *ext.Context) error {
 
 		callerName := formatUserName(ctx.EffectiveUser)
 		confirmText := formatGroupPingSetConfirm(callerName, group.AcademicGroupName, valid)
-		kb := groupPingSetKeyboard(ctx.EffectiveUser.Id, pendingID.String())
+		kb := groupPingSetKeyboard(pendingID.String())
 		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, confirmText, &gotgbot.SendMessageOpts{
 			ParseMode:          "HTML",
 			ReplyMarkup:        kb,
 			LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
 		})
+		return sendErr
+	}
+
+	if utf8.RuneCountInString(args) > 1000 {
+		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, "⚠️ Текст повідомлення занадто довгий (максимум 1000 символів).", nil)
 		return sendErr
 	}
 

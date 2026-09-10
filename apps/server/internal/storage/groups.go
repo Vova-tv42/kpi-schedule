@@ -561,21 +561,30 @@ func (db *DB) AddGroupPingUsers(ctx context.Context, groupID uuid.UUID, username
 	if len(usernames) == 0 {
 		return 0, nil
 	}
+	tx, err := db.SQL.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("beginning add ping users tx: %w", err)
+	}
+	defer tx.Rollback()
+
 	now := time.Now().UTC()
 	added := 0
 	for _, u := range usernames {
-		res, err := db.SQL.ExecContext(ctx, `
+		res, err := tx.ExecContext(ctx, `
 			INSERT INTO bot_group_ping_users (group_id, username, created_at)
 			VALUES (?, ?, ?)
 			ON CONFLICT (group_id, username) DO NOTHING
 		`, groupID.String(), u, now)
 		if err != nil {
-			return added, fmt.Errorf("inserting group ping user: %w", err)
+			return 0, fmt.Errorf("inserting group ping user: %w", err)
 		}
 		n, _ := res.RowsAffected()
 		if n > 0 {
 			added++
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("committing add ping users tx: %w", err)
 	}
 	return added, nil
 }
@@ -623,6 +632,10 @@ func (db *DB) SaveGroupPingPending(ctx context.Context, id uuid.UUID, groupID uu
 	rawJSON, err := json.Marshal(usernames)
 	if err != nil {
 		return fmt.Errorf("marshaling ping pending usernames: %w", err)
+	}
+	// Clear any previous pending confirmation for this chat and group to prevent stale row accumulation.
+	if _, err := db.SQL.ExecContext(ctx, `DELETE FROM bot_group_ping_pending WHERE group_id = ? AND chat_id = ?`, groupID.String(), chatID); err != nil {
+		return fmt.Errorf("clearing previous group ping pending: %w", err)
 	}
 	now := time.Now().UTC()
 	_, err = db.SQL.ExecContext(ctx, `

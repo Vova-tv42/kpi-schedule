@@ -1,12 +1,10 @@
 -- +goose Up
 CREATE TABLE bot_group_ping_users (
     group_id   TEXT NOT NULL REFERENCES bot_groups(id) ON DELETE CASCADE,
-    username   TEXT NOT NULL,
+    username   TEXT NOT NULL COLLATE NOCASE,
     created_at TIMESTAMP NOT NULL,
     PRIMARY KEY (group_id, username)
 );
-
-CREATE INDEX idx_bot_group_ping_users_group ON bot_group_ping_users (group_id);
 
 CREATE TABLE bot_group_ping_pending (
     id         TEXT PRIMARY KEY,
@@ -19,5 +17,4 @@ CREATE TABLE bot_group_ping_pending (
 
 -- +goose Down
 DROP TABLE IF EXISTS bot_group_ping_pending;
-DROP INDEX IF EXISTS idx_bot_group_ping_users_group;
 DROP TABLE IF EXISTS bot_group_ping_users;

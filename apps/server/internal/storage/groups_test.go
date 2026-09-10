@@ -439,6 +439,15 @@ func TestGroupPingUsers(t *testing.T) {
 		t.Errorf("expected 1 added, got %d", addedDup)
 	}
 
+	// Adding case-insensitive duplicate
+	addedCaseDup, err := db.AddGroupPingUsers(ctx, g.ID, []string{"USER_A", "User_D"})
+	if err != nil {
+		t.Fatalf("AddGroupPingUsers case-insensitive dup: %v", err)
+	}
+	if addedCaseDup != 0 {
+		t.Errorf("expected 0 added for case-insensitive duplicates, got %d", addedCaseDup)
+	}
+
 	// Verify alphabetical order
 	users, err = db.GetGroupPingUsers(ctx, g.ID)
 	if err != nil {
@@ -493,10 +502,21 @@ func TestGroupPingUsers(t *testing.T) {
 	if pGID != g.ID || pChatID != chatID || pUserID != callerID || len(pList) != 2 {
 		t.Errorf("mismatched pending data: gid=%s chat=%d user=%d list=%+v", pGID, pChatID, pUserID, pList)
 	}
-	if err := db.DeleteGroupPingPending(ctx, pendingID); err != nil {
-		t.Fatalf("DeleteGroupPingPending: %v", err)
+
+	// Stale pending cleanup test: saving new pending for same group and chat clears previous
+	pendingID2 := uuid.New()
+	if err := db.SaveGroupPingPending(ctx, pendingID2, g.ID, chatID, callerID, []string{"p3"}); err != nil {
+		t.Fatalf("SaveGroupPingPending 2: %v", err)
 	}
 	_, _, _, _, err = db.GetGroupPingPending(ctx, pendingID)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected old pendingID to be overwritten/cleared, got: %v", err)
+	}
+
+	if err := db.DeleteGroupPingPending(ctx, pendingID2); err != nil {
+		t.Fatalf("DeleteGroupPingPending: %v", err)
+	}
+	_, _, _, _, err = db.GetGroupPingPending(ctx, pendingID2)
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound after pending deletion, got: %v", err)
 	}

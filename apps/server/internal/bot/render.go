@@ -1245,6 +1245,11 @@ func parseUsernames(raw string) (valid []string, bots []string, invalid []string
 			continue
 		}
 		lower := strings.ToLower(token)
+		if seen[lower] {
+			continue
+		}
+		seen[lower] = true
+
 		if strings.HasSuffix(lower, "bot") {
 			bots = append(bots, token)
 			continue
@@ -1253,12 +1258,14 @@ func parseUsernames(raw string) (valid []string, bots []string, invalid []string
 			invalid = append(invalid, token)
 			continue
 		}
-		if !seen[lower] {
-			seen[lower] = true
-			valid = append(valid, token)
-		}
+		valid = append(valid, token)
 	}
 	return valid, bots, invalid
+}
+
+func pingUserHash(u string) string {
+	h := sha256.Sum256([]byte(strings.ToLower(u)))
+	return hex.EncodeToString(h[:4])
 }
 
 func isValidUsernameChars(s string) bool {
@@ -1319,7 +1326,7 @@ func groupPingKeyboard(groupID string, users []string, page int) gotgbot.InlineK
 
 	for _, u := range users[start:end] {
 		rows = append(rows, []gotgbot.InlineKeyboardButton{
-			{Text: "❌ @" + u, CallbackData: fmt.Sprintf("%sping_rm:%s:%d:%s", groupCallbackPrefix, groupID, page, u)},
+			{Text: "❌ @" + u, CallbackData: fmt.Sprintf("%sprm:%s:%d:%s", groupCallbackPrefix, groupID, page, pingUserHash(u))},
 		})
 	}
 
@@ -1383,19 +1390,19 @@ func formatGroupPingSetConfirm(callerName, groupName string, users []string) str
 	return b.String()
 }
 
-func groupPingSetKeyboard(callerID int64, pendingID string) gotgbot.InlineKeyboardMarkup {
+func groupPingSetKeyboard(pendingID string) gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 			{
-				{Text: "✅ Продовжити", CallbackData: fmt.Sprintf("%sconfirm:%d:%s", groupPingCallbackPrefix, callerID, pendingID)},
-				{Text: "❌ Скасувати", CallbackData: fmt.Sprintf("%scancel:%d:%s", groupPingCallbackPrefix, callerID, pendingID)},
+				{Text: "✅ Продовжити", CallbackData: fmt.Sprintf("%sconfirm:%s", groupPingCallbackPrefix, pendingID)},
+				{Text: "❌ Скасувати", CallbackData: fmt.Sprintf("%scancel:%s", groupPingCallbackPrefix, pendingID)},
 			},
 		},
 	}
 }
 
 func formatGroupPingSetSuccess(callerName, groupName string, count int) string {
-	return fmt.Sprintf("✅ <b>%s</b>, список користувачів для /ping успішно оновлено! (Всього користувачів: %d)", html.EscapeString(callerName), count)
+	return fmt.Sprintf("✅ <b>%s</b>, список користувачів для /ping у групі <b>%s</b> успішно оновлено! (Всього користувачів: %d)", html.EscapeString(callerName), html.EscapeString(groupName), count)
 }
 
 

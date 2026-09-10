@@ -995,15 +995,15 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		}
 		return b.applyScreen(bot, cq, formatGroupPingMenu(g.AcademicGroupName, users, ""), groupPingKeyboard(parts[0], users, page), true)
 
-	case strings.HasPrefix(action, "ping_rm:"):
-		rest := strings.TrimPrefix(action, "ping_rm:")
+	case strings.HasPrefix(action, "prm:"):
+		rest := strings.TrimPrefix(action, "prm:")
 		parts := strings.Split(rest, ":")
 		if len(parts) != 3 {
 			return answerSilently(bot, cq)
 		}
 		gid, err := uuid.Parse(parts[0])
 		page, err2 := strconv.Atoi(parts[1])
-		username := parts[2]
+		targetHash := parts[2]
 		if err != nil || err2 != nil {
 			return answerSilently(bot, cq)
 		}
@@ -1015,15 +1015,29 @@ func (b *Bot) onGroup(bot *gotgbot.Bot, ctx *ext.Context) error {
 		if err != nil {
 			return answerWithError(bot, cq)
 		}
-		if err := b.db.RemoveGroupPingUser(reqCtx, gid, username); err != nil {
-			slog.Error("removing group ping user", "error", err, "group_id", gid, "username", username)
-			return answerWithError(bot, cq)
-		}
 		users, err := b.db.GetGroupPingUsers(reqCtx, gid)
 		if err != nil {
 			return answerWithError(bot, cq)
 		}
-		notice := fmt.Sprintf("🗑 Користувача «@%s» видалено зі списку.", html.EscapeString(username))
+		var targetUser string
+		for _, u := range users {
+			if pingUserHash(u) == targetHash {
+				targetUser = u
+				break
+			}
+		}
+		var notice string
+		if targetUser != "" {
+			if err := b.db.RemoveGroupPingUser(reqCtx, gid, targetUser); err != nil {
+				slog.Error("removing group ping user", "error", err, "group_id", gid, "username", targetUser)
+				return answerWithError(bot, cq)
+			}
+			users, err = b.db.GetGroupPingUsers(reqCtx, gid)
+			if err != nil {
+				return answerWithError(bot, cq)
+			}
+			notice = fmt.Sprintf("🗑 Користувача «@%s» видалено зі списку.", html.EscapeString(targetUser))
+		}
 		return b.applyScreen(bot, cq, formatGroupPingMenu(g.AcademicGroupName, users, notice), groupPingKeyboard(parts[0], users, page), true)
 
 	case strings.HasPrefix(action, "ping_add:"):
@@ -1354,21 +1368,26 @@ func (b *Bot) onGroupPing(bot *gotgbot.Bot, ctx *ext.Context) error {
 		return nil
 	}
 	action := strings.TrimPrefix(cq.Data, groupPingCallbackPrefix)
-	parts := strings.SplitN(action, ":", 3)
-	if len(parts) != 3 {
+	parts := strings.SplitN(action, ":", 2)
+	if len(parts) != 2 {
 		return answerSilently(bot, cq)
 	}
-	act, callerIDStr, pendingIDStr := parts[0], parts[1], parts[2]
-	callerID, err := strconv.ParseInt(callerIDStr, 10, 64)
-	if err != nil {
-		return answerSilently(bot, cq)
-	}
+	act, pendingIDStr := parts[0], parts[1]
 	pendingID, err := uuid.Parse(pendingIDStr)
 	if err != nil {
 		return answerSilently(bot, cq)
 	}
 
-	if cq.From.Id != callerID {
+	reqCtx := context.Background()
+	pGID, pChatID, pUserID, usernames, err := b.db.GetGroupPingPending(reqCtx, pendingID)
+	if err != nil {
+		if cq.Message != nil {
+			_, _ = bot.DeleteMessage(cq.Message.GetChat().Id, cq.Message.GetMessageId(), nil)
+		}
+		return answerSilently(bot, cq)
+	}
+
+	if cq.From.Id != pUserID {
 		_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
 			Text:      "⚠️ Ця дія призначена для іншого адміністратора.",
 			ShowAlert: true,
@@ -1377,7 +1396,7 @@ func (b *Bot) onGroupPing(bot *gotgbot.Bot, ctx *ext.Context) error {
 	}
 
 	chatID := cq.Message.GetChat().Id
-	if !isChatAdmin(bot, chatID, cq.From.Id) {
+	if chatID != pChatID || !isChatAdmin(bot, chatID, cq.From.Id) {
 		_, ansErr := bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
 			Text:      "⚠️ Тільки адміністратори цього чату можуть підтверджувати налаштування.",
 			ShowAlert: true,
@@ -1385,15 +1404,12 @@ func (b *Bot) onGroupPing(bot *gotgbot.Bot, ctx *ext.Context) error {
 		return ansErr
 	}
 
-	// Always delete confirmation prompt from chat
+	// Always delete confirmation prompt from chat once authorized
 	_, _ = bot.DeleteMessage(chatID, cq.Message.GetMessageId(), nil)
 	_ = answerSilently(bot, cq)
-
-	reqCtx := context.Background()
-	pGID, _, _, usernames, err := b.db.GetGroupPingPending(reqCtx, pendingID)
 	_ = b.db.DeleteGroupPingPending(reqCtx, pendingID)
 
-	if act == "cancel" || err != nil {
+	if act == "cancel" {
 		return nil
 	}
 
@@ -1401,11 +1417,13 @@ func (b *Bot) onGroupPing(bot *gotgbot.Bot, ctx *ext.Context) error {
 		group, gErr := b.db.GetBotGroupByID(reqCtx, pGID)
 		if gErr != nil {
 			slog.Error("fetching group for ping confirmation", "error", gErr, "group_id", pGID)
-			return nil
+			_, sendErr := bot.SendMessage(chatID, genericErrorText, nil)
+			return sendErr
 		}
 		if err := b.db.SetGroupPingUsers(reqCtx, pGID, usernames); err != nil {
 			slog.Error("setting group ping users from confirmation", "error", err, "group_id", pGID)
-			return nil
+			_, sendErr := bot.SendMessage(chatID, genericErrorText, nil)
+			return sendErr
 		}
 
 		callerName := formatUserName(&cq.From)

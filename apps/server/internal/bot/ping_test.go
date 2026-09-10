@@ -11,7 +11,7 @@ import (
 )
 
 func TestParseUsernames(t *testing.T) {
-	input := "@alice, @bob_99   @test_bot\n@charlie, @Alice @d @bad-name @super_long_username_that_is_way_too_long_for_telegram_rules"
+	input := "@alice, @bob_99   @test_bot\n@charlie, @Alice @d @bad-name @test_bot @d @super_long_username_that_is_way_too_long_for_telegram_rules"
 	valid, bots, invalid := parseUsernames(input)
 
 	// Valid should contain alice, bob_99, charlie (deduplicated case-insensitively)
@@ -25,12 +25,12 @@ func TestParseUsernames(t *testing.T) {
 		}
 	}
 
-	// Bots should contain test_bot
+	// Bots should contain test_bot (deduplicated)
 	if len(bots) != 1 || bots[0] != "test_bot" {
 		t.Errorf("expected bots [test_bot], got %+v", bots)
 	}
 
-	// Invalid should contain d, bad-name, super_long_...
+	// Invalid should contain d, bad-name, super_long_... (deduplicated)
 	if len(invalid) != 3 {
 		t.Errorf("expected 3 invalid usernames, got %d: %+v", len(invalid), invalid)
 	}
@@ -50,16 +50,25 @@ func TestGroupPingMenuAndKeyboard(t *testing.T) {
 		t.Fatalf("expected 2 rows in empty keyboard, got %d", len(emptyKB.InlineKeyboard))
 	}
 
-	// 2. 3 users (<= 5: no pagination row)
-	users3 := []string{"user1", "user2", "user3"}
+	// 2. 3 users (<= 5: no pagination row) with long username to check callback_data <= 64 bytes
+	users3 := []string{"user1", "user2", "very_long_username_32chars_long_"}
 	menu3 := formatGroupPingMenu("ІП-21", users3, "")
-	if !strings.Contains(menu3, "@user1 @user2 @user3") {
+	if !strings.Contains(menu3, "@user1 @user2 @very_long_username_32chars_long_") {
 		t.Errorf("expected usernames in quote block, got:\n%s", menu3)
 	}
 	kb3 := groupPingKeyboard(groupID, users3, 0)
 	// 3 user buttons + 1 add button + 1 back button = 5 rows, no pagination
 	if len(kb3.InlineKeyboard) != 5 {
 		t.Fatalf("expected 5 rows for 3 users without pagination, got %d", len(kb3.InlineKeyboard))
+	}
+	for _, row := range kb3.InlineKeyboard[:3] {
+		btn := row[0]
+		if !strings.HasPrefix(btn.CallbackData, groupCallbackPrefix+"prm:") {
+			t.Errorf("expected prm prefix in callback data, got %q", btn.CallbackData)
+		}
+		if len(btn.CallbackData) > 64 {
+			t.Errorf("callback data exceeds 64 bytes (%d bytes): %q", len(btn.CallbackData), btn.CallbackData)
+		}
 	}
 
 	// 3. 12 users (12 users / 5 per page = 3 pages: 0, 1, 2)
@@ -115,7 +124,6 @@ func TestGroupPingSetConfirmationAndKeyboard(t *testing.T) {
 	groupName := "ІП-21"
 	users := []string{"alice", "bob"}
 	pendingID := uuid.New().String()
-	var callerID int64 = 444555
 
 	confirmText := formatGroupPingSetConfirm(callerName, groupName, users)
 	if !strings.Contains(confirmText, "Іван Петренко") || !strings.Contains(confirmText, "ІП-21") {
@@ -128,7 +136,7 @@ func TestGroupPingSetConfirmationAndKeyboard(t *testing.T) {
 		t.Errorf("expected count 2 in confirm text, got:\n%s", confirmText)
 	}
 
-	kb := groupPingSetKeyboard(callerID, pendingID)
+	kb := groupPingSetKeyboard(pendingID)
 	if len(kb.InlineKeyboard) != 1 || len(kb.InlineKeyboard[0]) != 2 {
 		t.Fatalf("expected 1 row with 2 buttons, got %+v", kb.InlineKeyboard)
 	}
@@ -138,21 +146,27 @@ func TestGroupPingSetConfirmationAndKeyboard(t *testing.T) {
 	if !strings.Contains(proceedBtn.Text, "Продовжити") {
 		t.Errorf("expected proceed button text, got %q", proceedBtn.Text)
 	}
-	expectedProceedData := "gping:confirm:444555:" + pendingID
+	expectedProceedData := "gping:confirm:" + pendingID
 	if proceedBtn.CallbackData != expectedProceedData {
 		t.Errorf("expected %q, got %q", expectedProceedData, proceedBtn.CallbackData)
+	}
+	if len(proceedBtn.CallbackData) > 64 {
+		t.Errorf("proceed callback data exceeds 64 bytes: %q", proceedBtn.CallbackData)
 	}
 
 	if !strings.Contains(cancelBtn.Text, "Скасувати") {
 		t.Errorf("expected cancel button text, got %q", cancelBtn.Text)
 	}
-	expectedCancelData := "gping:cancel:444555:" + pendingID
+	expectedCancelData := "gping:cancel:" + pendingID
 	if cancelBtn.CallbackData != expectedCancelData {
 		t.Errorf("expected %q, got %q", expectedCancelData, cancelBtn.CallbackData)
 	}
+	if len(cancelBtn.CallbackData) > 64 {
+		t.Errorf("cancel callback data exceeds 64 bytes: %q", cancelBtn.CallbackData)
+	}
 
 	successText := formatGroupPingSetSuccess(callerName, groupName, 2)
-	if !strings.Contains(successText, "Іван Петренко") || !strings.Contains(successText, "успішно оновлено") || !strings.Contains(successText, "2") {
+	if !strings.Contains(successText, "Іван Петренко") || !strings.Contains(successText, "ІП-21") || !strings.Contains(successText, "успішно оновлено") || !strings.Contains(successText, "2") {
 		t.Errorf("unexpected success text:\n%s", successText)
 	}
 }
@@ -264,6 +278,38 @@ func TestGroupPingFlow(t *testing.T) {
 	}
 	if len(users) != 2 || users[0] != "david" || users[1] != "eva" {
 		t.Fatalf("expected [david, eva], got %+v", users)
+	}
+}
+
+func TestPingUserHashAndRemoval(t *testing.T) {
+	h1 := pingUserHash("Alice")
+	h2 := pingUserHash("alice")
+	if h1 != h2 {
+		t.Errorf("expected hash to be case-insensitive, got %s != %s", h1, h2)
+	}
+	if len(h1) != 8 {
+		t.Errorf("expected 8 hex chars, got %d (%s)", len(h1), h1)
+	}
+}
+
+func TestPingArgsParsing(t *testing.T) {
+	tests := []struct {
+		args     string
+		isSetCmd bool
+	}{
+		{"set @user1", true},
+		{"set\n@user1", true},
+		{"set", true},
+		{"setup meeting", false},
+		{"settings", false},
+		{"set_rules", false},
+		{"hello all", false},
+	}
+	for _, tc := range tests {
+		got := tc.args == "set" || strings.HasPrefix(tc.args, "set ") || strings.HasPrefix(tc.args, "set\n")
+		if got != tc.isSetCmd {
+			t.Errorf("args %q: expected isSetCmd=%v, got %v", tc.args, tc.isSetCmd, got)
+		}
 	}
 }
 
