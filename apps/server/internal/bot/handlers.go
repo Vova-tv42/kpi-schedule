@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
@@ -806,9 +807,166 @@ func (b *Bot) cmdGroupURLSync(bot *gotgbot.Bot, ctx *ext.Context) error {
 	return sendErr
 }
 
+func (b *Bot) cmdPing(bot *gotgbot.Bot, ctx *ext.Context) error {
+	if !isGroupChat(ctx.EffectiveChat) {
+		_, err := bot.SendMessage(ctx.EffectiveChat.Id, "⚠️ Ця команда доступна лише у групових чатах.", nil)
+		return err
+	}
+
+	reqCtx := context.Background()
+	group, err := b.db.GetBotGroupByChatID(reqCtx, ctx.EffectiveChat.Id)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, "⚙️ Для цього чату ще не налаштовано академічну групу. Адміністратор може налаштувати її за допомогою команди /group.", nil)
+			return sendErr
+		}
+		slog.Error("fetching group for /ping", "error", err, "chat_id", ctx.EffectiveChat.Id)
+		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, genericErrorText, nil)
+		return sendErr
+	}
+
+	rawText := strings.TrimSpace(ctx.EffectiveMessage.Text)
+	args := strings.TrimSpace(strings.TrimPrefix(rawText, "/ping"))
+	botPrefix := "@" + bot.Username
+	if bot.Username != "" && len(args) >= len(botPrefix) && strings.EqualFold(args[:len(botPrefix)], botPrefix) {
+		args = strings.TrimSpace(args[len(botPrefix):])
+	}
+
+	isSetCmd := args == "set" || strings.HasPrefix(args, "set ") || strings.HasPrefix(args, "set\n")
+	if isSetCmd {
+		if ctx.EffectiveUser == nil || !isChatAdmin(bot, ctx.EffectiveChat.Id, ctx.EffectiveUser.Id) {
+			_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, "⚠️ Тільки адміністратори цього чату можуть налаштовувати список /ping.", nil)
+			return sendErr
+		}
+
+		remainder := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(args, "set"), "\n"))
+		valid, bots, invalid := parseUsernames(remainder)
+		if len(valid) == 0 {
+			if len(bots) > 0 && len(invalid) == 0 {
+				_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, "⚠️ Боти не можуть бути додані до списку /ping.", nil)
+				return sendErr
+			}
+			_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, "⚠️ Будь ласка, вкажи коректні юзернейми: <code>/ping set @user1 @user2 ...</code>", &gotgbot.SendMessageOpts{ParseMode: "HTML"})
+			return sendErr
+		}
+
+		// Delete caller's /ping set message immediately
+		_, _ = bot.DeleteMessage(ctx.EffectiveChat.Id, ctx.EffectiveMessage.MessageId, nil)
+
+		pendingID := uuid.New()
+		if err := b.db.SaveGroupPingPending(reqCtx, pendingID, group.ID, ctx.EffectiveChat.Id, ctx.EffectiveUser.Id, valid); err != nil {
+			slog.Error("saving group ping pending", "error", err)
+			_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, genericErrorText, nil)
+			return sendErr
+		}
+
+		callerName := formatUserName(ctx.EffectiveUser)
+		confirmText := formatGroupPingSetConfirm(callerName, group.AcademicGroupName, valid)
+		kb := groupPingSetKeyboard(pendingID.String())
+		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, confirmText, &gotgbot.SendMessageOpts{
+			ParseMode:          "HTML",
+			ReplyMarkup:        kb,
+			LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
+		})
+		return sendErr
+	}
+
+	if utf8.RuneCountInString(args) > 1000 {
+		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, "⚠️ Текст повідомлення занадто довгий (максимум 1000 символів).", nil)
+		return sendErr
+	}
+
+	// Regular /ping
+	users, err := b.db.GetGroupPingUsers(reqCtx, group.ID)
+	if err != nil {
+		slog.Error("getting ping users", "error", err, "group_id", group.ID)
+		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, genericErrorText, nil)
+		return sendErr
+	}
+
+	if len(users) == 0 {
+		_, sendErr := bot.SendMessage(ctx.EffectiveChat.Id, "ℹ️ Список користувачів для /ping порожній. Адміністратор може налаштувати його в особистих повідомленнях (/group) або командою <code>/ping set @user1 @user2</code>.", &gotgbot.SendMessageOpts{ParseMode: "HTML"})
+		return sendErr
+	}
+
+	var tags []string
+	for _, u := range users {
+		tags = append(tags, "@"+u)
+	}
+
+	const chunkSize = 40
+	for i := 0; i < len(tags); i += chunkSize {
+		end := i + chunkSize
+		if end > len(tags) {
+			end = len(tags)
+		}
+		chunk := tags[i:end]
+		var msg string
+		if i == 0 && args != "" {
+			msg = fmt.Sprintf("📣 <b>%s</b>\n\n%s", html.EscapeString(args), strings.Join(chunk, " "))
+		} else {
+			msg = strings.Join(chunk, " ")
+		}
+		_, err = bot.SendMessage(ctx.EffectiveChat.Id, msg, &gotgbot.SendMessageOpts{
+			ParseMode:          "HTML",
+			LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
+		})
+		if err != nil {
+			slog.Error("sending ping message chunk", "error", err, "chat_id", ctx.EffectiveChat.Id)
+		}
+	}
+	return nil
+}
 
 func (b *Bot) handleGroupInput(bot *gotgbot.Bot, ctx *ext.Context, prompt *model.GroupPrompt, rawInput string) error {
 	reqCtx := context.Background()
+
+	if prompt.Action == "add_ping_users" && prompt.GroupID != nil {
+		valid, bots, invalid := parseUsernames(rawInput)
+		_ = b.db.ClearGroupPrompt(reqCtx, ctx.EffectiveUser.Id)
+
+		group, gErr := b.db.GetBotGroupByID(reqCtx, *prompt.GroupID)
+		if gErr != nil {
+			return nil
+		}
+
+		var notice string
+		if len(valid) > 0 {
+			addedCount, aErr := b.db.AddGroupPingUsers(reqCtx, *prompt.GroupID, valid)
+			if aErr != nil {
+				slog.Error("adding group ping users", "error", aErr)
+				return nil
+			}
+			if addedCount > 0 {
+				notice = fmt.Sprintf("✅ Додано користувачів: %d.", addedCount)
+			} else {
+				notice = "ℹ️ Всі вказані користувачі вже є у списку."
+			}
+		} else {
+			notice = "❌ Не знайдено коректних юзернеймів для додавання."
+		}
+
+		if len(bots) > 0 {
+			notice += fmt.Sprintf("\n⚠️ Пропущено (боти): %s", html.EscapeString(strings.Join(bots, ", ")))
+		}
+		if len(invalid) > 0 {
+			notice += fmt.Sprintf("\n⚠️ Пропущено (некоректні): %s", html.EscapeString(strings.Join(invalid, ", ")))
+		}
+
+		users, _ := b.db.GetGroupPingUsers(reqCtx, *prompt.GroupID)
+		text := formatGroupPingMenu(group.AcademicGroupName, users, notice)
+		kb := groupPingKeyboard(prompt.GroupID.String(), users, 0)
+		opts := &gotgbot.EditMessageTextOpts{
+			ChatId:             ctx.EffectiveChat.Id,
+			MessageId:          prompt.PromptMessageID,
+			Text:               text,
+			ParseMode:          "HTML",
+			ReplyMarkup:        kb,
+			LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
+		}
+		_, _, _ = bot.EditMessageText(opts)
+		return nil
+	}
 
 	if prompt.Action == "set_url" && prompt.GroupID != nil {
 		hash := lessonHash(prompt.SubjectNorm, prompt.Tag)

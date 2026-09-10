@@ -188,7 +188,7 @@ Allows group administrators to configure online conference links (Zoom, Google M
 - `UNIQUE (group_id, subject_norm, tag)`
 
 #### Table `user_group_prompts`
-Tracks multi-step input prompts for creating groups, editing academic group names, or setting group lesson URLs (`action`: `"create"`, `"edit_academic"`, `"set_url"`).
+Tracks multi-step input prompts for creating groups, editing academic group names, setting group lesson URLs, or adding ping users (`action`: `"create"`, `"edit_academic"`, `"set_url"`, `"add_ping_users"`).
 - Records `telegram_id`, `prompt_message_id`, `action`, `group_id`, `subject_norm`, `tag`, `subject_name`, `bind_chat_id`, and `bind_chat_title`.
 
 #### Table `bot_group_admins`
@@ -203,6 +203,22 @@ Tracks co-administrators invited by the group creator (`00006_group_admins.sql`)
 - Index: `idx_bot_group_admins_user (telegram_id, status)`
 
 **Ownership transfer on deletion**: when the creator leaves or deletes the group, ownership is automatically transferred to the earliest accepted administrator in `bot_group_admins`. If no accepted administrators remain, the group configuration, associated URLs, prompts, and admin records are deleted in a cascade.
+
+#### Table `bot_group_ping_users`
+Stores configured Telegram usernames tagged by the `/ping` command in group chats (`00009_group_ping_users.sql`):
+- `group_id TEXT NOT NULL REFERENCES bot_groups(id) ON DELETE CASCADE`
+- `username TEXT NOT NULL COLLATE NOCASE`
+- `created_at TIMESTAMP NOT NULL`
+- `PRIMARY KEY (group_id, username)`
+
+#### Table `bot_group_ping_pending`
+Stores staged `/ping set @u1 @u2 ...` operations awaiting confirmation from the chat administrator:
+- `id TEXT PRIMARY KEY` (UUID)
+- `group_id TEXT NOT NULL REFERENCES bot_groups(id) ON DELETE CASCADE`
+- `chat_id INTEGER NOT NULL`
+- `user_id INTEGER NOT NULL`
+- `usernames TEXT NOT NULL` (JSON array of parsed valid usernames)
+- `created_at TIMESTAMP NOT NULL`
 
 
 ### 2.3 User-Filed Issues (`issues`, `issue_comments`, `user_issue_drafts`)

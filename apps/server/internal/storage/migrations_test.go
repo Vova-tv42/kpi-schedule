@@ -63,8 +63,8 @@ func TestIssueThreadStateMigrationRoundTrip(t *testing.T) {
 		return n
 	}
 
-	if err := goose.Down(sqlDB, "migrations"); err != nil {
-		t.Fatalf("rolling back 00008: %v", err)
+	if err := goose.DownTo(sqlDB, "migrations", 7); err != nil {
+		t.Fatalf("rolling back to 00007: %v", err)
 	}
 	if n := countComments("after down"); n != 1 {
 		t.Errorf("rolling back must not drop comments, got %d", n)

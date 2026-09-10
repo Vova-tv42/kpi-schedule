@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -166,6 +167,8 @@ func (db *DB) DeleteBotGroup(ctx context.Context, id uuid.UUID) error {
 	_, _ = db.SQL.ExecContext(ctx, `DELETE FROM bot_group_lesson_urls WHERE group_id = ?`, id.String())
 	_, _ = db.SQL.ExecContext(ctx, `DELETE FROM bot_group_admins WHERE group_id = ?`, id.String())
 	_, _ = db.SQL.ExecContext(ctx, `DELETE FROM user_group_prompts WHERE group_id = ?`, id.String())
+	_, _ = db.SQL.ExecContext(ctx, `DELETE FROM bot_group_ping_users WHERE group_id = ?`, id.String())
+	_, _ = db.SQL.ExecContext(ctx, `DELETE FROM bot_group_ping_pending WHERE group_id = ?`, id.String())
 	res, err := db.SQL.ExecContext(ctx, `DELETE FROM bot_groups WHERE id = ?`, id.String())
 	if err != nil {
 		return fmt.Errorf("deleting bot group: %w", err)
@@ -527,5 +530,154 @@ func (db *DB) DeleteOrTransferGroupOwnership(ctx context.Context, groupID uuid.U
 		return false, 0, err
 	}
 	return false, 0, nil
+}
+
+// GetGroupPingUsers returns all configured ping usernames for a group in alphabetical order.
+func (db *DB) GetGroupPingUsers(ctx context.Context, groupID uuid.UUID) ([]string, error) {
+	rows, err := db.SQL.QueryContext(ctx, `
+		SELECT username FROM bot_group_ping_users
+		WHERE group_id = ?
+		ORDER BY username ASC
+	`, groupID.String())
+	if err != nil {
+		return nil, fmt.Errorf("querying group ping users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return nil, fmt.Errorf("scanning ping username: %w", err)
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
+// AddGroupPingUsers adds usernames to the group's ping list, ignoring duplicates.
+// Returns the count of newly inserted usernames.
+func (db *DB) AddGroupPingUsers(ctx context.Context, groupID uuid.UUID, usernames []string) (int, error) {
+	if len(usernames) == 0 {
+		return 0, nil
+	}
+	tx, err := db.SQL.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("beginning add ping users tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+	added := 0
+	for _, u := range usernames {
+		res, err := tx.ExecContext(ctx, `
+			INSERT INTO bot_group_ping_users (group_id, username, created_at)
+			VALUES (?, ?, ?)
+			ON CONFLICT (group_id, username) DO NOTHING
+		`, groupID.String(), u, now)
+		if err != nil {
+			return 0, fmt.Errorf("inserting group ping user: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		if n > 0 {
+			added++
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("committing add ping users tx: %w", err)
+	}
+	return added, nil
+}
+
+// RemoveGroupPingUser removes a username from the group's ping list.
+func (db *DB) RemoveGroupPingUser(ctx context.Context, groupID uuid.UUID, username string) error {
+	_, err := db.SQL.ExecContext(ctx, `
+		DELETE FROM bot_group_ping_users
+		WHERE group_id = ? AND username = ?
+	`, groupID.String(), username)
+	if err != nil {
+		return fmt.Errorf("deleting group ping user: %w", err)
+	}
+	return nil
+}
+
+// SetGroupPingUsers replaces all ping usernames for a group with the given list.
+func (db *DB) SetGroupPingUsers(ctx context.Context, groupID uuid.UUID, usernames []string) error {
+	tx, err := db.SQL.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("beginning set ping users tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM bot_group_ping_users WHERE group_id = ?`, groupID.String()); err != nil {
+		return fmt.Errorf("clearing group ping users: %w", err)
+	}
+
+	now := time.Now().UTC()
+	for _, u := range usernames {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO bot_group_ping_users (group_id, username, created_at)
+			VALUES (?, ?, ?)
+			ON CONFLICT (group_id, username) DO NOTHING
+		`, groupID.String(), u, now); err != nil {
+			return fmt.Errorf("inserting ping user in tx: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// SaveGroupPingPending stores a pending /ping set operation awaiting user confirmation.
+func (db *DB) SaveGroupPingPending(ctx context.Context, id uuid.UUID, groupID uuid.UUID, chatID, userID int64, usernames []string) error {
+	rawJSON, err := json.Marshal(usernames)
+	if err != nil {
+		return fmt.Errorf("marshaling ping pending usernames: %w", err)
+	}
+	// Clear any previous pending confirmation for this chat and group to prevent stale row accumulation.
+	if _, err := db.SQL.ExecContext(ctx, `DELETE FROM bot_group_ping_pending WHERE group_id = ? AND chat_id = ?`, groupID.String(), chatID); err != nil {
+		return fmt.Errorf("clearing previous group ping pending: %w", err)
+	}
+	now := time.Now().UTC()
+	_, err = db.SQL.ExecContext(ctx, `
+		INSERT INTO bot_group_ping_pending (id, group_id, chat_id, user_id, usernames, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, id.String(), groupID.String(), chatID, userID, string(rawJSON), now)
+	if err != nil {
+		return fmt.Errorf("saving group ping pending: %w", err)
+	}
+	return nil
+}
+
+// GetGroupPingPending fetches a pending /ping set operation by ID.
+func (db *DB) GetGroupPingPending(ctx context.Context, id uuid.UUID) (groupID uuid.UUID, chatID, userID int64, usernames []string, err error) {
+	var gidStr, rawJSON string
+	row := db.SQL.QueryRowContext(ctx, `
+		SELECT group_id, chat_id, user_id, usernames
+		FROM bot_group_ping_pending
+		WHERE id = ?
+	`, id.String())
+	if err := row.Scan(&gidStr, &chatID, &userID, &rawJSON); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return uuid.Nil, 0, 0, nil, ErrNotFound
+		}
+		return uuid.Nil, 0, 0, nil, fmt.Errorf("querying ping pending: %w", err)
+	}
+	parsedGID, err := uuid.Parse(gidStr)
+	if err != nil {
+		return uuid.Nil, 0, 0, nil, fmt.Errorf("parsing ping pending group id: %w", err)
+	}
+	if err := json.Unmarshal([]byte(rawJSON), &usernames); err != nil {
+		return uuid.Nil, 0, 0, nil, fmt.Errorf("unmarshaling ping pending usernames: %w", err)
+	}
+	return parsedGID, chatID, userID, usernames, nil
+}
+
+// DeleteGroupPingPending deletes a pending /ping set operation by ID.
+func (db *DB) DeleteGroupPingPending(ctx context.Context, id uuid.UUID) error {
+	_, err := db.SQL.ExecContext(ctx, `DELETE FROM bot_group_ping_pending WHERE id = ?`, id.String())
+	if err != nil {
+		return fmt.Errorf("deleting ping pending: %w", err)
+	}
+	return nil
 }
 

@@ -891,6 +891,9 @@ func groupConfigKeyboard(g model.BotGroup, isCreator bool) gotgbot.InlineKeyboar
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
 		{Text: "🔗 Посилання на заняття", CallbackData: groupCallbackPrefix + "urls:" + idStr},
 	})
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "📣 Налаштування /ping", CallbackData: groupCallbackPrefix + "ping:" + idStr},
+	})
 	toggleNotifyText := "🔔 Сповіщення: Увімкнено"
 	if !g.NotificationsEnabled {
 		toggleNotifyText = "🔕 Сповіщення: Вимкнено"
@@ -1229,5 +1232,178 @@ func formatGroupSyncSuccess(callerName, groupName string, updatedCount int) stri
 	}
 	return fmt.Sprintf("✅ <b>%s</b>, посилання на онлайн-заняття успішно синхронізовано з налаштуваннями групи <b>%s</b>! (Оновлено занять: %d)", html.EscapeString(callerName), html.EscapeString(groupName), updatedCount)
 }
+
+const pingUsersPerPage = 5
+
+func parseUsernames(raw string) (valid []string, bots []string, invalid []string) {
+	fields := strings.Fields(raw)
+	seen := make(map[string]bool)
+
+	for _, f := range fields {
+		token := strings.Trim(f, " \t\n\r,;@")
+		if token == "" {
+			continue
+		}
+		lower := strings.ToLower(token)
+		if seen[lower] {
+			continue
+		}
+		seen[lower] = true
+
+		if strings.HasSuffix(lower, "bot") {
+			bots = append(bots, token)
+			continue
+		}
+		if len(token) < 3 || len(token) > 32 || !isValidUsernameChars(token) {
+			invalid = append(invalid, token)
+			continue
+		}
+		valid = append(valid, token)
+	}
+	return valid, bots, invalid
+}
+
+func pingUserHash(u string) string {
+	h := sha256.Sum256([]byte(strings.ToLower(u)))
+	return hex.EncodeToString(h[:4])
+}
+
+func isValidUsernameChars(s string) bool {
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func formatGroupPingMenu(groupName string, users []string, notice string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "📣 <b>Налаштування команди /ping</b>\nГрупа: <b>%s</b>\n\n", html.EscapeString(groupName))
+
+	if notice != "" {
+		b.WriteString(notice)
+		b.WriteString("\n\n")
+	}
+
+	if len(users) == 0 {
+		b.WriteString("<i>Список користувачів для /ping порожній.</i>\n\n" +
+			"Додай користувачів кнопкою нижче або командою <code>/ping set @user1 @user2</code> у груповому чаті.")
+		return b.String()
+	}
+
+	b.WriteString("Підключені користувачі:\n<blockquote>")
+	var tags []string
+	for _, u := range users {
+		tags = append(tags, "@"+html.EscapeString(u))
+	}
+	b.WriteString(strings.Join(tags, " "))
+	b.WriteString("</blockquote>\n\n")
+	b.WriteString("Обери користувача зі списку нижче, щоб видалити його:")
+
+	return b.String()
+}
+
+func groupPingKeyboard(groupID string, users []string, page int) gotgbot.InlineKeyboardMarkup {
+	var rows [][]gotgbot.InlineKeyboardButton
+
+	totalPages := (len(users) + pingUsersPerPage - 1) / pingUsersPerPage
+	if totalPages == 0 {
+		totalPages = 1
+	}
+	if page >= totalPages {
+		page = totalPages - 1
+	}
+	if page < 0 {
+		page = 0
+	}
+
+	start := page * pingUsersPerPage
+	end := start + pingUsersPerPage
+	if end > len(users) {
+		end = len(users)
+	}
+
+	for _, u := range users[start:end] {
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: "❌ @" + u, CallbackData: fmt.Sprintf("%sprm:%s:%d:%s", groupCallbackPrefix, groupID, page, pingUserHash(u))},
+		})
+	}
+
+	if totalPages > 1 {
+		var prevBtn, nextBtn gotgbot.InlineKeyboardButton
+		if page == 0 {
+			prevBtn = gotgbot.InlineKeyboardButton{Text: "⏹️", CallbackData: groupCallbackPrefix + "ping_noop"}
+		} else {
+			prevBtn = gotgbot.InlineKeyboardButton{Text: "◀️", CallbackData: fmt.Sprintf("%sping_page:%s:%d", groupCallbackPrefix, groupID, page-1)}
+		}
+		if page == totalPages-1 {
+			nextBtn = gotgbot.InlineKeyboardButton{Text: "⏹️", CallbackData: groupCallbackPrefix + "ping_noop"}
+		} else {
+			nextBtn = gotgbot.InlineKeyboardButton{Text: "▶️", CallbackData: fmt.Sprintf("%sping_page:%s:%d", groupCallbackPrefix, groupID, page+1)}
+		}
+		rows = append(rows, []gotgbot.InlineKeyboardButton{prevBtn, nextBtn})
+	}
+
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "➕ Додати користувачів", CallbackData: groupCallbackPrefix + "ping_add:" + groupID},
+	})
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "◀️ Назад до налаштувань", CallbackData: groupCallbackPrefix + "view:" + groupID},
+	})
+
+	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func formatGroupPingAddPrompt(groupName string, notice string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "➕ <b>Додавання користувачів для /ping</b>\nГрупа: <b>%s</b>\n\n", html.EscapeString(groupName))
+
+	if notice != "" {
+		b.WriteString(notice)
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString("Надішли список юзернеймів через пробіл або з нового рядка (наприклад: <code>@user1 @user2 @user3</code>):")
+	return b.String()
+}
+
+func groupPingAddKeyboard(groupID string) gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{{Text: "◀️ Скасувати", CallbackData: groupCallbackPrefix + "ping:" + groupID}},
+		},
+	}
+}
+
+func formatGroupPingSetConfirm(callerName, groupName string, users []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "⚙️ <b>Оновлення списку /ping</b>\n\n")
+	fmt.Fprintf(&b, "👤 <b>%s</b>, ця дія замінить поточний список користувачів для команди /ping у групі <b>%s</b> на новий (користувачів: %d):\n\n", html.EscapeString(callerName), html.EscapeString(groupName), len(users))
+
+	var tags []string
+	for _, u := range users {
+		tags = append(tags, "@"+html.EscapeString(u))
+	}
+	fmt.Fprintf(&b, "<blockquote>%s</blockquote>\n\n", strings.Join(tags, " "))
+	b.WriteString("Продовжити?")
+	return b.String()
+}
+
+func groupPingSetKeyboard(pendingID string) gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{Text: "✅ Продовжити", CallbackData: fmt.Sprintf("%sconfirm:%s", groupPingCallbackPrefix, pendingID)},
+				{Text: "❌ Скасувати", CallbackData: fmt.Sprintf("%scancel:%s", groupPingCallbackPrefix, pendingID)},
+			},
+		},
+	}
+}
+
+func formatGroupPingSetSuccess(callerName, groupName string, count int) string {
+	return fmt.Sprintf("✅ <b>%s</b>, список користувачів для /ping у групі <b>%s</b> успішно оновлено! (Всього користувачів: %d)", html.EscapeString(callerName), html.EscapeString(groupName), count)
+}
+
 
 
