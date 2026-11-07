@@ -363,6 +363,7 @@ Each screen namespaces its buttons with its own `callback_data` prefix — `menu
 The server runs an automated alerts engine (`apps/server/internal/alerts/`) coupled with external scheduled webhooks (`POST /api/v1/cron/lesson-alerts`, see [`docs/architecture/notifications-and-cron.md`](../architecture/notifications-and-cron.md)):
 - **Lesson Notification Dispatcher**: Evaluates pending lessons 10 minutes before (`before_10m`) and at the start (`at_start`) for personal users and bound academic group chats.
 - **Idempotency Outbox**: Dispatched notifications are logged in `sent_lesson_alerts` table, ensuring zero duplicate messages even across multiple cron ticks or retries.
+- **Self-Cleaning Alerts**: Each cron tick deletes the previous lesson alerts it replaces — a new alert removes the recipient's older ones, a "Почалась пара" alert is removed on the next tick even if nothing new is sent, and a pre-lesson alert whose follow-up never came is removed once its lesson has started. See [Notifications & Scheduled Cron §5](../architecture/notifications-and-cron.md).
 - **Settings & Opt-out**:
   - Personal students can toggle notifications in private chat via `/settings` (enabled by default).
   - Academic group admins can toggle group-wide notifications in `/group` settings (enabled by default).

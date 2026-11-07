@@ -91,7 +91,7 @@ func TestAlertsAndNotifications(t *testing.T) {
 		t.Errorf("expected alert not sent yet")
 	}
 
-	if err := db.RecordAlertSent(ctx, "user", recipientID, dateStr, timeStr, model.AlertBefore10m); err != nil {
+	if err := db.RecordAlertSent(ctx, "user", recipientID, dateStr, timeStr, model.AlertBefore10m, 12345, 77); err != nil {
 		t.Fatalf("record alert sent: %v", err)
 	}
 
@@ -104,6 +104,36 @@ func TestAlertsAndNotifications(t *testing.T) {
 	sentAtStart, err := db.HasAlertBeenSent(ctx, "user", recipientID, dateStr, timeStr, model.AlertAtStart)
 	if err != nil || sentAtStart {
 		t.Errorf("expected at_start alert to not be marked as sent yet")
+	}
+
+	// The recorded Telegram message is listed until it is cleared.
+	live, err := db.ListLiveAlertMessages(ctx)
+	if err != nil {
+		t.Fatalf("list live alert messages: %v", err)
+	}
+	if len(live) != 1 || live[0].ChatID != 12345 || live[0].MessageID != 77 ||
+		live[0].RecipientType != "user" || live[0].RecipientID != recipientID || live[0].AlertType != model.AlertBefore10m ||
+		live[0].LessonDate != dateStr || live[0].LessonTime != timeStr {
+		t.Fatalf("unexpected live alert messages: %+v", live)
+	}
+
+	// A failed send (messageID 0) records no message.
+	if err := db.RecordAlertSent(ctx, "user", recipientID, dateStr, timeStr, model.AlertAtStart, 12345, 0); err != nil {
+		t.Fatalf("record failed alert: %v", err)
+	}
+	if live, _ = db.ListLiveAlertMessages(ctx); len(live) != 1 {
+		t.Fatalf("expected failed send to record no message, got %+v", live)
+	}
+
+	if err := db.ClearAlertMessage(ctx, live[0].ID); err != nil {
+		t.Fatalf("clear alert message: %v", err)
+	}
+	if live, _ = db.ListLiveAlertMessages(ctx); len(live) != 0 {
+		t.Fatalf("expected no live alert messages after clearing, got %+v", live)
+	}
+	// Clearing the message keeps the dedup record.
+	if sent, _ = db.HasAlertBeenSent(ctx, "user", recipientID, dateStr, timeStr, model.AlertBefore10m); !sent {
+		t.Fatalf("expected alert to stay marked as sent after clearing its message")
 	}
 
 	// Test cleanup

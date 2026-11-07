@@ -65,9 +65,11 @@ introduces `user_lesson_urls` and `user_url_prompts`; `00003_groups.sql` introdu
 `00007_issues.sql` introduces `issues`, `issue_comments` and `user_issue_drafts` for the
 `/issues` feedback channel (§2.3); `00008_issue_thread_state.sql` widens the status vocabulary,
 replaces `thread_open` with the three-state `thread_state`, and adds `status_note` (§2.3);
-`00009_group_ping_users.sql` introduces the `/ping` roster tables; and `00010_user_schedule_lock.sql`
+`00009_group_ping_users.sql` introduces the `/ping` roster tables; `00010_user_schedule_lock.sql`
 adds `users.schedule_locked` (default `0`), the `/settings` opt-in that restricts the buttons under a
-user's `/me_*` schedule messages to that user (see `docs/bot/telegram-bot-design.md` §3.5).
+user's `/me_*` schedule messages to that user (see `docs/bot/telegram-bot-design.md` §3.5); and
+`00011_alert_message_ids.sql` adds `chat_id` / `message_id` to `sent_lesson_alerts` so stale lesson
+alerts can be deleted (see [Notifications & Scheduled Cron §5](notifications-and-cron.md)).
 
 
 **Engine: SQLite, not PostgreSQL** (`modernc.org/sqlite`, pure Go — no CGO, so it stays
