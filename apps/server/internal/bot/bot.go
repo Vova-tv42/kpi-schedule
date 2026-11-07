@@ -162,7 +162,7 @@ func PrivateCommands() []gotgbot.BotCommand {
 		{Command: "week", Description: "Показати розклад на тиждень"},
 		{Command: "urls", Description: "Посилання на онлайн-заняття"},
 		{Command: "group", Description: "Керування академічними групами"},
-		{Command: "settings", Description: "Налаштування сповіщень"},
+		{Command: "settings", Description: "Особисті налаштування"},
 		{Command: "issues", Description: "Повідомити про помилку або запропонувати ідею"},
 		{Command: "install", Description: "Інструкція та підключення розкладу"},
 		{Command: "link", Description: "Отримати код прив'язки браузерного розширення"},

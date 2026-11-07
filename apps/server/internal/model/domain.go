@@ -24,8 +24,12 @@ type User struct {
 	GroupID              *int
 	GroupName            *string
 	NotificationsEnabled bool
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	// ScheduleLocked restricts the buttons under this user's personal
+	// schedule messages to the user themself, so other group members cannot
+	// switch the message over to their own schedule. Off by default.
+	ScheduleLocked bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // ScheduleState tracks when a user's lesson set was last synced. There is no

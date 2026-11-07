@@ -35,25 +35,73 @@ const (
 	issuesCallbackPrefix    = "iss:"   // issues screens: menu / new / type / list / view / thread
 )
 
-// navCallbackData encodes an action ("prev"/"next"/"today") plus the
-// *currently displayed* date. No message state is persisted server-side —
-// the callback carries everything needed to re-derive the target date, per
+// navCallbackData encodes an action ("prev"/"next"/"today"), the
+// *currently displayed* date and the Telegram ID of the user whose schedule
+// is on screen (nav:<action>:<date>:<ownerID>). No message state is persisted
+// server-side — the callback carries everything needed to re-derive the
+// target date and to enforce the owner's schedule lock, per
 // docs/bot/telegram-bot-design.md §5.
-func navCallbackData(action string, date time.Time) string {
-	return fmt.Sprintf("%s%s:%s", navCallbackPrefix, action, date.Format("2006-01-02"))
+func navCallbackData(action string, date time.Time, ownerID int64) string {
+	return fmt.Sprintf("%s%s:%s:%d", navCallbackPrefix, action, date.Format("2006-01-02"), ownerID)
 }
 
 // weekCallbackData targets a week by its offset from the real current week
 // (-1/0/+1), not by an offset relative to what is on screen — the three week
 // buttons are fixed slots, so navigation never drifts further than one week
-// out from today.
-func weekCallbackData(offset int) string {
-	return fmt.Sprintf("%sgoto:%d", weekCallbackPrefix, offset)
+// out from today. ownerID is the user whose schedule is on screen.
+func weekCallbackData(offset int, ownerID int64) string {
+	return fmt.Sprintf("%sgoto:%d:%d", weekCallbackPrefix, offset, ownerID)
 }
 
 func weekNoopCallbackData() string { return weekCallbackPrefix + "noop" }
 
-func weekTodayCallbackData() string { return weekCallbackPrefix + "today" }
+func weekTodayCallbackData(ownerID int64) string {
+	return fmt.Sprintf("%stoday:%d", weekCallbackPrefix, ownerID)
+}
+
+// parseOwnerID parses the optional trailing owner segment of a personal
+// schedule callback. Messages sent before owner tagging have no such segment;
+// they yield 0, which allowPersonalScheduleNav treats as unrestricted.
+func parseOwnerID(raw string) (int64, bool) {
+	if raw == "" {
+		return 0, true
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return id, true
+}
+
+// allowPersonalScheduleNav reports whether cq.From may press a navigation
+// button under a personal schedule message that currently shows ownerID's
+// schedule. Anyone may, unless the owner turned on the schedule lock in
+// /settings — then only the owner can, and everyone else gets a popup while
+// the message stays untouched. When it returns false the callback has
+// already been answered and the returned error is that answer's result.
+func (b *Bot) allowPersonalScheduleNav(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, ownerID int64) (bool, error) {
+	if ownerID == 0 || ownerID == cq.From.Id {
+		return true, nil
+	}
+	owner, err := b.db.GetUserByTelegramID(context.Background(), ownerID)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return true, nil
+		}
+		slog.Error("loading schedule owner", "error", err, "owner_telegram_id", ownerID, "telegram_id", cq.From.Id)
+		return false, answerWithError(bot, cq)
+	}
+	if !owner.ScheduleLocked {
+		return true, nil
+	}
+	_, err = bot.AnswerCallbackQuery(cq.Id, &gotgbot.AnswerCallbackQueryOpts{
+		Text:      scheduleLockedAlertText,
+		ShowAlert: true,
+	})
+	return false, err
+}
+
+const scheduleLockedAlertText = "🔒 Власник цього розкладу заборонив іншим керувати ним. Щоб переглянути свій розклад, використай /me_today, /me_tomorrow або /me_week."
 
 func menuCallbackData(action string) string { return menuCallbackPrefix + action }
 
@@ -61,14 +109,23 @@ func menuCallbackData(action string) string { return menuCallbackPrefix + action
 func (b *Bot) onNav(bot *gotgbot.Bot, ctx *ext.Context) error {
 	cq := ctx.CallbackQuery
 
-	parts := strings.SplitN(strings.TrimPrefix(cq.Data, navCallbackPrefix), ":", 2)
-	if len(parts) != 2 {
+	parts := strings.SplitN(strings.TrimPrefix(cq.Data, navCallbackPrefix), ":", 3)
+	if len(parts) < 2 {
 		return answerSilently(bot, cq)
 	}
 	action, dateStr := parts[0], parts[1]
 
 	date, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
+		return answerSilently(bot, cq)
+	}
+
+	ownerRaw := ""
+	if len(parts) == 3 {
+		ownerRaw = parts[2]
+	}
+	ownerID, ok := parseOwnerID(ownerRaw)
+	if !ok {
 		return answerSilently(bot, cq)
 	}
 
@@ -83,6 +140,9 @@ func (b *Bot) onNav(bot *gotgbot.Bot, ctx *ext.Context) error {
 		return answerSilently(bot, cq)
 	}
 
+	if allowed, err := b.allowPersonalScheduleNav(bot, cq, ownerID); !allowed {
+		return err
+	}
 	return b.editToDay(bot, cq, date)
 }
 
@@ -92,12 +152,31 @@ func (b *Bot) onWeek(bot *gotgbot.Bot, ctx *ext.Context) error {
 	action := strings.TrimPrefix(cq.Data, weekCallbackPrefix)
 
 	switch {
-	case action == "today":
+	case action == "today" || strings.HasPrefix(action, "today:"):
+		ownerID, ok := parseOwnerID(strings.TrimPrefix(strings.TrimPrefix(action, "today"), ":"))
+		if !ok {
+			return answerSilently(bot, cq)
+		}
+		if allowed, err := b.allowPersonalScheduleNav(bot, cq, ownerID); !allowed {
+			return err
+		}
 		return b.editToDay(bot, cq, time.Now())
 	case strings.HasPrefix(action, "goto:"):
-		offset, err := strconv.Atoi(strings.TrimPrefix(action, "goto:"))
+		parts := strings.SplitN(strings.TrimPrefix(action, "goto:"), ":", 2)
+		offset, err := strconv.Atoi(parts[0])
 		if err != nil {
 			return answerSilently(bot, cq)
+		}
+		ownerRaw := ""
+		if len(parts) == 2 {
+			ownerRaw = parts[1]
+		}
+		ownerID, ok := parseOwnerID(ownerRaw)
+		if !ok {
+			return answerSilently(bot, cq)
+		}
+		if allowed, err := b.allowPersonalScheduleNav(bot, cq, ownerID); !allowed {
+			return err
 		}
 		return b.editToWeek(bot, cq, offset)
 	default:
@@ -246,53 +325,42 @@ func (b *Bot) handleDeleteURL(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, hash 
 }
 
 func (b *Bot) editToSettingsScreen(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery) error {
-	reqCtx := context.Background()
-	user, err := b.db.GetUserByTelegramID(reqCtx, cq.From.Id)
+	user, err := b.upsertUser(context.Background(), cq.From.Id)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			user, err = b.db.UpsertUser(reqCtx, cq.From.Id, nil, nil)
-			if err != nil {
-				return answerWithError(bot, cq)
-			}
-		} else {
-			return answerWithError(bot, cq)
-		}
+		return answerWithError(bot, cq)
 	}
-	text := formatUserSettings(user.NotificationsEnabled)
-	kb := userSettingsKeyboard(user.NotificationsEnabled)
-	return b.applyScreen(bot, cq, text, kb, true)
+	return b.applyScreen(bot, cq, formatUserSettings(user), userSettingsKeyboard(user), true)
 }
 
 func (b *Bot) onSettings(bot *gotgbot.Bot, ctx *ext.Context) error {
 	cq := ctx.CallbackQuery
 	action := strings.TrimPrefix(cq.Data, "settings:")
+	if action != "toggle_notify" && action != "toggle_lock" {
+		return answerSilently(bot, cq)
+	}
 
-	if action == "toggle_notify" {
-		reqCtx := context.Background()
-		user, err := b.db.GetUserByTelegramID(reqCtx, cq.From.Id)
-		if err != nil {
-			if errors.Is(err, storage.ErrNotFound) {
-				user, err = b.db.UpsertUser(reqCtx, cq.From.Id, nil, nil)
-				if err != nil {
-					return answerWithError(bot, cq)
-				}
-			} else {
-				return answerWithError(bot, cq)
-			}
-		}
+	reqCtx := context.Background()
+	user, err := b.upsertUser(reqCtx, cq.From.Id)
+	if err != nil {
+		return answerWithError(bot, cq)
+	}
 
-		newStatus := !user.NotificationsEnabled
-		if err := b.db.SetUserNotifications(reqCtx, cq.From.Id, newStatus); err != nil {
+	switch action {
+	case "toggle_notify":
+		user.NotificationsEnabled = !user.NotificationsEnabled
+		if err := b.db.SetUserNotifications(reqCtx, cq.From.Id, user.NotificationsEnabled); err != nil {
 			slog.Error("toggling user notifications", "error", err, "telegram_id", cq.From.Id)
 			return answerWithError(bot, cq)
 		}
-
-		text := formatUserSettings(newStatus)
-		kb := userSettingsKeyboard(newStatus)
-		return b.applyScreen(bot, cq, text, kb, true)
+	case "toggle_lock":
+		user.ScheduleLocked = !user.ScheduleLocked
+		if err := b.db.SetUserScheduleLock(reqCtx, cq.From.Id, user.ScheduleLocked); err != nil {
+			slog.Error("toggling user schedule lock", "error", err, "telegram_id", cq.From.Id)
+			return answerWithError(bot, cq)
+		}
 	}
 
-	return answerSilently(bot, cq)
+	return b.applyScreen(bot, cq, formatUserSettings(user), userSettingsKeyboard(user), true)
 }
 
 func (b *Bot) editToDay(bot *gotgbot.Bot, cq *gotgbot.CallbackQuery, date time.Time) error {

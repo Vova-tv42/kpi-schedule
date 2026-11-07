@@ -487,16 +487,17 @@ func urlPromptKeyboard(hasURL bool, hash string) gotgbot.InlineKeyboardMarkup {
 }
 
 // dayKeyboard builds the ◀️/📅/▶️ day-navigation row. CallbackData encodes
-// the action plus the *currently displayed* date (nav:<action>:<date>); the
-// callback handler derives the target date from it — no message state needs
-// to be persisted server-side, per docs/bot/telegram-bot-design.md §5.
-func dayKeyboard(date time.Time) gotgbot.InlineKeyboardMarkup {
+// the action, the *currently displayed* date and whose schedule is on screen
+// (nav:<action>:<date>:<ownerID>); the callback handler derives the target
+// date from it and enforces the owner's schedule lock — no message state
+// needs to be persisted server-side, per docs/bot/telegram-bot-design.md §5.
+func dayKeyboard(date time.Time, ownerID int64) gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 			{
-				{Text: "◀️", CallbackData: navCallbackData("prev", date)},
-				{Text: "📅 Сьогодні", CallbackData: navCallbackData("today", date)},
-				{Text: "▶️", CallbackData: navCallbackData("next", date)},
+				{Text: "◀️", CallbackData: navCallbackData("prev", date, ownerID)},
+				{Text: "📅 Сьогодні", CallbackData: navCallbackData("today", date, ownerID)},
+				{Text: "▶️", CallbackData: navCallbackData("next", date, ownerID)},
 			},
 		},
 	}
@@ -507,29 +508,31 @@ func dayKeyboard(date time.Time) gotgbot.InlineKeyboardMarkup {
 // displayed) plus a jump to today's schedule. Telegram has no disabled-button
 // state, so the slot already being displayed is rendered as a marked, inert
 // button instead of being removed — the row keeps its shape as you navigate.
-func weekKeyboard(offset int) gotgbot.InlineKeyboardMarkup {
+// ownerID is the user whose schedule is on screen, carried in CallbackData so
+// the handler can enforce their schedule lock.
+func weekKeyboard(offset int, ownerID int64) gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 			{
-				weekNavButton(-1, offset, "◀️ Минулий"),
-				weekNavButton(0, offset, "Поточний"),
-				weekNavButton(1, offset, "Наступний ▶️"),
+				weekNavButton(-1, offset, "◀️ Минулий", ownerID),
+				weekNavButton(0, offset, "Поточний", ownerID),
+				weekNavButton(1, offset, "Наступний ▶️", ownerID),
 			},
 			{
-				{Text: "📅 Розклад на сьогодні", CallbackData: weekTodayCallbackData()},
+				{Text: "📅 Розклад на сьогодні", CallbackData: weekTodayCallbackData(ownerID)},
 			},
 		},
 	}
 }
 
-func weekNavButton(target, displayed int, label string) gotgbot.InlineKeyboardButton {
+func weekNavButton(target, displayed int, label string, ownerID int64) gotgbot.InlineKeyboardButton {
 	if target == displayed {
 		return gotgbot.InlineKeyboardButton{
 			Text:         "✅ " + weekOffsetLabel(target),
 			CallbackData: weekNoopCallbackData(),
 		}
 	}
-	return gotgbot.InlineKeyboardButton{Text: label, CallbackData: weekCallbackData(target)}
+	return gotgbot.InlineKeyboardButton{Text: label, CallbackData: weekCallbackData(target, ownerID)}
 }
 
 // startKeyboard and linkKeyboard are the two onboarding screens. Both live in
@@ -1182,25 +1185,36 @@ func groupURLPromptKeyboard(groupID string, hasExistingURL bool, hash string) go
 	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-func formatUserSettings(notificationsEnabled bool) string {
+func formatUserSettings(user model.User) string {
 	var b strings.Builder
-	b.WriteString("⚙️ <b>Налаштування сповіщень</b>\n\n")
-	if notificationsEnabled {
-		b.WriteString("• <b>Сповіщення про пари:</b> 🔔 Увімкнено\n\n<i>Бот надсилатиме сповіщення за 10 хвилин до початку та на початку кожної пари.</i>")
+	b.WriteString("⚙️ <b>Особисті налаштування</b>\n\n")
+	if user.NotificationsEnabled {
+		b.WriteString("• <b>Сповіщення про пари:</b> 🔔 Увімкнено\n<i>Бот надсилатиме сповіщення за 10 хвилин до початку та на початку кожної пари.</i>")
 	} else {
-		b.WriteString("• <b>Сповіщення про пари:</b> 🔕 Вимкнено\n\n<i>Сповіщення про пари вимкнено. Ти не отримуватимеш нагадувань.</i>")
+		b.WriteString("• <b>Сповіщення про пари:</b> 🔕 Вимкнено\n<i>Сповіщення про пари вимкнено. Ти не отримуватимеш нагадувань.</i>")
+	}
+	b.WriteString("\n\n")
+	if user.ScheduleLocked {
+		b.WriteString("• <b>Захист персонального розкладу:</b> 🔒 Увімкнено\n<i>Кнопки під повідомленнями з твоїм розкладом (/me_today, /me_tomorrow, /me_week) у групах працюють лише для тебе — інші учасники не зможуть замінити його своїм.</i>")
+	} else {
+		b.WriteString("• <b>Захист персонального розкладу:</b> 🔓 Вимкнено\n<i>Будь-хто в групі може натиснути кнопки під повідомленням з твоїм розкладом (/me_today, /me_tomorrow, /me_week) — тоді повідомлення покаже розклад того, хто натиснув.</i>")
 	}
 	return b.String()
 }
 
-func userSettingsKeyboard(notificationsEnabled bool) gotgbot.InlineKeyboardMarkup {
-	toggleText := "🔔 Сповіщення: Увімкнено"
-	if !notificationsEnabled {
-		toggleText = "🔕 Сповіщення: Вимкнено"
+func userSettingsKeyboard(user model.User) gotgbot.InlineKeyboardMarkup {
+	notifyText := "🔔 Сповіщення: Увімкнено"
+	if !user.NotificationsEnabled {
+		notifyText = "🔕 Сповіщення: Вимкнено"
+	}
+	lockText := "🔓 Захист розкладу: Вимкнено"
+	if user.ScheduleLocked {
+		lockText = "🔒 Захист розкладу: Увімкнено"
 	}
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-			{{Text: toggleText, CallbackData: "settings:toggle_notify"}},
+			{{Text: notifyText, CallbackData: "settings:toggle_notify"}},
+			{{Text: lockText, CallbackData: "settings:toggle_lock"}},
 			{{Text: "◀️ Назад", CallbackData: menuCallbackData("back")}},
 		},
 	}
