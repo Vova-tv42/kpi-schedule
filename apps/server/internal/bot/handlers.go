@@ -100,7 +100,7 @@ func (b *Bot) renderDay(ctx context.Context, telegramID int64, date time.Time, c
 		Lessons:          lines,
 	}
 
-	return formatDay(info), dayKeyboard(date), true, nil
+	return formatDay(info), dayKeyboard(date, telegramID), true, nil
 }
 
 // renderWeek is renderDay's counterpart for the week screen.
@@ -161,7 +161,7 @@ func (b *Bot) renderWeek(ctx context.Context, telegramID int64, offset int, call
 		Days:             days,
 	}
 
-	return formatWeek(info, offset, user.GroupName), weekKeyboard(offset), true, nil
+	return formatWeek(info, offset, user.GroupName), weekKeyboard(offset, telegramID), true, nil
 }
 
 // renderGroupDay renders a group's schedule for a single date.
@@ -1327,21 +1327,10 @@ func (b *Bot) cmdSettings(bot *gotgbot.Bot, ctx *ext.Context) error {
 		return err
 	}
 
-	reqCtx := context.Background()
-	user, err := b.db.GetUserByTelegramID(reqCtx, ctx.EffectiveUser.Id)
+	user, err := b.upsertUser(context.Background(), ctx.EffectiveUser.Id)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			user, err = b.db.UpsertUser(reqCtx, ctx.EffectiveUser.Id, nil, nil)
-			if err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
+		return err
 	}
-
-	text := formatUserSettings(user.NotificationsEnabled)
-	kb := userSettingsKeyboard(user.NotificationsEnabled)
-	return sendScreen(bot, ctx.EffectiveChat.Id, text, kb, true)
+	return sendScreen(bot, ctx.EffectiveChat.Id, formatUserSettings(user), userSettingsKeyboard(user), true)
 }
 

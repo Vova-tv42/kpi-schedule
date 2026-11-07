@@ -62,7 +62,8 @@ Because the server VM shuts down after 15 minutes of inactivity (`IDLE_TIMEOUT=1
 │  2. Matches (5..15m] & [-5..5m]      │
 │  3. Verifies sent_lesson_alerts      │
 │  4. Sends Telegram messages          │
-│  5. Records sent alert record        │
+│  5. Records alert + message id       │
+│  6. Deletes replaced/stale alerts    │
 └──────────────────┬───────────────────┘
                    ▼
 ┌──────────────────────────────────────┐
@@ -110,6 +111,8 @@ To prevent duplicate messages if the external cron retries or fires multiple tim
       lesson_time    TEXT NOT NULL,
       alert_type     TEXT NOT NULL CHECK (alert_type IN ('before_10m', 'at_start')),
       sent_at        TIMESTAMP NOT NULL,
+      chat_id        INTEGER,  -- added in 00011: Telegram chat of the alert message
+      message_id     INTEGER,  -- added in 00011: NULL if the send failed or the message was deleted
       UNIQUE (recipient_type, recipient_id, lesson_date, lesson_time, alert_type)
   );
   ```
@@ -118,13 +121,37 @@ To prevent duplicate messages if the external cron retries or fires multiple tim
 
 ---
 
-## 5. Local Development Fallback
+## 5. Replacing Previous Alerts
+
+Only the latest lesson alert stays visible in each DM / group chat. Every `Dispatch` run (the cron tick) ends by deleting alert messages left by **earlier** runs:
+
+| Previous alert | Deleted when |
+|---|---|
+| Any alert (`before_10m` or `at_start`) | The same recipient received a new alert in this run (e.g. "Почалась пара" replaces "Пара почнеться через 10 хвилин"). |
+| `at_start` ("Почалась пара") | Always — on the very next run, even if that run sends nothing. |
+| `before_10m` ("Пара почнеться через N хвилин") | Its lesson's `at_start` window is over (more than 5 minutes after the lesson start), i.e. the follow-up was never sent — the cron missed the window, notifications were turned off, or the lesson left the schedule. |
+
+So no alert is left in a chat overnight: the last alert of the day is gone by the first run after its lesson's start window, rather than waiting for the next day's first alert. Until then, a `before_10m` alert stays in place for its `at_start` follow-up to replace.
+
+Mechanics (`internal/alerts.Dispatcher.deletePreviousAlerts`):
+- `RecordAlertSent` stores the `chat_id` / `message_id` returned by `sendMessage` (NULL when the send failed).
+- At the start of a run, `ListLiveAlertMessages` snapshots all rows with a non-NULL `message_id`. Alerts sent during the same run are not in the snapshot, so two alerts sent in one run (e.g. two pairs at the same time) never delete each other.
+- The lesson's start is rebuilt from the row's `lesson_date` / `lesson_time` (Europe/Kyiv), so the expiry check costs no extra queries or Telegram calls.
+- After sending, each snapshot message matching the table above is removed with `deleteMessage`, then `ClearAlertMessage` sets its `chat_id` / `message_id` to NULL. The reference is cleared even if Telegram rejects the delete (message already removed by a user, bot kicked, >48h old), so nothing is retried on every tick. The row itself stays, so deduplication is unaffected.
+- The snapshot covers all recipients, so a "Почалась пара" alert is still removed after the user or group turns notifications off.
+- Only lesson alerts are tracked; no other bot message is touched. Bots may delete their own messages in private chats and groups without admin rights (within 48h).
+
+With cron-job.org **Option A** below, a "Почалась пара" alert sent at `:25` is deleted at the `:30` tick; with the local 1-minute ticker it disappears one minute later.
+
+---
+
+## 6. Local Development Fallback
 
 In local development or persistent hosting where `IDLE_TIMEOUT <= 0` (idle shutdown disabled), `cmd/server/main.go` automatically spawns an in-process background ticker that runs `alertDispatcher.Dispatch(...)` every 1 minute. No external cron service is required for local offline testing.
 
 ---
 
-## 6. Step-by-Step Setup on cron-job.org
+## 7. Step-by-Step Setup on cron-job.org
 
 [cron-job.org](https://cron-job.org) is a free, reliable web cron service that supports custom schedules, headers, and timezones.
 

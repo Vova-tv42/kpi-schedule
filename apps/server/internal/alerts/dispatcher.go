@@ -18,9 +18,10 @@ import (
 	"kpi-schedule-bot/server/internal/storage"
 )
 
-// TelegramSender is an interface for sending Telegram messages (satisfied by *gotgbot.Bot).
+// TelegramSender is an interface for sending and deleting Telegram messages (satisfied by *gotgbot.Bot).
 type TelegramSender interface {
 	SendMessage(chatID int64, text string, opts *gotgbot.SendMessageOpts) (*gotgbot.Message, error)
+	DeleteMessage(chatID int64, messageID int64, opts *gotgbot.DeleteMessageOpts) (bool, error)
 }
 
 type DispatchResult struct {
@@ -56,6 +57,16 @@ func (d *Dispatcher) Dispatch(ctx context.Context, now time.Time) (DispatchResul
 	}
 
 	_ = d.db.CleanOldAlerts(ctx, 7*24*time.Hour)
+
+	// Snapshot the alert messages left by earlier runs before sending anything,
+	// so alerts sent within this run never delete one another.
+	previous, err := d.db.ListLiveAlertMessages(ctx)
+	if err != nil {
+		slog.Error("listing previous lesson alert messages", "error", err)
+	}
+	// Recipients ("user|<id>" / "group|<id>") that received a new alert in this run.
+	notified := make(map[string]bool)
+	defer d.deletePreviousAlerts(ctx, now, previous, notified)
 
 	nowKyiv := now.In(d.loc)
 	todayUTC := time.Date(nowKyiv.Year(), nowKyiv.Month(), nowKyiv.Day(), 0, 0, 0, 0, time.UTC)
@@ -105,14 +116,19 @@ func (d *Dispatcher) Dispatch(ctx context.Context, now time.Time) (DispatchResul
 					opts.ReplyMarkup = *kb
 				}
 
-				_, sendErr := d.sender.SendMessage(u.TelegramID, msg, opts)
+				var messageID int64
+				sentMsg, sendErr := d.sender.SendMessage(u.TelegramID, msg, opts)
 				if sendErr != nil {
 					slog.Warn("sending personal lesson alert", "error", sendErr, "telegram_id", u.TelegramID)
 				} else {
 					result.PersonalAlertsSent++
+					notified[recipientKey("user", u.ID.String())] = true
+					if sentMsg != nil {
+						messageID = sentMsg.MessageId
+					}
 				}
 
-				_ = d.db.RecordAlertSent(ctx, "user", u.ID.String(), dateStr, l.StartTime, alertType)
+				_ = d.db.RecordAlertSent(ctx, "user", u.ID.String(), dateStr, l.StartTime, alertType, u.TelegramID, messageID)
 			}
 		}
 	}
@@ -197,14 +213,19 @@ func (d *Dispatcher) Dispatch(ctx context.Context, now time.Time) (DispatchResul
 						opts.ReplyMarkup = *kb
 					}
 
-					_, sendErr := d.sender.SendMessage(*g.TelegramChatID, msg, opts)
+					var messageID int64
+					sentMsg, sendErr := d.sender.SendMessage(*g.TelegramChatID, msg, opts)
 					if sendErr != nil {
 						slog.Warn("sending group lesson alert", "error", sendErr, "chat_id", *g.TelegramChatID)
 					} else {
 						result.GroupAlertsSent++
+						notified[recipientKey("group", g.ID.String())] = true
+						if sentMsg != nil {
+							messageID = sentMsg.MessageId
+						}
 					}
 
-					_ = d.db.RecordAlertSent(ctx, "group", g.ID.String(), dateStr, p.Time, alertType)
+					_ = d.db.RecordAlertSent(ctx, "group", g.ID.String(), dateStr, p.Time, alertType, *g.TelegramChatID, messageID)
 				}
 			}
 		}
@@ -212,6 +233,60 @@ func (d *Dispatcher) Dispatch(ctx context.Context, now time.Time) (DispatchResul
 
 	return result, nil
 }
+
+func recipientKey(recipientType, recipientID string) string {
+	return recipientType + "|" + recipientID
+}
+
+// deletePreviousAlerts removes lesson alert messages sent by earlier runs:
+//   - every alert of a recipient that just received a new alert (the new one
+//     replaces them),
+//   - every "lesson started" alert, even when this run sent nothing — it is
+//     only relevant until the next cron tick, and
+//   - every pre-lesson alert whose lesson's "lesson started" window is over —
+//     its follow-up was never sent (cron missed the window, notifications were
+//     turned off, the lesson left the schedule), so nothing would replace it.
+//
+// Otherwise a pre-lesson alert stays in the chat until its follow-up arrives.
+//
+// The stored message reference is cleared whatever Telegram answers: the
+// message may already be gone (deleted by a user, chat left, >48h old), and a
+// failed delete is not worth retrying on every tick.
+func (d *Dispatcher) deletePreviousAlerts(ctx context.Context, now time.Time, previous []storage.AlertMessage, notified map[string]bool) {
+	for _, m := range previous {
+		if m.AlertType != model.AlertAtStart &&
+			!notified[recipientKey(m.RecipientType, m.RecipientID)] &&
+			!d.startWindowOver(m, now) {
+			continue
+		}
+		if _, err := d.sender.DeleteMessage(m.ChatID, m.MessageID, nil); err != nil {
+			slog.Warn("deleting previous lesson alert", "error", err, "chat_id", m.ChatID, "message_id", m.MessageID)
+		}
+		if err := d.db.ClearAlertMessage(ctx, m.ID); err != nil {
+			slog.Warn("clearing previous lesson alert message", "error", err, "alert_id", m.ID)
+		}
+	}
+}
+
+// startWindowOver reports whether the "lesson started" window of the alert's
+// lesson has closed at `now`. A malformed date or time counts as over, so a
+// bad row cannot keep a message in the chat forever.
+func (d *Dispatcher) startWindowOver(m storage.AlertMessage, now time.Time) bool {
+	day, err := time.ParseInLocation("2006-01-02", m.LessonDate, d.loc)
+	if err != nil {
+		return true
+	}
+	h, min, err := parseTimeHHMM(m.LessonTime)
+	if err != nil {
+		return true
+	}
+	start := time.Date(day.Year(), day.Month(), day.Day(), h, min, 0, 0, d.loc)
+	return now.After(start.Add(atStartWindowAfter))
+}
+
+// atStartWindowAfter is how long after a lesson starts its "lesson started"
+// alert may still be sent.
+const atStartWindowAfter = 5 * time.Minute
 
 // matchAlertWindow checks if nowKyiv falls into the 15-5m before window or 5m before to 5m after start window.
 func matchAlertWindow(nowKyiv time.Time, startTime string) (model.AlertType, int, bool) {
@@ -233,7 +308,7 @@ func matchAlertWindow(nowKyiv time.Time, startTime string) (model.AlertType, int
 	}
 
 	// 5 minutes before to 5 minutes after start: AlertAtStart
-	if diff >= -5.0 && diff <= 5.0 {
+	if diff >= -atStartWindowAfter.Minutes() && diff <= 5.0 {
 		return model.AlertAtStart, 0, true
 	}
 

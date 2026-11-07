@@ -14,11 +14,11 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
-const userColumns = `id, telegram_id, group_id, group_name, notifications_enabled, created_at, updated_at`
+const userColumns = `id, telegram_id, group_id, group_name, notifications_enabled, schedule_locked, created_at, updated_at`
 
 func scanUser(row interface{ Scan(...any) error }) (model.User, error) {
 	var u model.User
-	err := row.Scan(&u.ID, &u.TelegramID, &u.GroupID, &u.GroupName, &u.NotificationsEnabled, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.TelegramID, &u.GroupID, &u.GroupName, &u.NotificationsEnabled, &u.ScheduleLocked, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return model.User{}, ErrNotFound
@@ -64,6 +64,30 @@ func (db *DB) SetUserNotifications(ctx context.Context, telegramID int64, enable
 	`, enabled, now, telegramID)
 	if err != nil {
 		return fmt.Errorf("updating user notifications: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetUserScheduleLock toggles the schedule_locked flag for a user. When set,
+// only the user themself can press the navigation buttons under a personal
+// schedule message (/me_today, /me_tomorrow, /me_week) that shows their
+// schedule.
+func (db *DB) SetUserScheduleLock(ctx context.Context, telegramID int64, locked bool) error {
+	now := time.Now().UTC()
+	res, err := db.SQL.ExecContext(ctx, `
+		UPDATE users
+		SET schedule_locked = ?, updated_at = ?
+		WHERE telegram_id = ?
+	`, locked, now, telegramID)
+	if err != nil {
+		return fmt.Errorf("updating user schedule lock: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {

@@ -228,7 +228,7 @@ func TestBotExtensionDownloadURL(t *testing.T) {
 
 func TestDayKeyboard(t *testing.T) {
 	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
-	kb := dayKeyboard(now)
+	kb := dayKeyboard(now, 1)
 	if len(kb.InlineKeyboard) != 1 || len(kb.InlineKeyboard[0]) != 3 {
 		t.Fatalf("unexpected keyboard shape: %+v", kb)
 	}
@@ -245,27 +245,27 @@ func TestDayKeyboard(t *testing.T) {
 
 func TestTomorrowDayKeyboard(t *testing.T) {
 	tomorrow := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
-	kb := dayKeyboard(tomorrow)
+	kb := dayKeyboard(tomorrow, 1)
 	if len(kb.InlineKeyboard) != 1 || len(kb.InlineKeyboard[0]) != 3 {
 		t.Fatalf("unexpected keyboard shape: %+v", kb)
 	}
 	if kb.InlineKeyboard[0][0].Text != "◀️" {
 		t.Errorf("expected prev button text '◀️', got %q", kb.InlineKeyboard[0][0].Text)
 	}
-	if kb.InlineKeyboard[0][0].CallbackData != "nav:prev:2026-09-03" {
-		t.Errorf("expected prev callback data 'nav:prev:2026-09-03', got %q", kb.InlineKeyboard[0][0].CallbackData)
+	if kb.InlineKeyboard[0][0].CallbackData != "nav:prev:2026-09-03:1" {
+		t.Errorf("expected prev callback data 'nav:prev:2026-09-03:1', got %q", kb.InlineKeyboard[0][0].CallbackData)
 	}
 	if kb.InlineKeyboard[0][1].Text != "📅 Сьогодні" {
 		t.Errorf("expected today button text '📅 Сьогодні', got %q", kb.InlineKeyboard[0][1].Text)
 	}
-	if kb.InlineKeyboard[0][1].CallbackData != "nav:today:2026-09-03" {
-		t.Errorf("expected today callback data 'nav:today:2026-09-03', got %q", kb.InlineKeyboard[0][1].CallbackData)
+	if kb.InlineKeyboard[0][1].CallbackData != "nav:today:2026-09-03:1" {
+		t.Errorf("expected today callback data 'nav:today:2026-09-03:1', got %q", kb.InlineKeyboard[0][1].CallbackData)
 	}
 	if kb.InlineKeyboard[0][2].Text != "▶️" {
 		t.Errorf("expected next button text '▶️', got %q", kb.InlineKeyboard[0][2].Text)
 	}
-	if kb.InlineKeyboard[0][2].CallbackData != "nav:next:2026-09-03" {
-		t.Errorf("expected next callback data 'nav:next:2026-09-03', got %q", kb.InlineKeyboard[0][2].CallbackData)
+	if kb.InlineKeyboard[0][2].CallbackData != "nav:next:2026-09-03:1" {
+		t.Errorf("expected next callback data 'nav:next:2026-09-03:1', got %q", kb.InlineKeyboard[0][2].CallbackData)
 	}
 }
 

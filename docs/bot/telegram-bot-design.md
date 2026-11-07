@@ -37,7 +37,7 @@ Commands are scoped via Telegram's `setMyCommands` API (`BotCommandScopeAllPriva
 | `/group_week` (`/group-week`) | Groups only | `Показати розклад групи на тиждень` | ✅ Implemented (Alias) | Legacy alias for `/week` in groups. Shows overall group schedule for a week. |
 | `/group_url_sync` (`/group-url-sync`) | Groups only | `Синхронізувати посилання з розкладу групи` | ✅ Implemented | Synchronizes the caller's personal schedule lesson URLs with the URLs configured for the academic group bound to the chat (see §3.5). Prompts with a confirmation screen (Proceed/Cancel) that auto-deletes on action; replaces only identical lessons configured in the group settings. |
 | `/ping` | Groups only | Group: `Покликати учасників групи`<br>Admin: `Покликати учасників (/ping set для налаштування)` | ✅ Implemented | In groups: tags configured non-bot members (`@user1 @user2 ...`) in batches. Admins can execute `/ping set @u1 @u2 ...` to quickly override the ping roster with an auto-deleted confirmation prompt (see §3.5). |
-| `/settings` | DM only | `Налаштування сповіщень` | ✅ Implemented | Manage lesson reminders (10m before and at start) with in-place toggle. |
+| `/settings` | DM only | `Особисті налаштування` | ✅ Implemented | Personal settings with in-place toggles: lesson reminders (10m before and at start, on by default) and the personal schedule lock (off by default; see §3.5). |
 | `/issues` | DM only | `Повідомити про помилку або запропонувати ідею` | ✅ Implemented | Files bug reports and feature requests through a guided type → title → description wizard, and lists the caller's own issues with their triage status. See [issues.md](issues.md). |
 | `/help` | Both | `Довідка та інструкції` | Not yet built | FAQ, troubleshooting, and links to web extension. |
 
@@ -263,6 +263,10 @@ To prevent chat flooding, unauthorized modifications, and permission leaks:
   `👤 Розклад: <b>Ім'я Користувача (@username)</b>`
 - When any member clicks a navigation button (`◀️`, `📅 Сьогодні`, `▶️`, or week slots), the schedule is refetched for that specific clicking member, and the caller title updates dynamically in place.
 - If an unlinked member taps a navigation button, the group message is preserved and a personal popup alert is returned: `🔒 Твій акаунт ще не прив'язано...`.
+- **Personal schedule lock** (`users.schedule_locked`, toggled in DM via `/settings` → `[ 🔓/🔒 Захист розкладу ]`, **off by default**): when on, only the user whose schedule a `/me_*` message currently shows can press its buttons, so one message always shows one person's schedule. Anyone else gets a popup (`🔒 Власник цього розкладу заборонив іншим керувати ним...`) and the message is left untouched.
+  - The owner is carried statelessly in the button's `callback_data` as a trailing Telegram ID — `nav:<action>:<date>:<ownerID>`, `week:goto:<offset>:<ownerID>`, `week:today:<ownerID>` (`week:noop` needs none) — and the owner's current setting is looked up on each press, so toggling the lock applies to messages already in the chat. The owner is whoever's schedule was last rendered into the message; with the lock off, a press by another member makes that member the new owner, as before.
+  - Messages sent before owner tagging carry no owner segment and stay unrestricted. An owner who no longer exists in `users` is treated as unlocked.
+  - The lock affects personal schedules only — group schedules (`/today`, `/tomorrow`, `/week` in groups; `gnav:`/`gweek:`) remain navigable by every member.
 - In private chats (DMs), caller attribution is omitted completely, preserving personal UX intact.
 
 #### 4. Group Schedules (`/today`, `/tomorrow` & `/week` in Groups)
@@ -348,7 +352,7 @@ Every button in the bot — onboarding, day navigation, week navigation — **ed
 | Remove a message | `deleteMessage` |
 | Stop the button's loading spinner | `answerCallbackQuery` |
 
-Each screen namespaces its buttons with its own `callback_data` prefix — `menu:` (onboarding), `nav:` (day), `week:` (week) — so one dispatcher handler is registered per screen instead of one that demultiplexes every button in the bot.
+Each screen namespaces its buttons with its own `callback_data` prefix — `menu:` (onboarding), `nav:` (day), `week:` (week) — so one dispatcher handler is registered per screen instead of one that demultiplexes every button in the bot. Personal `nav:`/`week:` buttons also end with the Telegram ID of the user whose schedule is on screen, used to enforce the personal schedule lock (§3.5).
 
 **Storage implication**: a callback update already carries `callback_query.message.message_id` and the chat ID, so ordinary navigation requires **no persisted message state**. A `message_id` only needs to be stored when the server must edit a message *later and unprompted* — for example, amending the morning briefing if a class is cancelled.
 
@@ -359,6 +363,7 @@ Each screen namespaces its buttons with its own `callback_data` prefix — `menu
 The server runs an automated alerts engine (`apps/server/internal/alerts/`) coupled with external scheduled webhooks (`POST /api/v1/cron/lesson-alerts`, see [`docs/architecture/notifications-and-cron.md`](../architecture/notifications-and-cron.md)):
 - **Lesson Notification Dispatcher**: Evaluates pending lessons 10 minutes before (`before_10m`) and at the start (`at_start`) for personal users and bound academic group chats.
 - **Idempotency Outbox**: Dispatched notifications are logged in `sent_lesson_alerts` table, ensuring zero duplicate messages even across multiple cron ticks or retries.
+- **Self-Cleaning Alerts**: Each cron tick deletes the previous lesson alerts it replaces — a new alert removes the recipient's older ones, a "Почалась пара" alert is removed on the next tick even if nothing new is sent, and a pre-lesson alert whose follow-up never came is removed once its lesson has started. See [Notifications & Scheduled Cron §5](../architecture/notifications-and-cron.md).
 - **Settings & Opt-out**:
   - Personal students can toggle notifications in private chat via `/settings` (enabled by default).
   - Academic group admins can toggle group-wide notifications in `/group` settings (enabled by default).

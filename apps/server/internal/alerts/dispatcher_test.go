@@ -17,7 +17,13 @@ import (
 )
 
 type mockSender struct {
-	sentMessages []sentMsg
+	sentMessages    []sentMsg
+	deletedMessages []deletedMsg
+}
+
+type deletedMsg struct {
+	ChatID    int64
+	MessageID int64
 }
 
 type sentMsg struct {
@@ -33,6 +39,23 @@ func (m *mockSender) SendMessage(chatID int64, text string, opts *gotgbot.SendMe
 		Opts:   opts,
 	})
 	return &gotgbot.Message{MessageId: int64(len(m.sentMessages))}, nil
+}
+
+func (m *mockSender) DeleteMessage(chatID int64, messageID int64, _ *gotgbot.DeleteMessageOpts) (bool, error) {
+	m.deletedMessages = append(m.deletedMessages, deletedMsg{ChatID: chatID, MessageID: messageID})
+	return true, nil
+}
+
+func assertDeleted(t *testing.T, sender *mockSender, want ...deletedMsg) {
+	t.Helper()
+	if len(sender.deletedMessages) != len(want) {
+		t.Fatalf("expected deleted messages %+v, got %+v", want, sender.deletedMessages)
+	}
+	for i := range want {
+		if sender.deletedMessages[i] != want[i] {
+			t.Fatalf("expected deleted messages %+v, got %+v", want, sender.deletedMessages)
+		}
+	}
 }
 
 func TestDispatcherPersonalAlerts(t *testing.T) {
@@ -134,6 +157,8 @@ func TestDispatcherPersonalAlerts(t *testing.T) {
 	if res.PersonalAlertsSent != 0 || len(sender.sentMessages) != 1 {
 		t.Errorf("expected 0 new alerts due to deduplication, got %d (sent: %d)", res.PersonalAlertsSent, len(sender.sentMessages))
 	}
+	// The pre-lesson alert stays until something replaces it.
+	assertDeleted(t, sender)
 
 	// 4. Dispatch at 10:25 (at start) -> 1 alert (at_start)
 	timeStart := time.Date(2026, 9, 4, 10, 25, 0, 0, loc)
@@ -151,6 +176,8 @@ func TestDispatcherPersonalAlerts(t *testing.T) {
 	if !strings.Contains(msg2.Text, `<code>10:25</code>  Операційні системи <i><a href="https://zoom.us/j/987654321">[Лек., Онлайн]</a></i>`) {
 		t.Errorf("expected monospace time and subject, got: %s", msg2.Text)
 	}
+	// The new "lesson started" alert replaces the pre-lesson one.
+	assertDeleted(t, sender, deletedMsg{ChatID: 999111, MessageID: 1})
 
 	// 5. Test disabling notifications for user
 	err = db.SetUserNotifications(ctx, 999111, false)
@@ -186,6 +213,14 @@ func TestDispatcherPersonalAlerts(t *testing.T) {
 	if res.PersonalAlertsSent != 0 || len(sender.sentMessages) != 2 {
 		t.Errorf("expected 0 alerts when disabled, got %d", res.PersonalAlertsSent)
 	}
+	// A run that sends nothing still removes the previous "lesson started" alert.
+	assertDeleted(t, sender, deletedMsg{ChatID: 999111, MessageID: 1}, deletedMsg{ChatID: 999111, MessageID: 2})
+
+	// Already-deleted messages are not deleted again.
+	if _, err := d.Dispatch(ctx, time.Date(2026, 9, 4, 12, 11, 0, 0, loc)); err != nil {
+		t.Fatalf("dispatch after cleanup: %v", err)
+	}
+	assertDeleted(t, sender, deletedMsg{ChatID: 999111, MessageID: 1}, deletedMsg{ChatID: 999111, MessageID: 2})
 }
 
 func TestDispatcherGroupAlerts(t *testing.T) {
@@ -286,21 +321,35 @@ func TestDispatcherGroupAlerts(t *testing.T) {
 	if res.GroupAlertsSent != 0 || len(sender.sentMessages) != 1 {
 		t.Errorf("expected 0 new alerts, got %d", res.GroupAlertsSent)
 	}
+	assertDeleted(t, sender)
+
+	// Dispatch at 08:30 (start time) -> "lesson started" alert replaces the pre-lesson one
+	time0830 := time.Date(2026, 9, 4, 8, 30, 0, 0, loc)
+	res, err = d.Dispatch(ctx, time0830)
+	if err != nil {
+		t.Fatalf("dispatch group at start: %v", err)
+	}
+	if res.GroupAlertsSent != 1 || len(sender.sentMessages) != 2 {
+		t.Fatalf("expected 1 group start alert, got %d (sent: %d)", res.GroupAlertsSent, len(sender.sentMessages))
+	}
+	assertDeleted(t, sender, deletedMsg{ChatID: chatID, MessageID: 1})
 
 	// Test disabling notifications for group
 	if err := db.SetBotGroupNotifications(ctx, group.ID, false); err != nil {
 		t.Fatalf("disable group notifications: %v", err)
 	}
 
-	// Dispatch at 08:30 (start time) -> should be 0 because group notifications disabled
-	time0830 := time.Date(2026, 9, 4, 8, 30, 0, 0, loc)
-	res, err = d.Dispatch(ctx, time0830)
+	// Dispatch at 08:32 -> 0 alerts because group notifications are disabled,
+	// but the "lesson started" alert from the previous run is still removed.
+	time0832 := time.Date(2026, 9, 4, 8, 32, 0, 0, loc)
+	res, err = d.Dispatch(ctx, time0832)
 	if err != nil {
 		t.Fatalf("dispatch disabled group: %v", err)
 	}
-	if res.GroupAlertsSent != 0 || len(sender.sentMessages) != 1 {
+	if res.GroupAlertsSent != 0 || len(sender.sentMessages) != 2 {
 		t.Errorf("expected 0 alerts for disabled group, got %d", res.GroupAlertsSent)
 	}
+	assertDeleted(t, sender, deletedMsg{ChatID: chatID, MessageID: 1}, deletedMsg{ChatID: chatID, MessageID: 2})
 }
 
 func TestMatchAlertWindowsAndMessages(t *testing.T) {
@@ -450,4 +499,71 @@ func TestDispatcherOfflineLessonWithURL(t *testing.T) {
 	if !strings.Contains(msg.Text, expected) {
 		t.Errorf("expected %q in text, got: %s", expected, msg.Text)
 	}
+}
+
+// A pre-lesson alert whose "lesson started" follow-up never comes (here the
+// cron misses the whole start window) is deleted once that window is over,
+// instead of waiting in the chat until the next lesson's alert.
+func TestDispatcherDeletesUnreplacedPreLessonAlert(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "test_alerts_expire.db")
+	if err := storage.Migrate(dbPath); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	db, err := storage.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	user, err := db.UpsertUser(ctx, 333444, nil, nil)
+	if err != nil {
+		t.Fatalf("upsert user: %v", err)
+	}
+	err = db.ReplaceLessons(ctx, user.ID, []model.Lesson{
+		{
+			ID:          uuid.New(),
+			UserID:      user.ID,
+			Date:        time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC),
+			Week:        1,
+			Day:         5,
+			StartTime:   "18:30:00",
+			EndTime:     "20:05:00",
+			Subject:     "Філософія",
+			SubjectNorm: "філософія",
+			Tag:         "lec",
+			IsRecurring: true,
+		},
+	}, model.EnrichmentFull, nil)
+	if err != nil {
+		t.Fatalf("replace lessons: %v", err)
+	}
+
+	sender := &mockSender{}
+	d := alerts.NewDispatcher(db, nil, sender)
+	loc, _ := time.LoadLocation("Europe/Kyiv")
+	at := func(h, m int) time.Time { return time.Date(2026, 9, 4, h, m, 0, 0, loc) }
+
+	if res, _ := d.Dispatch(ctx, at(18, 20)); res.PersonalAlertsSent != 1 {
+		t.Fatalf("expected pre-lesson alert at 18:20, got %d", res.PersonalAlertsSent)
+	}
+
+	// The lesson has not started yet: the alert stays.
+	if res, _ := d.Dispatch(ctx, at(18, 24)); res.PersonalAlertsSent != 0 {
+		t.Fatalf("expected no alert at 18:24, got %d", res.PersonalAlertsSent)
+	}
+	assertDeleted(t, sender)
+
+	// 18:36 is past the 18:25–18:35 start window, so no "Почалась пара" is sent
+	// and nothing will ever replace the pre-lesson alert: it is deleted.
+	if res, _ := d.Dispatch(ctx, at(18, 36)); res.PersonalAlertsSent != 0 {
+		t.Fatalf("expected no alert at 18:36, got %d", res.PersonalAlertsSent)
+	}
+	assertDeleted(t, sender, deletedMsg{ChatID: 333444, MessageID: 1})
+
+	// Deleted once only.
+	if _, err := d.Dispatch(ctx, at(18, 40)); err != nil {
+		t.Fatalf("dispatch 18:40: %v", err)
+	}
+	assertDeleted(t, sender, deletedMsg{ChatID: 333444, MessageID: 1})
 }

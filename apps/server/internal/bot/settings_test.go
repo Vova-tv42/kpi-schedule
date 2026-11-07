@@ -50,4 +50,18 @@ func TestUserSettings(t *testing.T) {
 	if updated.NotificationsEnabled {
 		t.Errorf("expected NotificationsEnabled to be false after toggle")
 	}
+
+	if user.ScheduleLocked {
+		t.Errorf("expected ScheduleLocked to be false by default")
+	}
+	if err := db.SetUserScheduleLock(ctx, 555444, true); err != nil {
+		t.Fatalf("set user schedule lock: %v", err)
+	}
+	locked, _ := db.GetUserByTelegramID(ctx, 555444)
+	if !locked.ScheduleLocked {
+		t.Errorf("expected ScheduleLocked to be true after toggle")
+	}
+	if locked.NotificationsEnabled != updated.NotificationsEnabled {
+		t.Errorf("toggling the schedule lock must not change notifications")
+	}
 }
