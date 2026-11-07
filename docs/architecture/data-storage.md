@@ -62,8 +62,11 @@ introduces `user_lesson_urls` and `user_url_prompts`; `00003_groups.sql` introdu
 `00004_group_lesson_urls.sql` introduces `bot_group_lesson_urls`; `00005_notifications.sql` adds notifications;
 `00006_group_admins.sql` introduces `bot_group_admins` for multi-admin co-management;
 `00007_issues.sql` introduces `issues`, `issue_comments` and `user_issue_drafts` for the
-`/issues` feedback channel (§2.3); and `00008_issue_thread_state.sql` widens the status vocabulary,
-replaces `thread_open` with the three-state `thread_state`, and adds `status_note` (§2.3).
+`/issues` feedback channel (§2.3); `00008_issue_thread_state.sql` widens the status vocabulary,
+replaces `thread_open` with the three-state `thread_state`, and adds `status_note` (§2.3);
+`00009_group_ping_users.sql` introduces the `/ping` tables (§2.2); and `00011_alert_message_ids.sql`
+adds `chat_id` / `message_id` to `sent_lesson_alerts` so stale lesson alerts can be deleted
+(see [Notifications & Scheduled Cron §5](notifications-and-cron.md)).
 
 
 **Engine: SQLite, not PostgreSQL** (`modernc.org/sqlite`, pure Go — no CGO, so it stays
